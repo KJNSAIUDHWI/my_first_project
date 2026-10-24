@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>训练监控</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141a24; --panel2:#0f141d; --line:#1f2735;
+    --text:#e8edf5; --muted:#7f8ca3; --dim:#5b6678;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --info:#38bdf8; --violet:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:
+    radial-gradient(1200px 600px at 15% -10%, #14202f 0%, transparent 55%),
+    radial-gradient(1000px 500px at 100% 0%, #1a1526 0%, transparent 50%),
+    var(--bg);
+    color:var(--text);font-family:"Microsoft YaHei",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  #wrap{max-width:1240px;margin:0 auto;padding:26px 24px 48px}
+
+  /* 顶栏 */
+  .bar{display:flex;align-items:center;gap:12px;margin-bottom:22px;flex-wrap:wrap}
+  h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.3px;
+     background:linear-gradient(90deg,#e8edf5,#9fb3d1);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #dot{width:9px;height:9px;border-radius:50%;background:#4a5568;display:inline-block;transition:.2s}
+  #dot.on{box-shadow:0 0 0 4px rgba(34,197,94,.15),0 0 12px rgba(34,197,94,.6)}
+  #dot.warnc{box-shadow:0 0 0 4px rgba(245,158,11,.15),0 0 12px rgba(245,158,11,.55)}
+  #dot.off{box-shadow:0 0 0 4px rgba(239,68,68,.15)}
+  .tag{font-size:12.5px;color:var(--muted)}
+  #run{font-size:12.5px;color:#93a4bd;background:var(--panel);border:1px solid var(--line);
+       padding:4px 10px;border-radius:999px}
+  .spacer{flex:1}
+
+  /* 卡片 */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px;margin-bottom:14px}
+  .card{position:relative;background:linear-gradient(180deg,#161d29 0%,#111620 100%);
+        border:1px solid var(--line);border-radius:14px;padding:14px 16px 13px;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px;
+        background:linear-gradient(180deg,#2b3648,#1c2433)}
+  .card .k{font-size:11.5px;color:var(--muted);margin-bottom:7px;letter-spacing:.2px}
+  .card .k .cn{color:#4a5568;font-size:10.5px;font-weight:400;margin-left:5px;letter-spacing:0}
+  .card .v{font-size:27px;font-weight:750;font-variant-numeric:tabular-nums;line-height:1.1;
+           font-family:"Cascadia Mono",Consolas,monospace}
+  .card .v small{font-size:13px;font-weight:500;color:var(--dim);font-family:"Microsoft YaHei",sans-serif}
+  .card .sub{font-size:11.5px;color:var(--dim);margin-top:7px;min-height:15px}
+  .card.ok::before{background:linear-gradient(180deg,var(--ok),#15803d)}
+  .card.warn{border-color:rgba(245,158,11,.42);background:linear-gradient(180deg,#231c10,#171208)}
+  .card.warn::before{background:linear-gradient(180deg,var(--warn),#b45309)}
+  .card.warn .v{color:#fcd34d}
+  .card.danger{border-color:rgba(239,68,68,.45);background:linear-gradient(180deg,#241417,#170f12)}
+  .card.danger::before{background:linear-gradient(180deg,#f87171,#b91c1c)}
+  .card.danger .v{color:#fca5a5}
+  .card.hi::before{background:linear-gradient(180deg,var(--info),#0369a1)}
+
+  .gauge{height:6px;background:#1b2230;border-radius:999px;overflow:hidden;margin-top:10px}
+  .gauge i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#22c55e,#4ade80);transition:width .35s}
+  .gauge.warn i{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+  .gauge.hot i{background:linear-gradient(90deg,#ef4444,#f87171)}
+  .gauge.blue i{background:linear-gradient(90deg,#38bdf8,#818cf8)}
+
+  /* 图表 */
+  .panel{background:linear-gradient(180deg,#151b25 0%,#10151e 100%);
+         border:1px solid var(--line);border-radius:14px;padding:14px 16px 10px;margin-bottom:14px}
+  .panel h2{font-size:12.5px;margin:0 0 10px;color:#a9b7cc;font-weight:600;letter-spacing:.3px}
+  .panel h2 .lg{font-weight:500;color:var(--dim);margin-left:10px;font-size:11.5px}
+  .legend-box{display:flex;flex-wrap:wrap;gap:5px 20px;margin:-2px 0 10px;font-size:11.5px;color:#8291a8;line-height:1.7}
+  .legend-box span{display:inline-flex;align-items:baseline;gap:6px}
+  .legend-box i{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none;transform:translateY(-1px)}
+  .legend-box b{color:#c3cede;font-weight:600}
+  canvas{width:100%;height:186px;display:block}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:900px){.charts{grid-template-columns:1fr}}
+
+  /* 异常事件 */
+  .pill{display:inline-block;margin-left:8px;font-size:11px;padding:2px 9px;border-radius:999px;
+        background:#1a2230;color:#8ea1bb;border:1px solid var(--line);font-weight:600}
+  .pill.hot{background:rgba(239,68,68,.15);color:#fca5a5;border-color:rgba(239,68,68,.4)}
+  .events{max-height:190px;overflow:auto;font-size:12.5px}
+  .ev{display:flex;gap:10px;padding:7px 2px;border-bottom:1px solid rgba(31,39,53,.7);align-items:baseline}
+  .ev:last-child{border-bottom:none}
+  .ev .ep{color:var(--dim);font-variant-numeric:tabular-nums;min-width:58px;font-size:11.5px}
+  .ev .tx{color:#c3cede;line-height:1.5}
+  .ev.nan .tx{color:#fca5a5}
+  .ev.guard .tx{color:#fcd34d}
+  .ev.val .tx{color:#fca5a5}
+  .empty{color:var(--dim);font-size:12.5px;padding:10px 2px}
+
+  #foot{font-size:11.5px;color:var(--dim);line-height:2;margin-top:6px}
+  #foot b{color:#93a4bd;font-weight:600}
+  #msg{padding:34px 20px;text-align:center;color:var(--muted);
+       background:var(--panel);border:1px dashed var(--line);border-radius:14px;margin-bottom:14px}
+
+  /* 曲线悬浮提示 */
+  #tip{position:fixed;z-index:99;pointer-events:none;display:none;
+       background:rgba(10,14,20,.97);border:1px solid #2a3448;border-radius:10px;
+       padding:8px 12px;font-size:12px;line-height:1.75;min-width:132px;
+       box-shadow:0 10px 28px rgba(0,0,0,.55)}
+  #tip .tt{color:#8ea1bb;font-size:11px;margin-bottom:4px;letter-spacing:.3px}
+  #tip .tr{display:flex;gap:14px;justify-content:space-between;align-items:baseline}
+  #tip .tr b{font-family:"Cascadia Mono",monospace;font-weight:600;color:#e8edf5}
+  canvas{cursor:crosshair}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="bar">
+    <h1>训练监控</h1>
+    <span id="dot"></span><span id="status" class="tag">连接中…</span>
+    <span id="run"></span>
+    <span class="spacer"></span>
+    <span class="tag">csv <span id="age">—</span></span>
+  </div>
+  <div id="msg" style="display:none"></div>
+
+  <div class="grid" id="cards">
+    <div class="card hi"><div class="k">训练进度</div><div class="v" id="ep">—</div>
+      <div class="gauge blue"><i id="epbar"></i></div></div>
+    <div class="card"><div class="k" id="ktloss">train box loss</div><div class="v" id="tloss">—</div>
+      <div class="sub" id="tlsub"></div></div>
+    <div class="card"><div class="k" id="kvacc">mAP50 (val)</div><div class="v" id="vacc">—</div></div>
+    <div class="card"><div class="k">mAP50-95 <span class="cn">IoU 0.5~0.95</span></div><div class="v" id="vmap">—</div></div>
+    <div class="card" id="cardrecall"><div class="k">recall <span class="cn">召回率 R</span></div><div class="v" id="vrecall">—</div>
+      <div class="sub" id="recallsub">目标 100%</div></div>
+    <div class="card ok" id="cardnan"><div class="k">NaN / 坏梯度 <span class="cn">数值异常</span></div><div class="v" id="nanv">—</div>
+      <div class="sub" id="nansub"></div></div>
+    <div class="card"><div class="k">本轮剩余 <span class="cn">当前 epoch</span></div><div class="v" id="eprem">—</div><div class="sub" id="epremsub"></div></div>
+    <div class="card"><div class="k">预计剩余 <span class="cn">整次训练</span></div><div class="v" id="eta">—</div><div class="sub" id="etasub"></div></div>
+    <div class="card"><div class="k">GPU 利用率</div><div class="v" id="gutil">—</div>
+      <div class="gauge"><i id="gutibar"></i></div></div>
+    <div class="card"><div class="k">显存</div><div class="v" id="gmem">—</div>
+      <div class="gauge blue"><i id="gmembar"></i></div></div>
+    <div class="card"><div class="k">功耗 / 温度</div><div class="v" id="gpwr">—</div><div class="sub" id="kpysub"></div></div>
+  </div>
+
+  <div class="charts">
+    <div class="panel"><h2 id="hloss">train loss</h2>
+      <div class="legend-box" id="losslegend">
+        <span><i style="background:#f87171"></i><b>box</b> 框回归损失：预测框的位置、大小和标注差多少</span>
+        <span><i style="background:#4ade80"></i><b>cls</b> 分类损失：类别判断错得有多重</span>
+        <span><i style="background:#38bdf8"></i><b>dfl</b> 分布焦点损失：把框的四条边位移学细（YOLO 特有）</span>
+      </div>
+      <canvas id="closs" height="186"></canvas></div>
+    <div class="panel"><h2 id="hacc">val mAP50</h2><canvas id="cacc" height="186"></canvas></div>
+  </div>
+  <div class="panel" id="panelmap"><h2>val mAP50-95</h2><canvas id="cmap" height="186"></canvas></div>
+  <div class="panel" id="panelrecall">
+    <h2>val 召回率 R <span class="lg">漏检率 = 1-R，目标 100%</span></h2>
+    <canvas id="crecall" height="186"></canvas>
+  </div>
+
+  <div class="panel"><h2>训练状态与故障诊断</h2><pre id="diagnosis" style="white-space:pre-wrap;word-break:break-word">正在读取…</pre></div>
+  <div class="panel" id="panelhealth">
+    <h2>异常事件 <span id="hcount" class="pill">0</span></h2>
+    <div id="hevents" class="events"><div class="empty">没有异常</div></div>
+  </div>
+
+  <div id="foot">
+    <div>python 进程：<b id="py">—</b>　扫描目录：<span id="scan">—</span></div>
+    <div>状态灯：<b style="color:#22c55e">训练中</b> · <b style="color:#f59e0b">等待/卡住</b> · <b style="color:#ef4444">断开</b> · 灰 = 没在跑</div>
+    <div>只看不写：csv 用共享读，不影响训练（也别用 Excel 打开它）。</div>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let hist = {loss: [], acc: [], lastEpochs: 0, lastChange: Date.now()};
+const chartState = {};   // 每个 canvas 最近一次绘制的数据，供 hover 反查
+
+function fmt(x, n = 4){ return (x === undefined || x === null || isNaN(x)) ? '—' : Number(x).toFixed(n); }
+function isBadVal(v){ return v === undefined || v === null || String(v).toLowerCase() === 'nan' || String(v).toLowerCase() === 'inf' || isNaN(Number(v)); }
+
+async function tick(){
+  let d;
+  try {
+    d = await (await fetch('/api/state')).json();
+  } catch(e){
+    $('dot').className = 'off'; $('status').textContent = '服务断开了';
+    return;
+  }
+  const rows = d.rows || [];
+  if (!d.ok){
+    $('msg').style.display = 'block'; $('msg').textContent = d.msg || '没有找到训练结果';
+  } else {
+    $('msg').style.display = 'none';
+  }
+
+  if (rows.length !== hist.lastEpochs){ hist.lastEpochs = rows.length; hist.lastChange = Date.now(); }
+  const idleFor = (Date.now() - hist.lastChange) / 1000;
+
+  // 状态灯
+  const live = ((d.csv_age || 1e9) < 180) || (idleFor < 180 && d.py >= 2);
+  const dark = (d.py <= 1);
+  if (!d.ok){
+    if (dark){ $('dot').className = ''; $('status').textContent = '没有训练在跑'; }
+    else { $('dot').className = 'warnc'; $('status').textContent = '训练启动中，等待第一轮'; }
+  }
+  else if (live && !dark){ $('dot').className = 'on'; $('status').textContent = '训练进行中'; }
+  else if (dark){ $('dot').className = ''; $('status').textContent = '训练已结束（进程退出了）'; }
+  else { $('dot').className = 'warnc'; $('status').textContent = '训练可能卡住/长时间没更新'; }
+
+  const last = rows[rows.length - 1] || {};
+  const doneN = rows.length;
+  const isDet = ('metrics/mAP50(B)' in last);
+  const accKey = isDet ? 'metrics/mAP50(B)' : 'metrics/accuracy_top1';
+  const lossKey = isDet ? 'train/box_loss' : 'train/loss';
+  const acc = last[accKey];
+  const loss = last[lossKey];
+  const mapKey = isDet ? 'metrics/mAP50-95(B)' : null;
+  const vmap = mapKey ? last[mapKey] : undefined;
+
+  $('ktloss').innerHTML = isDet ? 'train box loss <span class="cn">框回归损失</span>' : 'train loss <span class="cn">训练损失</span>';
+  $('kvacc').innerHTML = isDet ? 'mAP50 <span class="cn">IoU=0.5 平均精度</span>' : 'val 准确率 <span class="cn">top-1</span>';
+  $('ep').textContent = doneN ? doneN + ' 轮' : '—';
+  const totalEp = d.epochs || 0;
+  $('epbar').style.width = (totalEp ? Math.min(100, doneN / totalEp * 100) : 0) + '%';
+  $('run').textContent = (d.run ? d.run.split('\\').pop() : '') + (d.epochs ? '  ·  ' + doneN + '/' + d.epochs + ' 轮' : '');
+
+  $('tloss').textContent = fmt(loss);
+  const clsL = isDet ? fmt(last['train/cls_loss']) : '—';
+  const dflL = isDet ? fmt(last['train/dfl_loss']) : '—';
+  $('tlsub').textContent = isDet ? ('cls ' + clsL + ' · dfl ' + dflL) : '';
+  $('vacc').innerHTML = isBadVal(acc) ? '—' : (Number(acc) * 100).toFixed(2) + '<small> %</small>';
+  $('vmap').innerHTML = isBadVal(vmap) ? '—' : Number(vmap).toFixed(4);
+
+  // 召回率（硬要求 100%：漏一个就是直接丢分）
+  const recKey = isDet ? 'metrics/recall(B)' : 'metrics/recall';
+  const rec = last[recKey];
+  if (isBadVal(rec)){
+    $('vrecall').textContent = '—';
+    $('recallsub').textContent = '目标 100%';
+    $('cardrecall').className = 'card';
+  } else {
+    const rp = Number(rec) * 100;
+    const miss = 100 - rp;
+    $('vrecall').innerHTML = rp.toFixed(2) + '<small> %</small>';
+    $('recallsub').textContent = miss <= 0.0001 ? '零漏检' : ('漏检 ' + miss.toFixed(2) + '%');
+    $('cardrecall').className = 'card ' + (rp >= 99.99 ? 'ok' : (rp >= 99 ? '' : 'danger'));
+  }
+
+  // NaN / 坏梯度
+  const diag = d.diagnosis || {};
+  const exit = diag.exit || {};
+  const check = diag.completion || {};
+  const hb = d.heartbeat || {};
+  const status = exit.exit_code !== undefined ? (exit.exit_code !== 0 ? '训练异常退出' : check.success === true ? '完成并通过检查' : check.ready_for_regression ? '历史运行已验收' : '已退出，等待收尾检查') : hb.status === 'running' ? '训练中（以心跳时间核对）' : '状态未知，勿据此重复启动';
+  $('diagnosis').textContent = status + '\n心跳：' + (hb.time || '无') + '\n' + (diag.suggestion || '') + '\nAMP可恢复溢出：' + (diag.amp_overflow_count || 0) + (diag.first_failure ? '\n首个异常：' + JSON.stringify(diag.first_failure, null, 2) : '') + (diag.traceback_tail ? '\n错误末尾：\n' + diag.traceback_tail : '');
+  const h = d.health || {};
+  const bad = !!h.bad;
+  const badN = (h.nan_epochs || []).length + (h.guard_skips || 0) + (h.recoveries || 0);
+  $('cardnan').className = 'card ' + (bad ? 'danger' : 'ok');
+  $('nanv').innerHTML = bad ? (badN + '<small> 次</small>') : '0 <small>次</small>';
+  $('nansub').textContent = bad
+    ? ('首次：第 ' + (h.first_bad_epoch || '?') + ' 轮' + (h.guard_skips ? ' · 坏梯度跳过 ' + h.guard_skips : '') + (h.recoveries ? ' · 恢复 ' + h.recoveries : ''))
+    : '全程干净';
+  renderHealth(h);
+
+  // GPU
+  const g = d.gpu || {};
+  if (g.util !== undefined){
+    $('gutil').innerHTML = g.util.toFixed(0) + '<small> %</small>';
+    $('gutibar').style.width = g.util + '%';
+    $('gutibar').parentNode.className = 'gauge' + (g.util > 85 ? ' hot' : (g.util > 50 ? ' warn' : ''));
+    const mp = g.mem_total ? (g.mem_used / g.mem_total * 100) : 0;
+    $('gmem').innerHTML = (g.mem_used !== undefined)
+      ? (g.mem_used/1024).toFixed(1) + '<small> / ' + ((g.mem_total || 0)/1024).toFixed(0) + ' GB</small>' : '—';
+    $('gmembar').style.width = mp + '%';
+    $('gmembar').parentNode.className = 'gauge blue' + (mp > 90 ? ' hot' : (mp > 70 ? ' warn' : ''));
+    const pw = g.power === undefined ? '—' : g.power.toFixed(0) + '<small> W</small>';
+    const tp = g.temp === undefined ? '—' : g.temp.toFixed(0) + '<small> °C</small>';
+    $('gpwr').innerHTML = pw + ' / ' + tp;
+  } else {
+    $('gutil').textContent = '—'; $('gmem').textContent = '—'; $('gpwr').textContent = '—';
+  }
+  $('kpysub').textContent = d.py >= 0 ? ('python 进程 ' + d.py) : '';
+
+  // 本轮剩余（从 train.log 的 tqdm 进度行解析）
+  const lv = d.live || {};
+  if (lv.remain !== undefined){
+    $('eprem').innerHTML = lv.remain.toFixed(1) + '<small> 秒</small>';
+    $('epremsub').textContent = '第 ' + lv.epoch + '/' + (lv.epochs || totalEp) + ' 轮 · '
+      + lv.step + '/' + lv.steps + ' 步 (' + lv.pct + '%)';
+  } else {
+    $('eprem').textContent = '—';
+    $('epremsub').textContent = '';
+  }
+
+  // ETA
+  const totalEpochs = d.epochs || 0;
+  const t = Number(last['time']);
+  if (!totalEpochs){
+    $('eta').textContent = '—';
+  } else if (doneN > 0 && !isNaN(t) && t > 0){
+    let per = t / doneN;
+    if (doneN >= 4){
+      const a = Number(rows[doneN - 4]['time']);
+      const b = Number(rows[doneN - 1]['time']);
+      if (!isNaN(a) && !isNaN(b) && b > a) per = (b - a) / 3;
+    }
+    const remain = Math.max(0, (totalEpochs - doneN) * per);
+    $('eta').innerHTML = remain > 0 ? (remain/60).toFixed(0) + '<small> 分钟</small>' : '<small>已完成</small>';
+    $('etasub').textContent = remain > 0 ? ('约 ' + per.toFixed(0) + ' 秒/轮') : '';
+  }
+
+  $('age').textContent = d.ok ? d.csv_age + ' 秒前' : '—';
+  $('py').textContent = d.py >= 0 ? (d.py + ' 个') : '—';
+  $('scan').textContent = d.scan || '—';
+
+  // 图表
+  const nanEps = h.nan_epochs || [];
+  const lossSeries = isDet
+    ? [{key: 'train/box_loss', color: '#f87171', label: 'box'},
+       {key: 'train/cls_loss', color: '#4ade80', label: 'cls'},
+       {key: 'train/dfl_loss', color: '#38bdf8', label: 'dfl'}]
+    : [{key: 'train/loss', color: '#f87171', label: 'loss'}];
+  drawMulti('closs', rows, lossSeries, false, nanEps);
+  draw('cacc', rows, accKey, '#4ade80', !isDet, nanEps);
+  $('hloss').textContent = 'train loss';
+  $('losslegend').style.display = isDet ? '' : 'none';
+  $('hacc').textContent = isDet ? 'val mAP50' : 'val 准确率 (%)';
+  $('panelmap').style.display = isDet ? '' : 'none';
+  $('panelrecall').style.display = isDet ? '' : 'none';
+  if (isDet) {
+    draw('cmap', rows, mapKey, '#a78bfa', true, nanEps);
+    draw('crecall', rows, recKey, '#fbbf24', true, nanEps);
+  }
+}
+
+function renderHealth(h){
+  const evs = h.events || [];
+  const box = $('hevents');
+  const cnt = $('hcount');
+  const total = (h.nan_epochs || []).length + (h.guard_skips || 0) + (h.recoveries || 0);
+  cnt.textContent = total;
+  cnt.className = 'pill' + (total ? ' hot' : '');
+  if (!evs.length){
+    box.innerHTML = '<div class="empty">没有异常：没有 NaN，也没有坏梯度跳过</div>';
+    return;
+  }
+  box.innerHTML = evs.slice().reverse().map(e => {
+    const cls = e.type === 'guard' ? 'guard' : (e.type === 'val' ? 'val' : 'nan');
+    const ep = e.epoch ? ('第 ' + e.epoch + ' 轮') : '';
+    return '<div class="ev ' + cls + '"><span class="ep">' + ep + '</span><span class="tx">' + escapeHtml(e.text) + '</span></div>';
+  }).join('');
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 多条曲线共用一个 Y 轴：train loss 的 box/cls/dfl 三项量级接近，同轴对比最直观 */
+function drawMulti(id, rows, series, pct, nanEps){
+  const cv = $(id), ctx = cv.getContext('2d');
+  const dpr = devicePixelRatio || 1;
+  const w = cv.clientWidth * dpr, h = 186 * dpr;
+  cv.width = w; cv.height = h;
+  ctx.clearRect(0, 0, w, h);
+  const lines = series.map(s => ({
+    s,
+    pts: rows.map((r, i) => {
+      const v = Number(r[s.key]);
+      if (isNaN(v)) return null;
+      return [i, pct ? v * 100 : v];
+    }).filter(Boolean)
+  }));
+  const n = Math.max(...lines.map(l => l.pts.length), 0);
+  if (n < 2){ ctx.fillStyle = '#5b6678'; ctx.font = '13px sans-serif'; ctx.fillText('数据不足', 12, 30); return; }
+  let y0 = Infinity, y1 = -Infinity;
+  lines.forEach(l => l.pts.forEach(p => { y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }));
+  if (y1 - y0 < 1e-9){ y1 = y0 + 1; }
+  const pad = (y1 - y0) * 0.1; y0 -= pad; y1 += pad;
+  const X = i => 38 + (w - 58) * (rows.length > 1 ? i / (rows.length - 1) : 1);
+  const Y = v => h - 26 - (h - 48) * ((v - y0) / (y1 - y0));
+  ctx.strokeStyle = '#1c2433'; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++){
+    const yy = 20 + (h - 48) * k / 4;
+    ctx.beginPath(); ctx.moveTo(38, yy); ctx.lineTo(w - 20, yy); ctx.stroke();
+    ctx.fillStyle = '#5b6678'; ctx.font = (11 * dpr) + 'px "Cascadia Mono",monospace';
+    ctx.fillText((y1 - (y1 - y0) * k / 4).toFixed(pct ? 1 : 3), 2, yy + 4);
+  }
+  markNan(ctx, nanEps, rows.length, X, h, dpr);
+  lines.forEach(l => {
+    if (l.pts.length < 2) return;
+    ctx.strokeStyle = l.s.color; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath();
+    l.pts.forEach((p, i) => { const x = X(p[0]), y = Y(p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    const lp = l.pts[l.pts.length - 1];
+    ctx.fillStyle = l.s.color;
+    ctx.beginPath(); ctx.arc(X(lp[0]), Y(lp[1]), 3.5 * dpr, 0, 7); ctx.fill();
+  });
+  chartState[id] = { rows, series, pct, plot: { x0: 38, x1: w - 20, n: rows.length } };
+}
+
+function draw(id, rows, key, color, pct, nanEps){
+  const cv = $(id), ctx = cv.getContext('2d');
+  const dpr = devicePixelRatio || 1;
+  const w = cv.clientWidth * dpr, h = 186 * dpr;
+  cv.width = w; cv.height = h;
+  ctx.clearRect(0,0,w,h);
+  const pts = [];
+  rows.forEach((r,i) => { const v = Number(r[key]); if (!isNaN(v)) pts.push([i, pct ? v*100 : v]); });
+  if (pts.length < 2){ ctx.fillStyle='#5b6678'; ctx.font='13px sans-serif'; ctx.fillText('数据不足', 12, 30); return; }
+  let y0 = Math.min(...pts.map(p=>p[1])), y1 = Math.max(...pts.map(p=>p[1]));
+  if (y1 - y0 < 1e-9){ y1 = y0 + 1; }
+  const pad = (y1-y0)*0.1; y0 -= pad; y1 += pad;
+  const X = i => 38 + (w-58) * (rows.length>1 ? i/(rows.length-1) : 1);
+  const Y = v => h-26 - (h-48) * ((v-y0)/(y1-y0));
+  ctx.strokeStyle = '#1c2433'; ctx.lineWidth = 1;
+  for (let k=0;k<=4;k++){
+    const yy = 20 + (h-48)*k/4;
+    ctx.beginPath(); ctx.moveTo(38,yy); ctx.lineTo(w-20,yy); ctx.stroke();
+    ctx.fillStyle = '#5b6678'; ctx.font = (11*dpr)+'px "Cascadia Mono",monospace';
+    ctx.fillText((y1-(y1-y0)*k/4).toFixed(pct?1:3), 2, yy+4);
+  }
+  markNan(ctx, nanEps, rows.length, X, h, dpr);
+  ctx.strokeStyle = color; ctx.lineWidth = 2*dpr;
+  ctx.beginPath();
+  pts.forEach((p,i) => { const x = X(i), y = Y(p[1]); i? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
+  ctx.stroke();
+  const lp = pts[pts.length-1];
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(X(pts.length-1), Y(lp[1]), 3.5*dpr, 0, 7); ctx.fill();
+  chartState[id] = { rows, series: [{ key, color, label: key.split('/').pop().replace('(B)', '') }],
+                     pct, plot: { x0: 38, x1: w - 20, n: rows.length } };
+}
+
+/* 在出现 nan 的轮次画红色虚线，并标 EP */
+function markNan(ctx, nanEps, rowsLen, X, h, dpr){
+  if (!nanEps || !nanEps.length || rowsLen < 2) return;
+  ctx.save();
+  ctx.setLineDash([4*dpr, 4*dpr]);
+  ctx.strokeStyle = 'rgba(239,68,68,.75)';
+  ctx.lineWidth = 1.2*dpr;
+  nanEps.forEach(ep => {
+    const x = X(ep - 1);
+    ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, h - 24); ctx.stroke();
+  });
+  ctx.restore();
+  ctx.fillStyle = '#f87171';
+  ctx.font = (10*dpr) + 'px "Cascadia Mono",monospace';
+  nanEps.slice(0, 6).forEach(ep => ctx.fillText('nan', X(ep - 1) + 3, h - 10));
+}
+
+/* 曲线悬浮：按 x 反查最近的轮次，显示该点各项数值 */
+function onMove(e){
+  const cv = e.currentTarget;
+  const st = chartState[cv.id];
+  const tip = $('tip');
+  if (!st || !st.rows || !st.rows.length){ tip.style.display = 'none'; return; }
+  const rect = cv.getBoundingClientRect();
+  const dpr = devicePixelRatio || 1;
+  const x = (e.clientX - rect.left) * dpr;
+  const p = st.plot;
+  if (p.n < 1 || x < p.x0 - 10 || x > p.x1 + 10){ tip.style.display = 'none'; return; }
+  let i = Math.round((x - p.x0) / Math.max(1, p.x1 - p.x0) * (p.n - 1));
+  i = Math.max(0, Math.min(p.n - 1, i));
+  const row = st.rows[i] || {};
+  let html = '<div class="tt">第 ' + (i + 1) + ' 轮</div>';
+  let any = false;
+  st.series.forEach(s => {
+    const v = Number(row[s.key]);
+    if (isNaN(v)) return;
+    any = true;
+    const val = st.pct ? (v * 100).toFixed(2) + ' %' : v.toFixed(4);
+    html += '<div class="tr"><span style="color:' + s.color + '">' + s.label + '</span><b>' + val + '</b></div>';
+  });
+  if (!any){ tip.style.display = 'none'; return; }
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  const tw = tip.offsetWidth || 140;
+  let left = e.clientX + 16;
+  if (left + tw > window.innerWidth - 12) left = e.clientX - tw - 16;
+  tip.style.left = left + 'px';
+  tip.style.top = Math.max(8, e.clientY + 14) + 'px';
+}
+
+function onLeave(){ $('tip').style.display = 'none'; }
+
+['closs', 'cacc', 'cmap', 'crecall'].forEach(id => {
+  const cv = $(id);
+  if (!cv) return;
+  cv.addEventListener('mousemove', onMove);
+  cv.addEventListener('mouseleave', onLeave);
+});
+
+tick();
+setInterval(tick, 1500);
+</script>
+</body>
+</html>

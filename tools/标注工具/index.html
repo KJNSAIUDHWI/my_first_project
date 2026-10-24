@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>答题卡标注</title>
+<style>
+:root{
+  --bg:#f4f6f9; --panel:#fff; --line:#e5e7eb; --text:#1f2937; --muted:#6b7280;
+  --primary:#2563eb; --success:#16a34a; --warn:#d97706; --danger:#dc2626;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:13px}
+.top{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px 8px}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brand{font-size:15px;font-weight:700;letter-spacing:.3px}
+.brand .path{font-size:12px;font-weight:400;color:var(--muted);margin-left:8px}
+.ds{padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;background:#fff;color:#334155;outline:none;cursor:pointer}
+.ds:focus{border-color:var(--primary)}
+.spacer{flex:1}
+.btn{padding:7px 14px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:#eef2f7;color:#334155;transition:.15s}
+.btn:hover{background:#e2e8f0}
+.btn.primary{background:var(--primary);color:#fff}
+.btn.primary:hover{background:#1d4ed8}
+.btn.success{background:var(--success);color:#fff}
+.btn.success:hover{background:#15803d}
+.btn.warn{background:var(--warn);color:#fff}
+.btn.warn:hover{background:#b45309}
+.btn:disabled{opacity:.4;cursor:default}
+.pos{font-variant-numeric:tabular-nums;color:var(--muted)}
+.jump{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.jump input{width:66px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;outline:none;background:#fff}
+.jump input:focus{border-color:var(--primary)}
+.prog{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+.pbar{display:none}
+input[type=range]{height:6px;-webkit-appearance:none;appearance:none;background:#e8edf3;border-radius:4px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid #2563eb;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+#posRange{width:240px}
+.stack{display:flex;width:260px;height:8px;background:#e8edf3;border-radius:4px;overflow:hidden}
+.seg{height:100%;width:0;transition:width .3s}
+.seg.correct{background:#22c55e}
+.seg.fixed{background:#3b82f6}
+.seg.special{background:#8b5cf6}
+.legend{display:flex;gap:10px;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px}
+.lf{cursor:pointer}
+.lf:hover{color:var(--primary)}
+.badge.special{background:#ede9fe;color:#5b21b6}
+.btn.special{background:#7c3aed;color:#fff}
+.btn.special:hover{background:#6d28d9}
+.classes{display:flex;gap:6px;flex-wrap:wrap;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.cb{padding:5px 10px;border:1px solid transparent;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;background:#f1f5f9;color:#334155;transition:.15s}
+.cb:hover{border-color:#cbd5e1}
+.cb.act{color:#fff;border-color:rgba(0,0,0,.25);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.main{flex:1;display:flex;min-height:0;padding:12px;gap:12px}
+.cw{flex:1;background:var(--panel);border-radius:12px;box-shadow:0 1px 3px rgba(15,23,42,.06);overflow:hidden;position:relative}
+canvas{display:block;background:#f8fafc;cursor:crosshair}
+.sb{width:260px;background:var(--panel);border-radius:12px;box-shadow:0 1px 3px rgba(15,23,42,.06);padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.sb h4{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+#curName{font-size:13px;word-break:break-all;line-height:1.5}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.badge.ok{background:#dcfce7;color:#166534}
+.badge.fixed{background:#dbeafe;color:#1e40af}
+.badge.warn{background:#ffedd5;color:#9a3412}
+.badge.todo{background:#fef3c7;color:#92400e}
+.work{display:grid;grid-template-columns:1fr auto;gap:5px 8px;font-size:12.5px;color:var(--muted)}
+.work b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:600}
+.work .sum{border-top:1px dashed var(--line);padding-top:5px;margin-top:2px}
+.work .money{color:var(--success);font-size:15px;font-weight:700}
+.work .cur{grid-column:1/-1;font-size:11.5px;color:var(--muted);margin-top:2px}
+.bl{display:flex;flex-direction:column;gap:4px;max-height:56vh;overflow-y:auto}
+.bi{padding:7px 9px;background:#f8fafc;border:1px solid transparent;border-radius:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:.12s}
+.bi:hover{background:#eef2f7}
+.bi.hl{background:#e0ecff;border-color:#93c5fd}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.bi .x{color:#f87171;font-weight:700;padding:0 3px;font-size:15px;line-height:1}
+.bi .x:hover{color:var(--danger)}
+.empty{color:#9aa4b2;font-size:12px;padding:6px 2px}
+.help{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;line-height:1.7}
+.help b{color:#475569;font-weight:600}
+.toast{position:fixed;top:16px;right:16px;background:#111827;color:#fff;padding:9px 15px;border-radius:9px;font-size:13px;opacity:0;transform:translateY(-4px);transition:.2s;pointer-events:none;z-index:99}
+.toast.show{opacity:1;transform:none}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="row">
+    <div class="brand">答题卡标注 <span class="path" id="dataName"></span></div>
+    <select id="dsSelect" class="ds"></select>
+    <div class="spacer"></div>
+    <div class="prog">
+      <div class="legend">
+        <span class="lf" data-filter="correct"><i style="background:#22c55e"></i>预标注正确 <b id="cCorrect">0</b></span>
+        <span class="lf" data-filter="fixed"><i style="background:#3b82f6"></i>手动修改 <b id="cFixed">0</b></span>
+        <span class="lf" data-filter="special"><i style="background:#8b5cf6"></i>特殊 <b id="cSpecial">0</b></span>
+        <span class="lf" data-filter="pending"><i style="background:#cbd5e1"></i>未看 <b id="cPending">0</b></span>
+      </div>
+      <div class="stack">
+        <div class="seg correct" id="segCorrect"></div>
+        <div class="seg fixed" id="segFixed"></div>
+        <div class="seg special" id="segSpecial"></div>
+      </div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:9px">
+    <button class="btn" id="prev">◀ 上一张</button>
+    <span class="pos" id="pos">0/0</span>
+    <input type="range" id="posRange" min="1" max="1" value="1">
+    <button class="btn" id="next">下一张 ▶</button>
+    <span class="jump">跳至 <input id="jumpNo" type="number" min="1"> 张 <button class="btn" id="jumpBtn" style="padding:6px 10px">跳</button></span>
+    <div class="spacer"></div>
+    <button class="btn" id="cancelBtn" disabled>↩ 取消审核</button>
+    <button class="btn success" id="confirmBtn" disabled>✓ 确认本图</button>
+    <button class="btn special" id="specialBtn">⚠ 特殊</button>
+  </div>
+</div>
+<div class="classes" id="cbtns"></div>
+<div class="main">
+  <div class="cw"><canvas id="cv"></canvas></div>
+  <div class="sb">
+    <div>
+      <h4>当前图</h4>
+      <div id="curName" style="margin-top:6px"></div>
+      <div id="curStatus" style="margin-top:8px"></div>
+    </div>
+    <div>
+      <h4>已标框 <span id="boxCount" style="color:#334155">(0)</span></h4>
+      <div class="bl" id="bl"><div class="empty">暂无</div></div>
+    </div>
+    <div>
+      <h4>我的工作量 <span style="color:#9aa4b2;text-transform:none;letter-spacing:0">¥0.09/框</span></h4>
+      <div class="work" style="margin-top:8px">
+        <span>调整框（移动/缩放/改类）</span><b id="eMoved">0</b>
+        <span>新增框</span><b id="eAdded">0</b>
+        <span>删除框</span><b id="eDeleted">0</b>
+        <span class="sum">合计</span><b class="sum" id="eTotal">0 框</b>
+        <span class="sum">操作价值</span><b class="sum money" id="eAmount">¥0.00</b>
+        <span class="cur" id="eCur">本图：调整 0 · 新增 0 · 删除 0</span>
+      </div>
+    </div>
+    <div class="help">
+      <b>1~9,0</b> 选类别 · 左键拖画框<br>
+      <b>左键单击</b> 选中框 · 选中后拖 <b>8 个手柄</b> 调整大小<br>
+      <b>拖框内</b> 移动框 · <b>右键点框</b> 删除<br>
+      <b>右键拖</b> 平移 · <b>滚轮</b> 缩放 · <b>Delete</b> 删选中<br>
+      <b>← →</b> 浏览 · <b>A D</b> 提交并切图 · <b>R</b> 旋转 · <b>Z</b> 撤销 · <b>Ctrl+Y</b> 重做 · <b>H</b> 帮助<br>
+      改框<b>不会马上写日志</b>；按 A/D 或点「✓ 确认本图」才记一条审核。<br>
+      有未提交的修改时，←/→ 会挡住，先按 A/D 提交。
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+'use strict';
+const CLASSES = [
+  ['姓名学号','#ef4444'],['选择题区','#22c55e'],['选择题题号','#f97316'],['选择题选项','#8b5cf6'],
+  ['填空题区','#3b82f6'],['填空题大题框','#60a5fa'],['填空大题号','#2563eb'],
+  ['填空小题号','#1d4ed8'],['小题填空区','#1e40af'],['填空行','#0f2a5c']
+];
+const FILTER = new URLSearchParams(location.search).get('filter') || '';
+const state = { list: [], idx: 0, boxes: [], cls: 0, img: null, scale: 1, ox: 0, oy: 0,
+                drag: null, preview: null, selected: -1, undo: [], redo: [],
+                rotation: 0, special: false, original: '[]',
+                readonly: !!FILTER && FILTER !== 'pending',
+                counts: { correct: 0, fixed: 0, special: 0, pending: 0 },
+                edits: { moved: 0, added: 0, deleted: 0, total: 0 } };
+const RATE = 0.09;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1600);
+}
+function syncProgress() {
+  const c = state.counts || { correct: 0, fixed: 0, special: 0, pending: 0 };
+  document.getElementById('cCorrect').textContent = c.correct;
+  document.getElementById('cFixed').textContent = c.fixed;
+  document.getElementById('cSpecial').textContent = c.special;
+  document.getElementById('cPending').textContent = c.pending;
+  const total = state.list.length || 1;
+  document.getElementById('segCorrect').style.width = (c.correct / total * 100) + '%';
+  document.getElementById('segFixed').style.width = (c.fixed / total * 100) + '%';
+  document.getElementById('segSpecial').style.width = (c.special / total * 100) + '%';
+}
+function recount() {
+  if (!state.readonly) {
+    const c = { correct: 0, fixed: 0, special: 0, pending: 0 };
+    for (const x of state.list) {
+      if (x.special) c.special++;
+      else if (x.reviewed) (x.status === '已审-修正' ? c.fixed++ : c.correct++);
+      else c.pending++;
+    }
+    state.counts = c;
+  }
+  syncProgress();
+}
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function loadDatasets() {
+  const d = await (await fetch('/api/datasets')).json();
+  const sel = document.getElementById('dsSelect');
+  sel.innerHTML = '';
+  for (const x of d.datasets) {
+    const o = document.createElement('option');
+    o.value = x.name;
+    o.textContent = x.name;
+    o.selected = x.current;
+    sel.appendChild(o);
+  }
+}
+document.getElementById('dsSelect').onchange = async e => {
+  const r = await fetch('/api/switch', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name: e.target.value }) });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    toast(d.error || '狗秀金桑马，这个数据集不存在');
+    await loadDatasets();
+    return;
+  }
+  state.list = []; state.idx = 0;
+  state.counts = { correct: 0, fixed: 0, special: 0, pending: 0 };
+  await loadList();
+};
+async function loadList() {
+  const d = await (await fetch('/api/list')).json();
+  let items = d.items;
+  if (FILTER === 'correct') items = items.filter(x => x.reviewed && x.status !== '已审-修正' && !x.special);
+  else if (FILTER === 'fixed') items = items.filter(x => x.status === '已审-修正');
+  else if (FILTER === 'special') items = items.filter(x => x.special);
+  else if (FILTER === 'pending') items = items.filter(x => !x.reviewed && !x.special);
+  state.list = items;
+  state.counts = d.counts || state.counts;
+  state.edits = d.edits || state.edits;
+  const names = { correct: '预标注正确', fixed: '手动修改', special: '特殊', pending: '未看' };
+  document.getElementById('dataName').textContent = d.data +
+    (FILTER ? '  ·  筛选：' + (names[FILTER] || FILTER) + ' ' + items.length + ' 张' : '');
+  syncProgress();
+  renderWork(null);
+  renderClassBtns();
+  if (state.list.length) loadImage(0);
+}
+function renderClassBtns() {
+  const box = document.getElementById('cbtns');
+  box.innerHTML = '';
+  CLASSES.forEach(([name, color], i) => {
+    const b = document.createElement('button');
+    b.className = 'cb' + (i === state.cls ? ' act' : '');
+    if (i === state.cls) b.style.background = color;
+    b.textContent = (i === 9 ? 0 : i + 1) + ' ' + name;
+    b.onclick = () => { state.cls = i; renderClassBtns(); };
+    box.appendChild(b);
+  });
+}
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width; cv.height = r.height;
+  draw();
+}
+function rotSize() {
+  const W = state.img.width, H = state.img.height;
+  return (state.rotation % 180 === 0) ? { w: W, h: H } : { w: H, h: W };
+}
+function fit() {
+  if (!state.img) return;
+  const rs = rotSize();
+  const s = Math.min((cv.width - 24) / rs.w, (cv.height - 24) / rs.h);
+  state.scale = s;
+  state.ox = (cv.width - rs.w * s) / 2;
+  state.oy = (cv.height - rs.h * s) / 2;
+}
+let imageLoadId = 0;
+async function loadImage(i) {
+  const loadId = ++imageLoadId;
+  state.img = null; state.drag = null; state.preview = null;
+  state.boxes = []; state.original = '[]'; state.selected = -1; state.undo = []; state.redo = [];
+  renderBoxList();
+  document.getElementById('cancelBtn').disabled = true;
+  document.getElementById('confirmBtn').disabled = true;
+  document.getElementById('specialBtn').disabled = true;
+  draw();
+  state.idx = Math.max(0, Math.min(i, state.list.length - 1));
+  const it = state.list[state.idx];
+  document.getElementById('pos').textContent = (state.idx + 1) + '/' + state.list.length;
+  document.getElementById('jumpNo').max = state.list.length;
+  document.getElementById('curName').textContent = it.name;
+  const response = await fetch('/api/label?stem=' + encodeURIComponent(it.stem));
+  if (!response.ok) throw new Error('标签加载失败');
+  const lab = await response.json();
+  if (loadId !== imageLoadId || state.list[state.idx] !== it) return;
+  state.boxes = parseLabel(lab.text);
+  state.selected = -1; state.undo = []; state.redo = [];
+  state.rotation = lab.rotation || it.rotation || 0;
+  state.special = !!it.special;
+  state.original = JSON.stringify(state.boxes);
+  document.getElementById('posRange').value = state.idx + 1;
+  document.getElementById('posRange').max = state.list.length || 1;
+  const img = new Image();
+  img.onload = () => {
+    if (loadId !== imageLoadId || state.list[state.idx] !== it) return;
+    state.img = img;
+    document.getElementById('specialBtn').disabled = false;
+    document.getElementById('confirmBtn').disabled = false;
+    fit(); draw(); updateStatus(it);
+  };
+  img.onerror = () => {
+    if (loadId !== imageLoadId || state.list[state.idx] !== it) return;
+    state.img = null; draw();
+    ctx.fillStyle = '#94a3b8'; ctx.font = '15px Microsoft YaHei';
+    ctx.fillText('图片加载失败：' + it.name, 22, 40);
+    updateStatus(it);
+  };
+  img.src = '/img/' + encodeURIComponent(it.name);
+}
+
+async function reviewCurrent(explicit = false) {
+  const it = state.list[state.idx];
+  if (!it || !state.img) return false;
+  if (state.readonly) return true;
+  if (it.special && !explicit) {
+    if (isEdited()) { toast('特殊图有未提交修改，请点“确认本图”恢复审核'); return false; }
+    return true;
+  }
+  const r = await fetch('/api/review', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ stem: it.stem, text: labelText() }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    toast('审核没提交成功：' + (d.error || '未知原因') + '，修改还在');
+    return false;
+  }
+  it.reviewed = (d.status || '').indexOf('已审-') === 0;
+  it.status = d.status || it.status;
+  it.special = false; it.note = ''; state.special = false;
+  state.original = JSON.stringify(state.boxes);
+  it.review_count = d.review_count;
+  it.last_review = d.last_review || '';
+  applyEdit(it, d.edit);
+  recount(); updateStatus(it);
+  if (!d.unchanged) toast('已记：' + (d.status || ''));
+  return true;
+}
+
+let navChain = Promise.resolve();
+function go(delta, autoReview = !state.readonly) {
+  navChain = navChain.then(async () => {
+    if (!state.list.length) return;
+    const n = Math.max(0, Math.min(state.idx + delta, state.list.length - 1));
+    if (autoReview) {
+      const ok = await reviewCurrent();
+      if (!ok) return;
+    } else if (isEdited()) {
+      toast('有未提交的修改，按 A/D 提交后才能切图');
+      return;
+    }
+    if (n !== state.idx) await loadImage(n);
+    else updateStatus(state.list[state.idx]);
+  }).catch(() => { toast('切图失败，当前图保留'); });
+  return navChain;
+}
+function goTo(n) {
+  navChain = navChain.then(async () => {
+    if (isEdited()) { toast('有未提交的修改，按 A/D 提交后才能跳转'); return; }
+    await loadImage(n);
+  }).catch(() => { toast('跳转失败，当前图保留'); });
+  return navChain;
+}
+function fmtTime(s) {
+  return s ? String(s).slice(5) : '';
+}
+function isEdited() {
+  return JSON.stringify(state.boxes) !== state.original;
+}
+function renderWork(it) {
+  const g = state.edits || { moved: 0, added: 0, deleted: 0, total: 0 };
+  const total = g.total != null ? g.total : (g.moved + g.added + g.deleted);
+  document.getElementById('eMoved').textContent = g.moved || 0;
+  document.getElementById('eAdded').textContent = g.added || 0;
+  document.getElementById('eDeleted').textContent = g.deleted || 0;
+  document.getElementById('eTotal').textContent = total + ' 框';
+  document.getElementById('eAmount').textContent = '¥' + (total * RATE).toFixed(2);
+  const e = (it && it.edit) || { moved: 0, added: 0, deleted: 0 };
+  document.getElementById('eCur').textContent =
+    '本图：调整 ' + (e.moved || 0) + ' · 新增 ' + (e.added || 0) + ' · 删除 ' + (e.deleted || 0);
+}
+function applyEdit(it, e) {
+  if (!e) return;
+  const old = it.edit || { moved: 0, added: 0, deleted: 0, total: 0 };
+  it.edit = e;
+  const g = state.edits;
+  for (const k of ['moved', 'added', 'deleted', 'total']) {
+    g[k] = (g[k] || 0) + (e[k] || 0) - (old[k] || 0);
+  }
+  renderWork(state.list[state.idx] || null);
+}
+function updateStatus(it) {
+  const el = document.getElementById('curStatus');
+  let html;
+  if (it.special) {
+    html = '<span class="badge special">特殊：' + escapeHtml(it.note || '') + '</span>';
+  } else if (it.reviewed) {
+    if (isEdited()) {
+      html = '<span class="badge warn">已改 · 按 A/D 提交</span>';
+    } else {
+      const fixed = it.status === '已审-修正';
+      const when = fmtTime(it.last_review);
+      html = '<span class="badge ' + (fixed ? 'fixed' : 'ok') + '">' +
+             (fixed ? '手动修改' : '预标注正确') + (when ? ' · ' + when : '') + '</span>';
+    }
+  } else if (isEdited() || (it.edit && it.edit.total > 0)) {
+    html = '<span class="badge fixed">已改 · 待审核</span>';
+  } else {
+    html = '<span class="badge todo">未审核</span>';
+  }
+  el.innerHTML = html;
+  document.getElementById('cancelBtn').disabled = !it.reviewed && !it.special;
+  document.getElementById('confirmBtn').disabled = !state.img;
+  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
+  renderBoxList();
+  renderWork(it);
+}
+function parseLabel(text) {
+  const out = [];
+  for (const ln of text.split(/\r?\n/)) {
+    const q = ln.trim().split(/\s+/);
+    if (q.length >= 5) {
+      const c = parseInt(q[0], 10);
+      if (c >= 0 && c < 10) out.push([c, +q[1], +q[2], +q[3], +q[4]]);
+    }
+  }
+  return out;
+}
+function labelText() {
+  return state.boxes.map(b => b[0] + ' ' + b.slice(1).map(v => v.toFixed(6)).join(' ')).join('\n') + (state.boxes.length ? '\n' : '');
+}
+function renderBoxList() {
+  const el = document.getElementById('bl');
+  el.innerHTML = state.boxes.length ? '' : '<div class="empty">暂无</div>';
+  state.boxes.forEach((b, i) => {
+    const d = document.createElement('div');
+    d.className = 'bi' + (i === state.selected ? ' hl' : '');
+    d.innerHTML = '<span><span class="dot" style="background:' + CLASSES[b[0]][1] + '"></span>' + CLASSES[b[0]][0] + '</span><span class="x">×</span>';
+    d.onclick = () => { state.selected = i; draw(); renderBoxList(); };
+    d.querySelector('.x').onclick = e => { e.stopPropagation(); removeBox(i); };
+    el.appendChild(d);
+  });
+}
+function removeBox(i) {
+  if (!state.img) return;
+  pushUndo();
+  state.boxes.splice(i, 1);
+  state.selected = -1; markChanged();
+  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
+}
+function markChanged() {
+  draw();
+  renderBoxList();
+  const it = state.list[state.idx];
+  if (it) updateStatus(it);
+}
+async function cancelReview() {
+  const it = state.list[state.idx];
+  if (!it) return;
+  const r = await fetch('/api/unreview', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ stem: it.stem }) });
+  if (!r.ok) { toast('撤销失败，审核状态未改变'); return; }
+  it.reviewed = false; it.status = '未标';
+  it.special = false; it.note = ''; state.special = false;
+  it.last_review = '';
+  recount();
+  updateStatus(it);
+  toast('已取消审核');
+}
+async function special() {
+  const it = state.list[state.idx];
+  if (!it || !state.img) return;
+  const note = prompt('特殊批语（例如：学生改过答案 / 乱涂看不清 / 不使用 / 上传错）');
+  if (!note) return;
+  const r = await fetch('/api/special', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ stem: it.stem, note: note }) });
+  if (!r.ok) { toast('特殊状态未提交成功'); return; }
+  it.special = true; it.note = note; it.status = '特殊';
+  toast('已标记特殊');
+  recount();
+  updateStatus(it);
+}
+function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!state.img) return;
+  const W = state.img.width, H = state.img.height, rs = rotSize();
+  ctx.save();
+  ctx.translate(state.ox + rs.w * state.scale / 2, state.oy + rs.h * state.scale / 2);
+  ctx.rotate(state.rotation * Math.PI / 180);
+  ctx.scale(state.scale, state.scale);
+  ctx.translate(-W / 2, -H / 2);
+  ctx.shadowColor = 'rgba(15,23,42,.18)'; ctx.shadowBlur = 12 / state.scale;
+  ctx.drawImage(state.img, 0, 0);
+  ctx.shadowBlur = 0;
+  state.boxes.forEach((b, i) => drawBox(b, i === state.selected, state.scale));
+  if (state.preview) drawBox(state.preview, false, state.scale);
+  ctx.restore();
+}
+function handlePoints(x, y, w, h) {
+  return [
+    { x, y, id: 'tl' }, { x: x + w / 2, y, id: 't' },
+    { x: x + w, y, id: 'tr' }, { x: x + w, y: y + h / 2, id: 'r' },
+    { x: x + w, y: y + h, id: 'br' }, { x: x + w / 2, y: y + h, id: 'b' },
+    { x, y: y + h, id: 'bl' }, { x, y: y + h / 2, id: 'l' },
+  ];
+}
+function handleHit(p, b) {
+  const W = state.img.width, H = state.img.height;
+  const x = (b[1] - b[3] / 2) * W, y = (b[2] - b[4] / 2) * H;
+  const tol = 10 / state.scale;
+  for (const pt of handlePoints(x, y, b[3] * W, b[4] * H)) {
+    if (Math.abs(p.x - pt.x) <= tol && Math.abs(p.y - pt.y) <= tol) return pt.id;
+  }
+  return null;
+}
+function pushUndo() {
+  state.undo.push(JSON.parse(JSON.stringify(state.boxes)));
+  if (state.undo.length > 100) state.undo.shift();
+  state.redo = [];
+}
+function undo() {
+  if (!state.undo.length) return;
+  state.redo.push(JSON.parse(JSON.stringify(state.boxes)));
+  state.boxes = state.undo.pop();
+  state.selected = -1; markChanged();
+  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
+}
+function redo() {
+  if (!state.redo.length) return;
+  state.undo.push(JSON.parse(JSON.stringify(state.boxes)));
+  state.boxes = state.redo.pop();
+  state.selected = -1; markChanged();
+  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
+}
+function drawBox(b, hl, scale) {
+  const [c, cx, cy, w, h] = b, W = state.img.width, H = state.img.height;
+  const x = (cx - w / 2) * W, y = (cy - h / 2) * H;
+  ctx.lineWidth = (hl ? 3 : 2) / scale;
+  ctx.strokeStyle = hl ? '#f59e0b' : CLASSES[c][1];
+  ctx.strokeRect(x, y, w * W, h * H);
+  if (hl) {
+    const hs = 8 / scale;
+    for (const pt of handlePoints(x, y, w * W, h * H)) {
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 2 / scale;
+      ctx.fillRect(pt.x - hs / 2, pt.y - hs / 2, hs, hs);
+      ctx.strokeRect(pt.x - hs / 2, pt.y - hs / 2, hs, hs);
+    }
+  }
+  const label = CLASSES[c][0];
+  ctx.font = (13 / scale) + 'px Microsoft YaHei';
+  const tw = ctx.measureText(label).width + 8 / scale;
+  ctx.fillStyle = CLASSES[c][1];
+  ctx.fillRect(x, Math.max(0, y - 16 / scale), tw, 16 / scale);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, x + 4 / scale, Math.max(11 / scale, y - 4 / scale));
+}
+function toImg(e) {
+  const rect = cv.getBoundingClientRect();
+  const xr = (e.clientX - rect.left - state.ox) / state.scale;
+  const yr = (e.clientY - rect.top - state.oy) / state.scale;
+  const W = state.img.width, H = state.img.height;
+  switch (state.rotation % 360) {
+    case 90: return { x: yr, y: H - xr };
+    case 180: return { x: W - xr, y: H - yr };
+    case 270: return { x: W - yr, y: xr };
+    default: return { x: xr, y: yr };
+  }
+}
+function hitBox(p) {
+  if (!state.img) return -1;
+  for (let i = state.boxes.length - 1; i >= 0; i--) {
+    const b = state.boxes[i], W = state.img.width, H = state.img.height;
+    const x1 = (b[1] - b[3] / 2) * W, y1 = (b[2] - b[4] / 2) * H;
+    if (p.x >= x1 && p.x <= x1 + b[3] * W && p.y >= y1 && p.y <= y1 + b[4] * H) return i;
+  }
+  return -1;
+}
+cv.addEventListener('mousedown', e => {
+  if (!state.img) return;
+  const p = toImg(e);
+  if (e.button === 0) {
+    if (state.selected >= 0 && state.boxes[state.selected]) {
+      const b = state.boxes[state.selected];
+      const hd = handleHit(p, b);
+      if (hd) {
+        state.drag = { type: 'resize', handle: hd, box: b.slice(), p: { x: p.x, y: p.y },
+                       before: JSON.parse(JSON.stringify(state.boxes)) };
+        return;
+      }
+      const W = state.img.width, H = state.img.height;
+      const x1 = (b[1] - b[3] / 2) * W, y1 = (b[2] - b[4] / 2) * H;
+      if (p.x >= x1 && p.x <= x1 + b[3] * W && p.y >= y1 && p.y <= y1 + b[4] * H) {
+        state.drag = { type: 'move', box: b.slice(), p: { x: p.x, y: p.y },
+                       before: JSON.parse(JSON.stringify(state.boxes)) };
+        return;
+      }
+    }
+    state.drag = { type: 'draw', x: p.x, y: p.y, sx: e.clientX, sy: e.clientY };
+  } else if (e.button === 2) {
+    state.drag = { type: 'pan', sx: e.clientX, sy: e.clientY, ox: state.ox, oy: state.oy, moved: false };
+  } else if (e.button === 1) {
+    state.drag = { type: 'pan', sx: e.clientX, sy: e.clientY, ox: state.ox, oy: state.oy, moved: false };
+    e.preventDefault();
+  }
+});
+cv.addEventListener('mousemove', e => {
+  if (!state.drag) return;
+  const p = toImg(e);
+  if (state.drag.type === 'draw') {
+    state.preview = [state.cls, (state.drag.x + p.x) / 2 / state.img.width,
+      (state.drag.y + p.y) / 2 / state.img.height,
+      Math.abs(p.x - state.drag.x) / state.img.width,
+      Math.abs(p.y - state.drag.y) / state.img.height];
+    draw();
+  } else if (state.drag.type === 'resize' || state.drag.type === 'move') {
+    const d = state.drag, si = state.selected, box = d.box;
+    if (si < 0) return;
+    const W = state.img.width, H = state.img.height;
+    const dx = p.x - d.p.x, dy = p.y - d.p.y;
+    let x1 = (box[1] - box[3] / 2) * W, y1 = (box[2] - box[4] / 2) * H;
+    let x2 = x1 + box[3] * W, y2 = y1 + box[4] * H;
+    if (d.type === 'move') {
+      x1 += dx; x2 += dx; y1 += dy; y2 += dy;
+    } else {
+      if (d.handle.includes('l')) x1 += dx;
+      if (d.handle.includes('r')) x2 += dx;
+      if (d.handle.includes('t')) y1 += dy;
+      if (d.handle.includes('b')) y2 += dy;
+    }
+    if (x2 - x1 < 16) { if (d.type === 'resize' && d.handle.includes('l')) x1 = x2 - 16; else x2 = x1 + 16; }
+    if (y2 - y1 < 16) { if (d.type === 'resize' && d.handle.includes('t')) y1 = y2 - 16; else y2 = y1 + 16; }
+    state.boxes[si] = [box[0], ((x1 + x2) / 2) / W, ((y1 + y2) / 2) / H,
+                       (x2 - x1) / W, (y2 - y1) / H];
+    draw();
+  } else if (state.drag.type === 'pan') {
+    const dx = e.clientX - state.drag.sx, dy = e.clientY - state.drag.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 4) state.drag.moved = true;
+    state.ox = state.drag.ox + dx; state.oy = state.drag.oy + dy; draw();
+  }
+});
+cv.addEventListener('mouseup', e => {
+  if (!state.drag) return;
+  const d = state.drag; state.drag = null;
+  if (d.type === 'draw') {
+    const moved = Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) > 4;
+    if (!moved) {
+      state.selected = hitBox(toImg(e));
+      state.preview = null; draw(); renderBoxList();
+      return;
+    }
+    if (state.preview) {
+      const b = state.preview;
+      if (b[3] * state.img.width > 16 && b[4] * state.img.height > 16) {
+        pushUndo();
+        state.boxes.push(b); markChanged();
+      }
+    }
+    state.preview = null; draw(); renderBoxList();
+    document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
+  } else if (d.type === 'resize' || d.type === 'move') {
+    if (JSON.stringify(d.before) !== JSON.stringify(state.boxes)) {
+      state.undo.push(d.before);
+      if (state.undo.length > 100) state.undo.shift();
+      state.redo = [];
+      markChanged();
+    }
+    draw(); renderBoxList();
+  } else if (d.type === 'pan' && !d.moved) {
+    const p = toImg(e);
+    const i = hitBox(p);
+    if (i >= 0) removeBox(i); else { state.selected = -1; draw(); renderBoxList(); }
+  }
+});
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (!state.img) return;
+  const rect = cv.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const old = state.scale;
+  const k = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const ns = Math.max(0.1, Math.min(8, old * k));
+  state.ox = mx - (mx - state.ox) * ns / old;
+  state.oy = my - (my - state.oy) * ns / old;
+  state.scale = ns;
+  if (state.drag && state.drag.type === 'pan') {
+    state.drag.ox = state.ox;
+    state.drag.oy = state.oy;
+    state.drag.sx = e.clientX;
+    state.drag.sy = e.clientY;
+  }
+  draw();
+}, { passive: false });
+window.addEventListener('resize', () => { resize(); fit(); draw(); });
+window.addEventListener('keydown', e => {
+  const inInput = e.target.tagName === 'INPUT';
+  if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1, false); return; }
+  if (e.key === 'ArrowRight') { e.preventDefault(); go(1, false); return; }
+  if (e.key === 'a' || e.key === 'A') { if (inInput) e.target.blur(); go(-1); return; }
+  if (e.key === 'd' || e.key === 'D') { if (inInput) e.target.blur(); go(1); return; }
+  if (inInput) return;
+  if (!state.img) return;
+  if (e.key === 'Delete' || e.key === 's' || e.key === 'S') {
+    if (state.selected >= 0) removeBox(state.selected);
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+    if (e.shiftKey) redo(); else undo();
+  } else if (e.key === 'z' || e.key === 'Z') {
+    undo();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+    redo();
+  } else if (e.key === 'h' || e.key === 'H') {
+    alert('1~9,0 选类别\n左键拖 = 画框；左键单击 = 选中框\n选中后拖 8 个手柄 = 调整大小，拖框内 = 移动\n右键点框 = 删除；右键拖 = 平移\n滚轮 = 缩放；Delete = 删选中\n← → = 浏览（有未提交修改会挡住）\nA D = 提交本图并切图\n✓ 确认本图 = 提交但不切图\nZ = 撤销；Ctrl+Y = 重做\nH = 这个帮助');
+  } else if (e.key === 'r' || e.key === 'R') {
+    if (!state.img) return;
+    state.rotation = (state.rotation + 90) % 360;
+    fit(); draw();
+    const it = state.list[state.idx];
+    fetch('/api/rotate', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stem: it.stem, rotation: state.rotation }) });
+    toast('旋转 ' + state.rotation + '°');
+  } else if (/^[0-9]$/.test(e.key)) {
+    state.cls = e.key === '0' ? 9 : parseInt(e.key, 10) - 1; renderClassBtns();
+  }
+});
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('cancelBtn').onclick = cancelReview;
+document.getElementById('confirmBtn').onclick = () => reviewCurrent(true);
+document.getElementById('specialBtn').onclick = special;
+document.getElementById('posRange').onchange = e => {
+  const n = parseInt(e.target.value, 10);
+  if (n >= 1) goTo(n - 1);
+};
+document.getElementById('jumpBtn').onclick = () => {
+  const n = parseInt(document.getElementById('jumpNo').value, 10);
+  if (n >= 1) goTo(n - 1);
+};
+document.querySelectorAll('.lf').forEach(el => {
+  el.onclick = () => window.open('?filter=' + el.dataset.filter, '_blank');
+});
+async function refreshStats() {
+  try {
+    const d = await (await fetch('/api/stats')).json();
+    if (!d || !d.counts) return;
+    state.counts = d.counts;
+    state.edits = d.edits;
+    syncProgress();
+    renderWork(state.list[state.idx] || null);
+  } catch (e) {}
+}
+setInterval(refreshStats, 2000);
+resize();
+loadDatasets().then(loadList);
+</script>
+</body>
+</html>

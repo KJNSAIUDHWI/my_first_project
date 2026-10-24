@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方向确认</title>
+<style>
+  html,body{margin:0;height:100%;background:#1b1b1f;color:#e6e6e6;
+    font-family:"Microsoft YaHei",system-ui,sans-serif;overflow:hidden;user-select:none}
+  #top{padding:8px 14px;display:flex;align-items:center;gap:18px;font-size:14px;
+    background:#26262c;height:28px}
+  #name{font-weight:600}
+  #rot{color:#ffd54f;min-width:130px}
+  #prog{color:#9e9eaa;min-width:70px}
+  #bar{width:260px;height:6px;background:#3a3a44;border-radius:3px;overflow:hidden}
+  #barfill{height:100%;width:0;background:#4caf50;transition:width .15s}
+  #jump{width:58px;background:#3a3a44;border:1px solid #4a4a56;color:#e6e6e6;
+    padding:2px 6px;border-radius:4px;font-size:13px}
+  #stage{position:absolute;top:44px;bottom:42px;left:0;right:0;
+    display:flex;align-items:center;justify-content:center}
+  canvas{background:#000;box-shadow:0 0 0 1px #4a4a56}
+  #bottom{padding:7px 14px;font-size:13px;color:#a8a8b3;background:#26262c;
+    position:absolute;bottom:0;left:0;right:0;height:28px} 
+  kbd{background:#3a3a44;border-radius:4px;padding:1px 7px;font-family:inherit;font-size:12px;
+    box-shadow:0 1px 0 #111}
+  .hint{color:#77777f;margin-left:14px}
+  #toast{position:absolute;right:14px;top:56px;background:#2e7d32;color:#fff;
+    padding:6px 14px;border-radius:6px;font-size:13px;opacity:0;transition:opacity .25s;
+    pointer-events:none}
+</style>
+</head>
+<body>
+<div id="top">
+  <span id="name">加载中…</span>
+  <span id="rot"></span>
+  <span id="prog"></span>
+  <div id="bar"><div id="barfill"></div></div>
+  <span>跳到 <input id="jump" type="number" min="1" placeholder="#"> 张</span>
+</div>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="bottom">
+  <kbd>R</kbd> 转 90° &nbsp;<kbd>空格</kbd> 确认并下一张 &nbsp;<kbd>←</kbd><kbd>→</kbd> 上/下一张
+  &nbsp;<kbd>X</kbd> 异常（不参与训练）
+  <span class="hint">图本来就是正的 → 直接空格（记 0°）；歪了 → 按 R 转到正再空格</span>
+</div>
+<div id="toast"></div>
+
+<script>
+const state = { files: [], labels: {}, idx: 0, rot: 0, img: null };
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+
+const norm = a => ((a % 360) + 360) % 360;
+
+async function init(){
+  const r = await fetch('/api/list');
+  const d = await r.json();
+  state.files = d.files;
+  state.labels = d.labels;
+  if (!state.files.length){ $('name').textContent = 'raw/ 里没找到图片'; return; }
+  let first = state.files.findIndex(f => !(f in state.labels));
+  state.idx = first < 0 ? 0 : first;
+  load();
+}
+
+function load(){
+  const f = state.files[state.idx];
+  const lab = state.labels[f];
+  state.rot = (lab === undefined || lab < 0) ? 0 : norm(lab);
+  state.img = null;
+  $('name').textContent = '[' + (state.idx + 1) + '/' + state.files.length + ']  ' + f;
+  updateRot(); updateProg();
+  const im = new Image();
+  im.onload = () => { state.img = im; draw(); };
+  im.onerror = () => { $('name').textContent = '图片加载失败: ' + f; };
+  im.src = '/img?f=' + encodeURIComponent(f);
+}
+
+function draw(){
+  const stage = $('stage');
+  const cw = Math.max(100, stage.clientWidth - 24);
+  const ch = Math.max(100, stage.clientHeight - 24);
+  cv.width = cw; cv.height = ch;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cw, ch);
+  if (!state.img) return;
+  const w = state.img.naturalWidth, h = state.img.naturalHeight;
+  const rot = norm(state.rot);
+  const swap = (rot === 90 || rot === 270);
+  const dw = swap ? h : w, dh = swap ? w : h;
+  const s = Math.min(cw / dw, ch / dh);
+  ctx.save();
+  ctx.translate(cw / 2, ch / 2);
+  ctx.rotate(rot * Math.PI / 180);
+  ctx.scale(s, s);
+  ctx.drawImage(state.img, -w / 2, -h / 2);
+  ctx.restore();
+}
+
+function updateRot(){
+  $('rot').textContent = state.img === null && state.files[state.idx] === undefined ? '' :
+    ('需顺时针转 ' + norm(state.rot) + '°');
+}
+function updateProg(){
+  const total = state.files.length;
+  const done = state.files.filter(f => f in state.labels).length;
+  $('prog').textContent = done + ' / ' + total;
+  $('barfill').style.width = (total ? (done / total * 100) : 0) + '%';
+}
+function toast(msg){
+  const t = $('toast');
+  t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.style.opacity = 0, 700);
+}
+
+async function save(angle){
+  const f = state.files[state.idx];
+  state.labels[f] = angle;
+  try{
+    const r = await fetch('/api/label', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: f, angle })
+    });
+    const d = await r.json();
+    if (!d.ok) toast('保存失败！');
+  }catch(e){ toast('保存失败，检查服务窗口'); }
+  updateProg();
+}
+
+async function step(delta){
+  state.idx = (state.idx + delta + state.files.length) % state.files.length;
+  load();
+}
+
+document.addEventListener('keydown', async e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (!state.files.length) return;
+  if (e.key === 'r' || e.key === 'R'){
+    state.rot = norm(state.rot + 90); updateRot(); draw(); e.preventDefault();
+  } else if (e.key === ' '){
+    e.preventDefault();
+    const a = norm(state.rot);
+    await save(a); toast('已记 ' + a + '°'); await step(1);
+  } else if (e.key === 'ArrowRight'){ await step(1); }
+  else if (e.key === 'ArrowLeft'){ await step(-1); }
+  else if (e.key === 'x' || e.key === 'X'){ await save(-1); toast('已标记异常'); await step(1); }
+});
+
+$('jump').addEventListener('change', e => {
+  const n = parseInt(e.target.value, 10);
+  if (n >= 1 && n <= state.files.length){ state.idx = n - 1; load(); }
+  e.target.value = '';
+});
+
+window.addEventListener('resize', draw);
+init();
+</script>
+</body>
+</html>
