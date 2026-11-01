@@ -7,8 +7,8 @@ from .paths import MODELS, ROOT
 from .records import read_json, write_json, lock, sha, now
 
 DEFAULTS = {'m1': 'm1/m1.pt', 'm2': 'm2/m2.pt', 'm3': 'm3/m3.pt',
-            'm4': 'm4/m4.pt', 'orient': 'orient/orient_page.pt',
-            'digit': 'cnn/digit_cnn_v4_20261022_补多选区.pt', 'choice': 'cnn/choice_cnn_v3.pt'}
+            'orient': 'orient/orient_page.pt',
+            'digit': 'cnn/digit_cnn_20261022_02_v4补多选区.pt', 'choice': 'cnn/choice.pt'}
 
 
 def model_record_path(value):
@@ -40,19 +40,21 @@ def inspect_weight(path, task):
         model.eval()
         with torch.no_grad():
             output = model(torch.zeros(shape))
-        expected = 35 if task == 'digit' else 6
-        if tuple(output.shape) != (1, expected) or not torch.isfinite(output).all():
+        from .digit_classes import DIGIT_NC, LEGACY_DIGIT_NC
+        accepted = (LEGACY_DIGIT_NC, DIGIT_NC) if task == 'digit' else (6,)
+        if output.ndim != 2 or output.shape[0] != 1 or output.shape[1] not in accepted or not torch.isfinite(output).all():
             raise ValueError('CNN输入/输出规格或数值异常')
     else:
         ck = torch.load(io.BytesIO(raw), map_location='cpu', weights_only=False)
         model = ck.get('ema') or ck.get('model')
         if model is None:
             raise ValueError('checkpoint缺少模型')
-        expected = {'m1': 3, 'm2': 2}.get(task)
+        expected = {'m1': 3, 'm2': 2, 'm3': 2}.get(task)
         if expected and len(model.names) != expected:
             raise ValueError('类别数量不匹配')
         scale = getattr(model, 'yaml', {}).get('scale')
-        if task in ('m1', 'm2') and scale != {'m1': 'n', 'm2': 's'}[task]:
+        # M3升级s，同时保留既有n候选的检查、对照和回退能力。
+        if task in ('m1', 'm2', 'm3') and scale not in {'m1': ('n',), 'm2': ('s',), 'm3': ('n', 's')}[task]:
             raise ValueError(f'{task}架构scale不匹配：{scale}')
     bad = [k for k, v in model.state_dict().items()
            if not torch.isfinite(v).all() or (k.endswith('running_var') and (v < 0).any())]
@@ -100,7 +102,7 @@ def publish(task, source, run, purpose='迭代完成'):
             current(task)
             return data[task]
         # CNN 发布别名固定为 cnn/<task>.pt：默认回退仍指 DEFAULTS 中的版本文件，
-        # 发布不覆盖任何历史版本（如 choice_cnn_v3.pt）。
+        # 发布不覆盖任何历史版本（如 choice.pt）。
         if task in ('digit', 'choice'):
             alias = MODELS / ('cnn/%s.pt' % task)
         else:

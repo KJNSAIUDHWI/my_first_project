@@ -104,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     if not os.path.isdir(RAW):
         print("找不到图片目录:", RAW)
-        print("请确认 data/raw 已存在。")
+        print("本项目原始扫描已按用户要求清理；此工具需重新提供 data/raw，当前工作图仍保留在 data/m1/images。")
         return 1
     os.makedirs(DATA, exist_ok=True)
     total = len(list_images())

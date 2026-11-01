@@ -50,7 +50,7 @@ def order_boxes(boxes):
 
 def load_model():
     """旧 v2 读数模型（已判定 8/9 类污染，仅历史脚本引用，不要用于新数据）。"""
-    p = MODELS / "cnn" / "digit_cnn_v2_20261007_8-9污染.pt"
+    p = MODELS / "cnn" / "digit_cnn_20261007_01_v2题号8-9污染.pt"
     m = torch.jit.load(io.BytesIO(open(p, "rb").read()), map_location="cpu")
     m.eval()
     return m

@@ -79,6 +79,10 @@ canvas{display:block;background:#f8fafc;cursor:crosshair}
 .help b{color:#475569;font-weight:600}
 .toast{position:fixed;top:16px;right:16px;background:#111827;color:#fff;padding:9px 15px;border-radius:9px;font-size:13px;opacity:0;transform:translateY(-4px);transition:.2s;pointer-events:none;z-index:99}
 .toast.show{opacity:1;transform:none}
+dialog{margin:auto;width:min(460px,90vw);border:0;border-radius:12px;padding:24px;box-shadow:0 12px 50px #0004}
+dialog::backdrop{background:#0f172a66}
+#specialNote{display:block;width:100%;height:90px;margin:12px 0;padding:10px;font:inherit;border:1px solid var(--line);border-radius:6px}
+#specialError{color:var(--danger);min-height:22px}
 </style>
 </head>
 <body>
@@ -86,6 +90,13 @@ canvas{display:block;background:#f8fafc;cursor:crosshair}
   <div class="row">
     <div class="brand">答题卡标注 <span class="path" id="dataName"></span></div>
     <select id="dsSelect" class="ds"></select>
+    <label for="labelMode">标签显示</label>
+    <select id="labelMode" class="ds">
+      <option value="all">通用 · 全部标签</option>
+      <option value="m1">M1 · 页面区域</option>
+      <option value="m2">M2 · 选择题题号、选项</option>
+      <option value="m3">M3 · 填空题大题框、大题号</option>
+    </select>
     <div class="spacer"></div>
     <div class="prog">
       <div class="legend">
@@ -108,8 +119,9 @@ canvas{display:block;background:#f8fafc;cursor:crosshair}
     <button class="btn" id="next">下一张 ▶</button>
     <span class="jump">跳至 <input id="jumpNo" type="number" min="1"> 张 <button class="btn" id="jumpBtn" style="padding:6px 10px">跳</button></span>
     <div class="spacer"></div>
+    <button class="btn" id="allBtn">← 返回全部</button>
     <button class="btn" id="cancelBtn" disabled>↩ 取消审核</button>
-    <button class="btn success" id="confirmBtn" disabled>✓ 确认本图</button>
+    <button class="btn success" id="refreshBtn">↻ 刷新分类</button>
     <button class="btn special" id="specialBtn">⚠ 特殊</button>
   </div>
 </div>
@@ -121,9 +133,11 @@ canvas{display:block;background:#f8fafc;cursor:crosshair}
       <h4>当前图</h4>
       <div id="curName" style="margin-top:6px"></div>
       <div id="curStatus" style="margin-top:8px"></div>
+      <div id="predictionVersion" style="margin-top:8px;font-size:12px;color:#64748b;overflow-wrap:anywhere"></div>
     </div>
     <div>
       <h4>已标框 <span id="boxCount" style="color:#334155">(0)</span></h4>
+      <div id="classCounts" class="work" style="margin:8px 0" aria-live="polite"></div>
       <div class="bl" id="bl"><div class="empty">暂无</div></div>
     </div>
     <div>
@@ -138,29 +152,57 @@ canvas{display:block;background:#f8fafc;cursor:crosshair}
       </div>
     </div>
     <div class="help">
-      <b>1~9,0</b> 选类别 · 左键拖画框<br>
+      <b id="classKeyHelp">1~9,0</b> 选类别 · 左键拖画框<br>
+      「标签显示」筛选类别按钮、图上框和右侧列表；通用显示全部。隐藏框仍会完整保存。<br>
       <b>左键单击</b> 选中框 · 选中后拖 <b>8 个手柄</b> 调整大小<br>
       <b>拖框内</b> 移动框 · <b>右键点框</b> 删除<br>
       <b>右键拖</b> 平移 · <b>滚轮</b> 缩放 · <b>Delete</b> 删选中<br>
       <b>← →</b> 浏览 · <b>A D</b> 提交并切图 · <b>R</b> 旋转 · <b>Z</b> 撤销 · <b>Ctrl+Y</b> 重做 · <b>H</b> 帮助<br>
-      改框<b>不会马上写日志</b>；按 A/D 或点「✓ 确认本图」才记一条审核。<br>
-      有未提交的修改时，←/→ 会挡住，先按 A/D 提交。
+      改框时只暂存，按 <b>A/D</b> 保存；最后一张按 D 也会保存。<br>
+      子集名单保持不动，图上显示最新标签；点「刷新分类」或「返回全部」才统一保存暂存修改并重新分组。←/→ 只浏览。
     </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<dialog id="specialDialog" aria-labelledby="specialTitle">
+  <form id="specialForm">
+    <h3 id="specialTitle">标记特殊图片</h3>
+    <p style="margin:10px 0;color:#64748b">填写原因，提交成功后本图显示为特殊。</p>
+    <button type="button" class="btn" id="specialCropReason">M1裁图错误</button>
+    <label for="specialNote" style="display:block;margin-top:12px">特殊原因</label>
+    <textarea id="specialNote" required placeholder="例如：M1裁图错误，裁到了阅读题标题"></textarea>
+    <div id="specialError" role="alert"></div>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" id="specialCancel">取消</button><button type="submit" class="btn special" id="specialSubmit">确认特殊</button></div>
+  </form>
+</dialog>
 <script>
 'use strict';
 const CLASSES = [
-  ['姓名学号','#ef4444'],['选择题区','#22c55e'],['选择题题号','#f97316'],['选择题选项','#8b5cf6'],
-  ['填空题区','#3b82f6'],['填空题大题框','#60a5fa'],['填空大题号','#2563eb'],
-  ['填空小题号','#1d4ed8'],['小题填空区','#1e40af'],['填空行','#0f2a5c']
+  ['姓名学号','#7c3aed'],['选择题区','#15803d'],['选择题题号','#b45309'],['选择题选项','#be185d'],
+  ['填空题区','#2563eb'],['填空题大题框','#007f99'],['填空题大题号','#dc2626']
 ];
-const FILTER = new URLSearchParams(location.search).get('filter') || '';
+const LABEL_MODES = { all: CLASSES.map((_, i) => i), m1: [0, 1, 4], m2: [2, 3], m3: [5, 6] };
+let labelMode = null;
+try { const saved = localStorage.getItem('annotationLabelMode'); if (LABEL_MODES[saved]) labelMode = saved; } catch (_) {}
+// 旧日志里的已停用类别仅保留显示，不能通过类别按钮新建。
+function classInfo(c) { return CLASSES[c] || ['旧类别 ' + c, '#64748b']; }
+function classVisible(c) { return LABEL_MODES[labelMode || 'all'].includes(c) || ((labelMode || 'all') === 'all' && c >= CLASSES.length); }
+function setLabelMode(mode) {
+  if (!LABEL_MODES[mode]) return;
+  labelMode = mode;
+  document.getElementById('labelMode').value = mode;
+  if (!classVisible(state.cls)) state.cls = LABEL_MODES[mode][0];
+  state.selected = -1; state.drag = null; state.preview = null;
+  renderClassBtns(); renderBoxList(); draw();
+}
+document.getElementById('labelMode').onchange = e => {
+  setLabelMode(e.target.value);
+  try { localStorage.setItem('annotationLabelMode', labelMode); } catch (_) {}
+};
+let FILTER = new URLSearchParams(location.search).get('filter') || '';
 const state = { list: [], idx: 0, boxes: [], cls: 0, img: null, scale: 1, ox: 0, oy: 0,
                 drag: null, preview: null, selected: -1, undo: [], redo: [],
-                rotation: 0, special: false, original: '[]',
-                readonly: !!FILTER && FILTER !== 'pending',
+                rotation: 0, special: false, original: '[]', drafts: new Map(),
                 counts: { correct: 0, fixed: 0, special: 0, pending: 0 },
                 edits: { moved: 0, added: 0, deleted: 0, total: 0 } };
 const RATE = 0.09;
@@ -177,21 +219,12 @@ function syncProgress() {
   document.getElementById('cFixed').textContent = c.fixed;
   document.getElementById('cSpecial').textContent = c.special;
   document.getElementById('cPending').textContent = c.pending;
-  const total = state.list.length || 1;
+  const total = c.correct + c.fixed + c.special + c.pending || 1;
   document.getElementById('segCorrect').style.width = (c.correct / total * 100) + '%';
   document.getElementById('segFixed').style.width = (c.fixed / total * 100) + '%';
   document.getElementById('segSpecial').style.width = (c.special / total * 100) + '%';
 }
 function recount() {
-  if (!state.readonly) {
-    const c = { correct: 0, fixed: 0, special: 0, pending: 0 };
-    for (const x of state.list) {
-      if (x.special) c.special++;
-      else if (x.reviewed) (x.status === '已审-修正' ? c.fixed++ : c.correct++);
-      else c.pending++;
-    }
-    state.counts = c;
-  }
   syncProgress();
 }
 function escapeHtml(s) {
@@ -210,6 +243,11 @@ async function loadDatasets() {
   }
 }
 document.getElementById('dsSelect').onchange = async e => {
+  await navChain;
+  if (!await flushDrafts()) {
+    await loadDatasets();
+    return;
+  }
   const r = await fetch('/api/switch', { method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ name: e.target.value }) });
   if (!r.ok) {
@@ -224,6 +262,10 @@ document.getElementById('dsSelect').onchange = async e => {
 };
 async function loadList() {
   const d = await (await fetch('/api/list')).json();
+  if (labelMode === null) {
+    const dataset = d.data.replace(/\\/g, '/').split('/').pop();
+    setLabelMode(LABEL_MODES[dataset] ? dataset : 'all');
+  }
   let items = d.items;
   if (FILTER === 'correct') items = items.filter(x => x.reviewed && x.status !== '已审-修正' && !x.special);
   else if (FILTER === 'fixed') items = items.filter(x => x.status === '已审-修正');
@@ -238,16 +280,28 @@ async function loadList() {
   syncProgress();
   renderWork(null);
   renderClassBtns();
-  if (state.list.length) loadImage(0);
+  if (state.list.length) await loadImage(0);
+  else {
+    state.idx = 0; state.img = null; state.boxes = []; state.original = '[]'; state.selected = -1;
+    document.getElementById('pos').textContent = '0/0';
+    document.getElementById('curName').textContent = '';
+    document.getElementById('curStatus').textContent = '当前分类暂无图片';
+    draw(); renderBoxList();
+  }
 }
 function renderClassBtns() {
   const box = document.getElementById('cbtns');
+  const visible = LABEL_MODES[labelMode || 'all'];
+  document.getElementById('classKeyHelp').textContent = visible.length === 10 ? '1~9,0' : '1~' + visible.length;
   box.innerHTML = '';
   CLASSES.forEach(([name, color], i) => {
+    if (!classVisible(i)) return;
     const b = document.createElement('button');
     b.className = 'cb' + (i === state.cls ? ' act' : '');
-    if (i === state.cls) b.style.background = color;
-    b.textContent = (i === 9 ? 0 : i + 1) + ' ' + name;
+    b.style.borderColor = color;
+    b.style.background = i === state.cls ? color : color + '14';
+    b.style.color = i === state.cls ? '#fff' : color;
+    b.textContent = ((visible.indexOf(i) + 1) % 10) + ' ' + name;
     b.onclick = () => { state.cls = i; renderClassBtns(); };
     box.appendChild(b);
   });
@@ -273,10 +327,10 @@ let imageLoadId = 0;
 async function loadImage(i) {
   const loadId = ++imageLoadId;
   state.img = null; state.drag = null; state.preview = null;
+  document.getElementById('predictionVersion').textContent = '';
   state.boxes = []; state.original = '[]'; state.selected = -1; state.undo = []; state.redo = [];
   renderBoxList();
   document.getElementById('cancelBtn').disabled = true;
-  document.getElementById('confirmBtn').disabled = true;
   document.getElementById('specialBtn').disabled = true;
   draw();
   state.idx = Math.max(0, Math.min(i, state.list.length - 1));
@@ -288,11 +342,14 @@ async function loadImage(i) {
   if (!response.ok) throw new Error('标签加载失败');
   const lab = await response.json();
   if (loadId !== imageLoadId || state.list[state.idx] !== it) return;
+  document.getElementById('predictionVersion').textContent = '预标注版本：' + (lab.prediction_model || '未记录') + (lab.prediction_time ? ' · ' + lab.prediction_time : '');
   state.boxes = parseLabel(lab.text);
   state.selected = -1; state.undo = []; state.redo = [];
   state.rotation = lab.rotation || it.rotation || 0;
   state.special = !!it.special;
   state.original = JSON.stringify(state.boxes);
+  const draft = state.drafts.get(it.stem);
+  if (draft) state.boxes = JSON.parse(draft.boxes);
   document.getElementById('posRange').value = state.idx + 1;
   document.getElementById('posRange').max = state.list.length || 1;
   const img = new Image();
@@ -300,7 +357,6 @@ async function loadImage(i) {
     if (loadId !== imageLoadId || state.list[state.idx] !== it) return;
     state.img = img;
     document.getElementById('specialBtn').disabled = false;
-    document.getElementById('confirmBtn').disabled = false;
     fit(); draw(); updateStatus(it);
   };
   img.onerror = () => {
@@ -316,42 +372,59 @@ async function loadImage(i) {
 async function reviewCurrent(explicit = false) {
   const it = state.list[state.idx];
   if (!it || !state.img) return false;
-  if (state.readonly) return true;
   if (it.special && !explicit) {
-    if (isEdited()) { toast('特殊图有未提交修改，请点“确认本图”恢复审核'); return false; }
+    if (isEdited()) return reviewCurrent(true);
     return true;
   }
+  rememberDraft();
+  return saveReview(it, JSON.stringify(state.boxes));
+}
+async function saveReview(it, snapshot) {
+  const boxes = JSON.parse(snapshot);
+  const text = boxes.map(b => b[0] + ' ' + b.slice(1).map(v => v.toFixed(6)).join(' ')).join('\n');
   const r = await fetch('/api/review', { method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ stem: it.stem, text: labelText() }) });
+    body: JSON.stringify({ stem: it.stem, text }) });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
-    toast('审核没提交成功：' + (d.error || '未知原因') + '，修改还在');
+    toast('保存失败：' + (d.error || '未知原因') + '，修改还在，可按 A/D 或刷新分类重试');
     return false;
   }
-  it.reviewed = (d.status || '').indexOf('已审-') === 0;
   it.status = d.status || it.status;
-  it.special = false; it.note = ''; state.special = false;
-  state.original = JSON.stringify(state.boxes);
+  it.reviewed = it.status.startsWith('已审-');
+  it.special = false; it.note = '';
+  if (state.list[state.idx] === it) { state.original = snapshot; state.special = false; }
+  if (state.drafts.get(it.stem)?.boxes === snapshot) state.drafts.delete(it.stem);
   it.review_count = d.review_count;
   it.last_review = d.last_review || '';
   applyEdit(it, d.edit);
-  recount(); updateStatus(it);
-  if (!d.unchanged) toast('已记：' + (d.status || ''));
+  recount();
+  if (state.list[state.idx] === it) updateStatus(it);
+  if (!d.unchanged) toast('已保存：' + it.status + '，当前子集名单保持不动');
   return true;
 }
 
 let navChain = Promise.resolve();
-function go(delta, autoReview = !state.readonly) {
+function rememberDraft() {
+  const it = state.list[state.idx];
+  if (!it || !state.img) return;
+  if (isEdited()) state.drafts.set(it.stem, {it, boxes:JSON.stringify(state.boxes)});
+  else state.drafts.delete(it.stem);
+}
+async function flushDrafts() {
+  rememberDraft();
+  for (const draft of state.drafts.values()) {
+    if (!await saveReview(draft.it, draft.boxes)) return false;
+  }
+  return true;
+}
+function go(delta, autoReview = true) {
   navChain = navChain.then(async () => {
     if (!state.list.length) return;
     const n = Math.max(0, Math.min(state.idx + delta, state.list.length - 1));
     if (autoReview) {
       const ok = await reviewCurrent();
       if (!ok) return;
-    } else if (isEdited()) {
-      toast('有未提交的修改，按 A/D 提交后才能切图');
-      return;
-    }
+    } else rememberDraft();
     if (n !== state.idx) await loadImage(n);
     else updateStatus(state.list[state.idx]);
   }).catch(() => { toast('切图失败，当前图保留'); });
@@ -359,7 +432,7 @@ function go(delta, autoReview = !state.readonly) {
 }
 function goTo(n) {
   navChain = navChain.then(async () => {
-    if (isEdited()) { toast('有未提交的修改，按 A/D 提交后才能跳转'); return; }
+    rememberDraft();
     await loadImage(n);
   }).catch(() => { toast('跳转失败，当前图保留'); });
   return navChain;
@@ -395,26 +468,22 @@ function applyEdit(it, e) {
 function updateStatus(it) {
   const el = document.getElementById('curStatus');
   let html;
-  if (it.special) {
+  if (isEdited()) {
+    html = '<span class="badge warn">已修改 · 暂存，按 A/D 保存</span>';
+  } else if (it.special) {
     html = '<span class="badge special">特殊：' + escapeHtml(it.note || '') + '</span>';
   } else if (it.reviewed) {
-    if (isEdited()) {
-      html = '<span class="badge warn">已改 · 按 A/D 提交</span>';
-    } else {
-      const fixed = it.status === '已审-修正';
-      const when = fmtTime(it.last_review);
-      html = '<span class="badge ' + (fixed ? 'fixed' : 'ok') + '">' +
-             (fixed ? '手动修改' : '预标注正确') + (when ? ' · ' + when : '') + '</span>';
-    }
-  } else if (isEdited() || (it.edit && it.edit.total > 0)) {
+    const fixed = it.status === '已审-修正';
+    const when = fmtTime(it.last_review);
+    html = '<span class="badge ' + (fixed ? 'fixed' : 'ok') + '">' +
+           (fixed ? '手动修改' : '预标注正确') + (when ? ' · ' + when : '') + '</span>';
+  } else if (it.edit && it.edit.total > 0) {
     html = '<span class="badge fixed">已改 · 待审核</span>';
   } else {
     html = '<span class="badge todo">未审核</span>';
   }
   el.innerHTML = html;
   document.getElementById('cancelBtn').disabled = !it.reviewed && !it.special;
-  document.getElementById('confirmBtn').disabled = !state.img;
-  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
   renderBoxList();
   renderWork(it);
 }
@@ -433,12 +502,21 @@ function labelText() {
   return state.boxes.map(b => b[0] + ' ' + b.slice(1).map(v => v.toFixed(6)).join(' ')).join('\n') + (state.boxes.length ? '\n' : '');
 }
 function renderBoxList() {
+  const counts = CLASSES.map(() => 0);
+  state.boxes.forEach(b => counts[b[0]] = (counts[b[0]] || 0) + 1);
+  const relevant = LABEL_MODES[labelMode || 'all'];
+  document.getElementById('classCounts').innerHTML = CLASSES.map(([name, color], c) =>
+    classVisible(c) && (counts[c] || relevant.includes(c)) ? '<span><span class="dot" style="background:' + color + '"></span>' + name + '</span><b>' + counts[c] + ' 个</b>' : ''
+  ).join('') || '<span>暂无框</span>';
   const el = document.getElementById('bl');
-  el.innerHTML = state.boxes.length ? '' : '<div class="empty">暂无</div>';
+  const visibleCount = state.boxes.filter(b => classVisible(b[0])).length;
+  document.getElementById('boxCount').textContent = visibleCount === state.boxes.length ? '(' + visibleCount + ')' : '(' + visibleCount + ' / 全部 ' + state.boxes.length + ')';
+  el.innerHTML = visibleCount ? '' : '<div class="empty">当前显示类别暂无框</div>';
   state.boxes.forEach((b, i) => {
+    if (!classVisible(b[0])) return;
     const d = document.createElement('div');
     d.className = 'bi' + (i === state.selected ? ' hl' : '');
-    d.innerHTML = '<span><span class="dot" style="background:' + CLASSES[b[0]][1] + '"></span>' + CLASSES[b[0]][0] + '</span><span class="x">×</span>';
+    d.innerHTML = '<span><span class="dot" style="background:' + classInfo(b[0])[1] + '"></span>' + classInfo(b[0])[0] + '</span><span class="x">×</span>';
     d.onclick = () => { state.selected = i; draw(); renderBoxList(); };
     d.querySelector('.x').onclick = e => { e.stopPropagation(); removeBox(i); };
     el.appendChild(d);
@@ -449,13 +527,13 @@ function removeBox(i) {
   pushUndo();
   state.boxes.splice(i, 1);
   state.selected = -1; markChanged();
-  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
 }
 function markChanged() {
   draw();
   renderBoxList();
   const it = state.list[state.idx];
   if (it) updateStatus(it);
+  rememberDraft();
 }
 async function cancelReview() {
   const it = state.list[state.idx];
@@ -470,19 +548,44 @@ async function cancelReview() {
   updateStatus(it);
   toast('已取消审核');
 }
-async function special() {
+let specialTarget = null;
+function special() {
   const it = state.list[state.idx];
   if (!it || !state.img) return;
-  const note = prompt('特殊批语（例如：学生改过答案 / 乱涂看不清 / 不使用 / 上传错）');
-  if (!note) return;
-  const r = await fetch('/api/special', { method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ stem: it.stem, note: note }) });
-  if (!r.ok) { toast('特殊状态未提交成功'); return; }
-  it.special = true; it.note = note; it.status = '特殊';
-  toast('已标记特殊');
-  recount();
-  updateStatus(it);
+  specialTarget = it;
+  document.getElementById('specialNote').value = it.note || '';
+  document.getElementById('specialError').textContent = '';
+  document.getElementById('specialDialog').showModal();
+  document.getElementById('specialNote').focus();
 }
+async function submitSpecial(e) {
+  e.preventDefault();
+  const it = specialTarget;
+  const note = document.getElementById('specialNote').value.trim();
+  const error = document.getElementById('specialError');
+  if (!it || !note) { error.textContent = '请填写特殊原因'; return; }
+  const button = document.getElementById('specialSubmit');
+  const snapshot = JSON.stringify(state.boxes);
+  const text = labelText();
+  button.disabled = true;
+  try {
+    const r = await fetch('/api/special', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stem: it.stem, note, text }) });
+    const result = await r.json();
+    if (!r.ok || !result.ok) throw new Error(result.error || '提交失败');
+    it.special = true; it.note = note; it.status = '特殊'; it.reviewed = false;
+    state.special = true;
+    state.original = snapshot;
+    if (state.drafts.get(it.stem)?.boxes === snapshot) state.drafts.delete(it.stem);
+    document.getElementById('specialDialog').close();
+    recount(); updateStatus(it); toast('已标记特殊');
+  } catch (e) {
+    error.textContent = '特殊状态未提交：' + e.message + '，请重试';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function draw() {
   ctx.clearRect(0, 0, cv.width, cv.height);
   if (!state.img) return;
@@ -495,7 +598,7 @@ function draw() {
   ctx.shadowColor = 'rgba(15,23,42,.18)'; ctx.shadowBlur = 12 / state.scale;
   ctx.drawImage(state.img, 0, 0);
   ctx.shadowBlur = 0;
-  state.boxes.forEach((b, i) => drawBox(b, i === state.selected, state.scale));
+  boxOrder().forEach(i => drawBox(state.boxes[i], i === state.selected, state.scale));
   if (state.preview) drawBox(state.preview, false, state.scale);
   ctx.restore();
 }
@@ -526,35 +629,33 @@ function undo() {
   state.redo.push(JSON.parse(JSON.stringify(state.boxes)));
   state.boxes = state.undo.pop();
   state.selected = -1; markChanged();
-  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
 }
 function redo() {
   if (!state.redo.length) return;
   state.undo.push(JSON.parse(JSON.stringify(state.boxes)));
   state.boxes = state.redo.pop();
   state.selected = -1; markChanged();
-  document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
 }
 function drawBox(b, hl, scale) {
   const [c, cx, cy, w, h] = b, W = state.img.width, H = state.img.height;
   const x = (cx - w / 2) * W, y = (cy - h / 2) * H;
   ctx.lineWidth = (hl ? 3 : 2) / scale;
-  ctx.strokeStyle = hl ? '#f59e0b' : CLASSES[c][1];
+  ctx.strokeStyle = classInfo(c)[1];
   ctx.strokeRect(x, y, w * W, h * H);
   if (hl) {
     const hs = 8 / scale;
     for (const pt of handlePoints(x, y, w * W, h * H)) {
       ctx.fillStyle = '#fff';
-      ctx.strokeStyle = '#2563eb';
+      ctx.strokeStyle = classInfo(c)[1];
       ctx.lineWidth = 2 / scale;
       ctx.fillRect(pt.x - hs / 2, pt.y - hs / 2, hs, hs);
       ctx.strokeRect(pt.x - hs / 2, pt.y - hs / 2, hs, hs);
     }
   }
-  const label = CLASSES[c][0];
+  const label = classInfo(c)[0];
   ctx.font = (13 / scale) + 'px Microsoft YaHei';
   const tw = ctx.measureText(label).width + 8 / scale;
-  ctx.fillStyle = CLASSES[c][1];
+  ctx.fillStyle = classInfo(c)[1];
   ctx.fillRect(x, Math.max(0, y - 16 / scale), tw, 16 / scale);
   ctx.fillStyle = '#fff';
   ctx.fillText(label, x + 4 / scale, Math.max(11 / scale, y - 4 / scale));
@@ -571,9 +672,14 @@ function toImg(e) {
     default: return { x: xr, y: yr };
   }
 }
+// 大框先画、小框后画；命中时按相反顺序，保持显示与选中一致。
+function boxOrder() {
+  return state.boxes.map((_, i) => i).filter(i => classVisible(state.boxes[i][0])).sort((a, b) =>
+    state.boxes[b][3] * state.boxes[b][4] - state.boxes[a][3] * state.boxes[a][4]);
+}
 function hitBox(p) {
   if (!state.img) return -1;
-  for (let i = state.boxes.length - 1; i >= 0; i--) {
+  for (const i of boxOrder().reverse()) {
     const b = state.boxes[i], W = state.img.width, H = state.img.height;
     const x1 = (b[1] - b[3] / 2) * W, y1 = (b[2] - b[4] / 2) * H;
     if (p.x >= x1 && p.x <= x1 + b[3] * W && p.y >= y1 && p.y <= y1 + b[4] * H) return i;
@@ -661,7 +767,6 @@ cv.addEventListener('mouseup', e => {
       }
     }
     state.preview = null; draw(); renderBoxList();
-    document.getElementById('boxCount').textContent = '(' + state.boxes.length + ')';
   } else if (d.type === 'resize' || d.type === 'move') {
     if (JSON.stringify(d.before) !== JSON.stringify(state.boxes)) {
       state.undo.push(d.before);
@@ -697,7 +802,13 @@ cv.addEventListener('wheel', e => {
   draw();
 }, { passive: false });
 window.addEventListener('resize', () => { resize(); fit(); draw(); });
+window.addEventListener('beforeunload', e => {
+  rememberDraft();
+  if (state.drafts.size) { e.preventDefault(); e.returnValue = ''; }
+});
 window.addEventListener('keydown', e => {
+  if (document.getElementById('specialDialog').open) return;
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
   const inInput = e.target.tagName === 'INPUT';
   if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1, false); return; }
   if (e.key === 'ArrowRight') { e.preventDefault(); go(1, false); return; }
@@ -714,7 +825,7 @@ window.addEventListener('keydown', e => {
   } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
     redo();
   } else if (e.key === 'h' || e.key === 'H') {
-    alert('1~9,0 选类别\n左键拖 = 画框；左键单击 = 选中框\n选中后拖 8 个手柄 = 调整大小，拖框内 = 移动\n右键点框 = 删除；右键拖 = 平移\n滚轮 = 缩放；Delete = 删选中\n← → = 浏览（有未提交修改会挡住）\nA D = 提交本图并切图\n✓ 确认本图 = 提交但不切图\nZ = 撤销；Ctrl+Y = 重做\nH = 这个帮助');
+    alert('数字键按按钮编号选类别（单模型从1开始）\n左键拖 = 画框；左键单击 = 选中框\n选中后拖 8 个手柄 = 调整大小，拖框内 = 移动\n右键点框 = 删除；右键拖 = 平移\n滚轮 = 缩放；Delete = 删选中\n改框只暂存，不读写日志\n← → = 只浏览，保留暂存修改\nA D = 保存审核并切图，最后一张也保存\n刷新分类 / 返回全部 = 保存暂存修改后重读分组\nZ = 撤销；Ctrl+Y = 重做\nH = 这个帮助');
   } else if (e.key === 'r' || e.key === 'R') {
     if (!state.img) return;
     state.rotation = (state.rotation + 90) % 360;
@@ -724,14 +835,36 @@ window.addEventListener('keydown', e => {
       body: JSON.stringify({ stem: it.stem, rotation: state.rotation }) });
     toast('旋转 ' + state.rotation + '°');
   } else if (/^[0-9]$/.test(e.key)) {
-    state.cls = e.key === '0' ? 9 : parseInt(e.key, 10) - 1; renderClassBtns();
+    const index = e.key === '0' ? 9 : parseInt(e.key, 10) - 1;
+    const cls = LABEL_MODES[labelMode || 'all'][index];
+    if (cls === undefined) return;
+    state.cls = cls; renderClassBtns();
   }
 });
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('cancelBtn').onclick = cancelReview;
-document.getElementById('confirmBtn').onclick = () => reviewCurrent(true);
+function changeFilter(nextFilter) {
+  navChain = navChain.then(async () => {
+    if (!await flushDrafts()) return;
+    FILTER = nextFilter;
+    const params = new URLSearchParams(location.search);
+    if (FILTER) params.set('filter', FILTER); else params.delete('filter');
+    history.replaceState(null, '', location.pathname + (params.size ? '?' + params : ''));
+    await loadList();
+    toast('已按最新保存结果刷新分类');
+  }).catch(() => toast('刷新失败，当前修改保留，请重试'));
+  return navChain;
+}
+document.getElementById('refreshBtn').onclick = () => changeFilter(FILTER);
+document.getElementById('allBtn').onclick = () => changeFilter('');
 document.getElementById('specialBtn').onclick = special;
+document.getElementById('specialForm').onsubmit = submitSpecial;
+document.getElementById('specialCancel').onclick = () => document.getElementById('specialDialog').close();
+document.getElementById('specialCropReason').onclick = () => {
+  document.getElementById('specialNote').value = 'M1裁图错误：裁到非选择题区域，排除训练';
+  document.getElementById('specialNote').focus();
+};
 document.getElementById('posRange').onchange = e => {
   const n = parseInt(e.target.value, 10);
   if (n >= 1) goTo(n - 1);
@@ -741,19 +874,8 @@ document.getElementById('jumpBtn').onclick = () => {
   if (n >= 1) goTo(n - 1);
 };
 document.querySelectorAll('.lf').forEach(el => {
-  el.onclick = () => window.open('?filter=' + el.dataset.filter, '_blank');
+  el.onclick = () => changeFilter(el.dataset.filter);
 });
-async function refreshStats() {
-  try {
-    const d = await (await fetch('/api/stats')).json();
-    if (!d || !d.counts) return;
-    state.counts = d.counts;
-    state.edits = d.edits;
-    syncProgress();
-    renderWork(state.list[state.idx] || null);
-  } catch (e) {}
-}
-setInterval(refreshStats, 2000);
 resize();
 loadDatasets().then(loadList);
 </script>

@@ -31,7 +31,7 @@ def m_eval(m):
     return m_dataset(m) / "data.yaml"
 
 def model_weight(m, name=None):
-    """m1/m2/m3/m4/orient/cnn 的当前权重；name 指定历史版本"""
+    """m1/m2/m3/orient/cnn 的当前权重；name 指定历史版本"""
     if name:
         return MODELS / m / name
     from .model_registry import current

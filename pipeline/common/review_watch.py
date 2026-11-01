@@ -24,7 +24,7 @@ def status(task, subset):
     if not rows:
         raise ValueError('审核名单为空')
     done, pending, special = [], [], []
-    if task in ('m1','m2','m3','m4'):
+    if task in ('m1','m2','m3'):
         for row in rows:
             name = row['new_name']
             st = events.load_state(task, name)

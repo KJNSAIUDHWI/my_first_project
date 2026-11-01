@@ -44,7 +44,9 @@ def pred(m, cls_map, only_missing=True, conf=0.25, iou=0.5, imgsz=1024, subset=N
     print("模型:", weight, " 待预标注:", len(todo), "/", len(files))
     for i, f in enumerate(todo):
         stem = os.path.splitext(f)[0]
-        r = model(os.path.join(imgs_dir, f), imgsz=imgsz, conf=conf, iou=iou, verbose=False)[0]
+        # M3 was trained with square padding; minimal rectangular padding caused block misses.
+        padding = {"rect": False} if m == "m3" else {}
+        r = model(os.path.join(imgs_dir, f), imgsz=imgsz, conf=conf, iou=iou, verbose=False, **padding)[0]
         H, W = r.orig_shape
         rows = []
         for b in r.boxes:
@@ -59,7 +61,7 @@ def pred(m, cls_map, only_missing=True, conf=0.25, iou=0.5, imgsz=1024, subset=N
         events.append_event(m, stem, {"e": "pred", "model": weight.name,
                                       "model_sha256": weight_hash, "model_path": str(weight),
                                       "conf": conf, "iou": iou, "imgsz": imgsz,
-                                      "boxes": rows, "n": len(rows)})
+                                      **padding, "boxes": rows, "n": len(rows)})
         if (i + 1) % 100 == 0:
             print(i + 1, "/", len(todo), flush=True)
     if todo:

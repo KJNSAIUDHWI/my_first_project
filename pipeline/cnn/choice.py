@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """选项涂黑读取。
 
-v3（默认）：models/cnn/choice_cnn_v3.pt，多标签 6 输出（A~F），任意组合。
+v3（默认）：models/cnn/choice.pt，多标签 6 输出（A~F），任意组合。
 输入：整行选项图，等比缩放到 188×44 + 居中补白到 192×48，灰度 + 反色。
 输出：组合字符串 + 置信度（所有选中字母概率的最小值）。
 
-legacy=True 时走 7 月的 v1 旧 11 类模型（models/cnn/choice_cnn_v1_20260718_旧11类.pt，64×64 拉伸）。
+legacy=True 时走 7 月的 v1 旧 11 类模型（models/cnn/choice_cnn_20260718_01_v1旧11类.pt，64×64 拉伸）。
 """
 import io
 import os
@@ -49,7 +49,7 @@ class ChoiceReader:
         self.min_conf = min_conf
         self.legacy = legacy
         if legacy:
-            p = str(weight or (MODELS / "cnn" / "choice_cnn_v1_20260718_旧11类.pt"))
+            p = str(weight or (MODELS / "cnn" / "choice_cnn_20260718_01_v1旧11类.pt"))
         else:
             p = str(weight or current("choice"))
         with open(p, "rb") as f:

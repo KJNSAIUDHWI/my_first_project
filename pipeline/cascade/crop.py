@@ -48,13 +48,30 @@ def write_csv(path, fields, rows):
         w.writerows(rows)
 
 
+def validate_parent_sources(raw, image, row, name):
+    if not image.is_file():
+        raise FileNotFoundError('m1工作父页缺失: ' + name)
+    expected = row.get('working_sha256') or row.get('oriented_sha256')
+    if raw.is_file():
+        if sha256(raw) != row['raw_sha256']:
+            raise ValueError('raw哈希不匹配: ' + name)
+    elif not expected:
+        raise ValueError('原始扫描已清理且缺少工作图指纹: ' + name)
+    if expected and sha256(image) != expected:
+        raise ValueError('m1图哈希不匹配: ' + name)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", required=True, type=int, choices=(1, 2, 3, 4),
                     help="只处理固定分区中该stage的训练父页")
     ap.add_argument("--report-dir", help="诊断报告目录；默认放入D:/temp本次codex目录")
     ap.add_argument("--parent-list", type=Path, help="只处理CSV中new_name列指定的本stage父页")
+    ap.add_argument('--review-list', type=Path, help='本批审核清单另存为data/m2内的新CSV，同stage可分批裁图')
     args = ap.parse_args()
+    subset_path = (args.review_list or M2 / ('review_stage%d.csv' % args.stage)).resolve()
+    if subset_path.parent != M2.resolve() or subset_path.suffix.lower() != '.csv':
+        raise ValueError('审核清单必须是data/m2内的CSV')
 
     sampling = {r["new_name"]: r for r in read_csv(M1 / "sampling.csv")}
     splits = {r["new_name"]: r for r in read_csv(M1 / "splits.csv")}
@@ -77,20 +94,14 @@ def main():
         if not requested or len(set(requested)) != len(requested) or set(requested) - known:
             raise ValueError('父页清单为空、重复或包含不属于本stage/train的页面')
         parents = [item for item in parents if item[0] in set(requested)]
-    if (M2 / ('review_stage%d.csv' % args.stage)).exists():
+    if subset_path.exists():
         raise FileExistsError('本stage审核清单已存在，拒绝覆盖')
 
     # Validate the full selected batch before running inference or writing data.
     for name, row, _ in parents:
         raw = RAW / (name + ".jpg")
         image = M1 / "images" / (name + ".jpg")
-        if not raw.is_file() or not image.is_file():
-            raise FileNotFoundError("raw或m1父页缺失: " + name)
-        if sha256(raw) != row["raw_sha256"]:
-            raise ValueError("raw哈希不匹配: " + name)
-        expected_working = row.get("working_sha256") or row.get("oriented_sha256")
-        if expected_working and sha256(image) != expected_working:
-            raise ValueError("m1图哈希不匹配: " + name)
+        validate_parent_sources(raw, image, row, name)
         st = events.load_state("m1", name)
         if not st["reviewed"] and not st["special"]:
             raise ValueError("父页尚未审核: " + name)
@@ -217,7 +228,6 @@ def main():
         write_csv(crop_path, CROP_FIELDS, crop_rows)
         write_csv(reject_path, REJECT_FIELDS, reject_rows)
 
-        subset_path = M2 / ("review_stage%d.csv" % args.stage)
         write_csv(subset_path, ["new_name"], [{"new_name": x["stem"]} for x in pending_crops])
     except Exception:
         for path in created:
@@ -235,7 +245,7 @@ def main():
         "m1_weight": str(weight.relative_to(ROOT)), "m1_sha256": weight_hash,
         "subject_stats": {s: {k: v for (sub, k), v in subject_stats.items() if sub == s}
                           for s in sorted({r[1]["subject_original"] for r in parents})},
-        "rejected_this_stage": rejected, "review_csv": str(M2 / ("review_stage%d.csv" % args.stage)),
+        "rejected_this_stage": rejected, "review_csv": str(subset_path),
     }
     (report_dir / ("crop_stage%d_report.json" % args.stage)).write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

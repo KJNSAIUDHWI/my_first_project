@@ -5,7 +5,7 @@
   预标注 / 审核 / 特殊 / 撤销审核 / 旋转 / 调整框
 progress.csv 只是投影缓存，可随时从日志重建。
 
-审核只认 A/D 离开或“确认本图”时提交的最终框；没有草稿事件。
+改框在页面暂存，A/D或主动刷新时提交审核结果；子集名单由页面统一刷新。
 """
 import os
 import sys
@@ -175,6 +175,8 @@ class Handler(SimpleHTTPRequestHandler):
             if SCOPE is not None and stem not in SCOPE:
                 return self._json({"error": "不在本批审核清单内"}, 403)
             st = events.load_state(mname(), stem)
+            pred_event = next((e for e in reversed(events.read_events(mname(), stem))
+                               if e.get("事件") == "预标注" or e.get("e") == "pred"), {})
             name = stem + ".jpg"
             if not os.path.isfile(os.path.join(images_dir(), name)):
                 return self._json({"error": "图片不存在"}, 404)
@@ -182,7 +184,9 @@ class Handler(SimpleHTTPRequestHandler):
                                "reviewed": st["reviewed"], "special": st["special"],
                                "review_count": st["review_count"],
                                "last_review": st["reviewed_at"],
-                               "rotation": st["rotation"], "note": st["note"]})
+                               "rotation": st["rotation"], "note": st["note"],
+                               "prediction_model": pred_event.get("模型", pred_event.get("model", "未记录")),
+                               "prediction_time": pred_event.get("时间", pred_event.get("t", ""))})
         if u.path.startswith("/img/"):
             name = os.path.basename(unquote(u.path[5:]))
             p = os.path.join(images_dir(), name)
@@ -244,8 +248,13 @@ class Handler(SimpleHTTPRequestHandler):
                                "edit": edit_of(stem)})
         if u.path == "/api/special":
             stem = body.get("stem", "")
-            note = body.get("note", "")
-            events.append_event(mname(), stem, {"e": "special", "note": note})
+            note = str(body.get("note", "")).strip()
+            if not note:
+                return self._json({"error": "请填写特殊原因"}, 400)
+            event = {"e": "special", "note": note}
+            if "text" in body:
+                event["boxes"] = events.from_text(body["text"])
+            events.append_event(mname(), stem, event)
             sync_progress(stem)
             invalidate(stem)
             return self._json({"ok": True})

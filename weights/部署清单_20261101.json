@@ -1,0 +1,81 @@
+{
+  "created": "2026-11-01",
+  "deployment": {
+    "orient": {
+      "path": "models/orient/orient_page.pt",
+      "sha256": "59c110ae79bbd26365c89325b9a00213297199cde7d40edb7cbea8287944f40c"
+    },
+    "m1": {
+      "path": "models/m1/m1.pt",
+      "sha256": "d78324eedd59a415a808de820deef1867367fc23f4640e698c164a10f1e81503"
+    },
+    "m2": {
+      "path": "models/m2/m2_20261026_01_官方底座全量1980图大版本80轮.pt",
+      "sha256": "6f005694746eb6c2fcd0e7c70f2ad1b5ca3c345a795755b901c73f3556d9fc99"
+    },
+    "m3": {
+      "path": "models/m3/m3_20261030_05_范围修正单模型人工停训最佳.pt",
+      "sha256": "072497bf185cf0dd3d9cfcc6ade36a4a608ed29126d56ac6a7be6fc200314947"
+    },
+    "digit": {
+      "path": "models/cnn/digit_cnn_20261022_02_v4补多选区.pt",
+      "sha256": "93583af8c8700da0c0ea9c8f9398f12432af4e105260ccd511b061fc96687bea"
+    },
+    "choice": {
+      "path": "models/cnn/choice.pt",
+      "sha256": "37103f1fbb6b388d18212166e4b79987cf341c7e33a34d6c0688ea4654d568bf"
+    }
+  },
+  "files": {
+    "models/orient/orient_page.pt": {
+      "sha256": "59c110ae79bbd26365c89325b9a00213297199cde7d40edb7cbea8287944f40c",
+      "bytes": 3203540
+    },
+    "models/m1/m1.pt": {
+      "sha256": "d78324eedd59a415a808de820deef1867367fc23f4640e698c164a10f1e81503",
+      "bytes": 5535620
+    },
+    "models/m2/m2_20261026_01_官方底座全量1980图大版本80轮.pt": {
+      "sha256": "6f005694746eb6c2fcd0e7c70f2ad1b5ca3c345a795755b901c73f3556d9fc99",
+      "bytes": 19204292
+    },
+    "models/m3/m3_20261030_05_范围修正单模型人工停训最佳.pt": {
+      "sha256": "072497bf185cf0dd3d9cfcc6ade36a4a608ed29126d56ac6a7be6fc200314947",
+      "bytes": 124602915
+    },
+    "models/cnn/digit_cnn_20261022_02_v4补多选区.pt": {
+      "sha256": "93583af8c8700da0c0ea9c8f9398f12432af4e105260ccd511b061fc96687bea",
+      "bytes": 3388947
+    },
+    "models/cnn/choice.pt": {
+      "sha256": "37103f1fbb6b388d18212166e4b79987cf341c7e33a34d6c0688ea4654d568bf",
+      "bytes": 1456139
+    },
+    "models/m2/m2.pt": {
+      "sha256": "6f005694746eb6c2fcd0e7c70f2ad1b5ca3c345a795755b901c73f3556d9fc99",
+      "bytes": 19204292
+    },
+    "models/m3/m3.pt": {
+      "sha256": "072497bf185cf0dd3d9cfcc6ade36a4a608ed29126d56ac6a7be6fc200314947",
+      "bytes": 124602915
+    },
+    "models/current.json": {
+      "sha256": "26c47d5828325035e2abd9016be95b98e25facdc74b0c85a0ef6510a31678c08",
+      "bytes": 819
+    },
+    "models/pretrained/PP-OCRv6_medium_rec_onnx/inference.onnx": {
+      "sha256": "9c09abf0957f7968c7586464b7397b84ad2387a0497a351af40e9acc71b673ba",
+      "bytes": 76554979
+    },
+    "models/pretrained/PP-OCRv6_medium_rec_onnx/inference.yml": {
+      "sha256": "991b700facf5b50a7de193468207d5f4255b538dde0d312ae3b7c7a9b6873129",
+      "bytes": 150580
+    },
+    "models/pretrained/PP-OCRv6_medium_rec_onnx/provenance.json": {
+      "sha256": "7f34546b6b83386157d2d8a8d11532074cd64e21c5064584e7ffe027f2f6927b",
+      "bytes": 484
+    }
+  },
+  "encryption": "7zAES / AES-256, encrypted headers",
+  "volume_bytes": 94371840
+}

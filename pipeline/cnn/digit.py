@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """题号读取（digit CNN，当前部署 v4）。
 
-权重：models/cnn/digit_cnn_v4_20261022_补多选区.pt（35 类：0=非数字，1~34=题号）
-v3 保留在 models/cnn/digit_cnn_v3.pt；v4 补了多选区 11/12 的样本。
+权重：models/cnn/digit_cnn_20261022_02_v4补多选区.pt（35 类：0=非数字，1~34=题号）
+v3 保留在 models/cnn/digit_cnn_20261022_01_v3人工复审.pt；v4 补了多选区 11/12 的样本。
 预处理：等比缩放到长边 56 + 居中补白到 64×64 + /255 + 反色
 """
 import io
@@ -57,7 +57,7 @@ class DigitReader:
         self.model.eval()
 
     def read(self, img):
-        """返回 (digit, conf)：digit 0=非数字，1~34=题号。"""
+        """返回 (digit, conf)：digit 0=非数字，最大题号由权重输出类别决定。"""
         x = prep(img)
         if x is None:
             return 0, 0.0

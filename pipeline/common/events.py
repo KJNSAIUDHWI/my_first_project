@@ -33,13 +33,14 @@ CLASS_NAMES = {
     'm1': {0: '姓名学号', 1: '选择题区', 4: '填空题区'},
     'm2': {2: '题号', 3: '选项'},
     'm3': {5: '大题框', 6: '大题号'},
-    'm4': {7: '小题号', 9: '填空行'},
 }
 CLASS_IDS = {name: cid for table in CLASS_NAMES.values() for cid, name in table.items()}
+# 只为读取历史中文日志保留旧类别；不再注册对应任务或提供新建入口。
+CLASS_IDS.update({'小题号': 7, '填空小题号': 7, '小题填空区': 8, '填空行': 9})
 
 OLD_EVENTS = {'pred': '预标注', 'review': '审核', 'special': '特殊',
               'unreview': '撤销审核', 'rotate': '旋转', 'save': '调整框',
-              'deskew': '倾斜校正', 'migrate': '迁移'}
+              'deskew': '倾斜校正', 'migrate': '迁移', 'clip': '边界裁剪'}
 NEW_EVENTS = {v: k for k, v in OLD_EVENTS.items() if k != 'migrate'}
 
 
@@ -274,7 +275,7 @@ def _upgrade_events(m, events):
         elif kind == 'deskew':
             ev.update({'角度': e.get('deg', 0), '检测角度': e.get('detected', 0),
                        '方法': e.get('method', '')})
-        elif kind == 'save':
+        elif kind in ('save', 'clip'):
             ev["框"] = boxes_to_cn(m, boxes)
         elif kind == 'review':
             count += 1
@@ -350,10 +351,11 @@ def append_event(m, stem, event):
         elif kind == 'deskew':
             ev.update({'角度': event.get('deg', 0), '检测角度': event.get('detected', 0),
                        '方法': event.get('method', ''), '说明': '倾斜校正已完成'})
-        elif kind == 'save':
+        elif kind in ('save', 'clip'):
             boxes = event.get("boxes", [])
             ev["框"] = boxes_to_cn(m, boxes)
-            ev["说明"] = _describe(m, ev)
+            ev["说明"] = ('按用户授权将出界部分裁回图片，保留审核状态与次数'
+                          if kind == 'clip' else _describe(m, ev))
         elif kind in ('migrate', '迁移'):
             ev.update({k: v for k, v in event.items() if k not in ('e', 't', 'v')})
             ev["说明"] = event.get("说明", "从旧格式转换，原值未改")
@@ -384,6 +386,8 @@ def project(events, m=None):
                 st["reviewed"] = False
                 st["reviewed_at"] = ""
             st["boxes"] = boxes
+        elif t == "clip":
+            st["boxes"] = _boxes_of(m, e)
         elif t == "review":
             if "框" in e or "boxes" in e:
                 st["boxes"] = _boxes_of(m, e)
@@ -394,6 +398,8 @@ def project(events, m=None):
             st["note"] = ""
             st["reviewed_at"] = _time_of(e)
         elif t == "special":
+            if "框" in e or "boxes" in e:
+                st["boxes"] = _boxes_of(m, e)
             st["special"] = True
             st["note"] = e.get("note") or e.get("备注") or e.get("类型") or ""
         elif t == "unreview":

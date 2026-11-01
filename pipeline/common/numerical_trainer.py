@@ -8,18 +8,52 @@ import ultralytics
 from ultralytics.models.yolo.detect import DetectionTrainer
 from ultralytics.utils.torch_utils import unwrap_model
 from .snapshot_dataset import build_snapshot_dataset, SnapshotValidator
+from .records import read_json
+
+
+@torch.no_grad()
+def stable_clip_grad_norm_(parameters, max_norm=10.0):
+    """同设备FP32梯度用FP64聚合；有限大梯度不能因平方溢出被误清零。"""
+    gradients = [p.grad for p in parameters if p.grad is not None]
+    if not gradients:
+        return torch.tensor(0., dtype=torch.float64)
+    norms = torch._foreach_norm(gradients, 2, dtype=torch.float64)
+    norm = torch.linalg.vector_norm(torch.stack(norms))
+    if not torch.isfinite(norm):
+        raise FloatingPointError('non-finite gradient norm')
+    if norm > max_norm:
+        peak = torch.stack(torch._foreach_norm(gradients, float('inf'))).max()
+        # 分两步缩放，避免max_norm/norm极小时转回FP32下溢；中间各元素绝对值≤1。
+        torch._foreach_div_(gradients, peak)
+        coefficient = max_norm / (norm / peak.double() + 1e-6)
+        torch._foreach_mul_(gradients, coefficient)
+    return norm
+
+
+class GuardedSnapshotValidator(SnapshotValidator):
+    def update_metrics(self, preds, batch):
+        if self.training:
+            trainer = self.guard_owner
+            trainer.guard_batch = batch
+            trainer.guard_batch_files = list(batch.get('im_file', []))
+            for index, name in enumerate(trainer.loss_names):
+                trainer._tensor(self.loss[index], 'validation.batch.' + name)
+        return super().update_metrics(preds, batch)
 
 
 class GradGuardTrainer(DetectionTrainer):
     def build_dataset(self, img_path, mode='train', batch=None):
         stride = max(int(unwrap_model(self.model).stride.max()), 32)
+        task = read_json(self.save_dir / 'snapshot_audit.json', {}).get('task')
         return build_snapshot_dataset(self.args, img_path, batch, self.data,
-                                      mode=mode, rect=mode == 'val', stride=stride)
+                                      mode=mode, rect=mode == 'val' and task != 'm3', stride=stride)
 
     def get_validator(self):
         self.loss_names = 'box_loss', 'cls_loss', 'dfl_loss'
-        return SnapshotValidator(self.test_loader, save_dir=self.save_dir,
-                                 args=copy(self.args), _callbacks=self.callbacks)
+        validator = GuardedSnapshotValidator(self.test_loader, save_dir=self.save_dir,
+                                             args=copy(self.args), _callbacks=self.callbacks)
+        validator.guard_owner = self
+        return validator
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -38,6 +72,18 @@ class GradGuardTrainer(DetectionTrainer):
         record = dict(step=self.guard_step, time=datetime.now().isoformat(), epoch=self.epoch + 1,
                       where=where, files=self.guard_batch_files, details=details)
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        # 保存实际失败时的原始参数/BN状态，上一轮有限检查点不能复现当前前向故障。
+        capture = self.save_dir / 'failure_model_state.pt'
+        if not capture.exists() and getattr(self, 'model', None) is not None:
+            try:
+                torch.save(dict(state_dict={k: v.detach().cpu() for k, v in self.model.state_dict().items()},
+                                model_yaml=getattr(self.model, 'yaml', None), where=where,
+                                epoch=self.epoch + 1, step=self.guard_step,
+                                scaler=self.scaler.state_dict() if getattr(self, 'scaler', None) else None), capture)
+                record['model_state_capture'] = str(capture)
+            except Exception as error:
+                # CUDA上下文也可能已坏；现场保存失败不能覆盖原来的数值故障。
+                record['model_state_capture_error'] = repr(error)
         with (self.save_dir / 'numerical_failure.jsonl').open('a', encoding='utf-8') as f:
             f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
         raise FloatingPointError(f'Numerical failure at {where}: {details}; see numerical_failure.jsonl')
@@ -126,8 +172,16 @@ class GradGuardTrainer(DetectionTrainer):
             with (self.save_dir / 'amp_overflow.jsonl').open('a', encoding='utf-8') as f:
                 f.write(json.dumps(record, ensure_ascii=False) + '\n')
             return
-        norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+        try:
+            norm = stable_clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+        except FloatingPointError as error:
+            self._fail('gradient.norm', str(error))
         self._tensor(norm, 'gradient.norm')
+        if norm > 1e12:
+            with (self.save_dir / 'large_finite_gradient.jsonl').open('a', encoding='utf-8') as f:
+                f.write(json.dumps(dict(time=datetime.now().isoformat(), epoch=self.epoch+1,
+                    step=self.guard_step, files=self.guard_batch_files, original_norm64=float(norm),
+                    action='stable_clip_to_10_nonfinite_checks_unchanged'), ensure_ascii=False) + '\n')
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.optimizer.zero_grad(set_to_none=True)
@@ -144,6 +198,8 @@ class GradGuardTrainer(DetectionTrainer):
         trainer._state(trainer.model, 'batch_end.model')
 
     def validate(self):
+        self.guard_batch = None
+        self.guard_batch_files = []
         self._state(self.ema.ema if self.ema else self.model, 'before_validation')
         metrics, fitness = super().validate()
         for key, value in metrics.items():
