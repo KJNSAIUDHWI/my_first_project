@@ -12,7 +12,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'pipeline'))
-from common import cnn_data, fixed_dataset  # noqa: E402
+from common import cnn_data, fixed_dataset, row_log  # noqa: E402
 
 
 class DataFlow(unittest.TestCase):
@@ -86,6 +86,70 @@ class DataFlow(unittest.TestCase):
         self.write_splits('page1,train,1,g1,物理\npage2,val,1,g1,物理\n')
         with self.assertRaises(ValueError):
             cnn_data.collect('digit')
+
+    def make_increment(self, task='digit'):
+        from common.records import write_json, write_csv
+        base = self.data / task / 'increments' / 'batch1'
+        (base / 'images').mkdir(parents=True)
+        write_json(base / 'batch.json', {'task': task, 'complete': True})
+        self.write_splits('page1,train,1,g1,物理\npage2,val,1,g2,物理\nnew,train,1,g3,英语\nreserve,val,1,g4,英语\ntest,test,1,g5,英语\n')
+        rows=[]
+        for stem,split,group in [('new','train','g3'),('reserve','val','g4'),('test','test','g5')]:
+            name=stem+'_001'
+            Image.new('L',(64,64),128).save(base/'images'/(name+'.png'))
+            if task == 'digit':
+                rows.append(dict(file=name+'.png',label=60,stem=stem,split=split,group=group))
+                row_log.append(base,name,{'事件':'预标注','标签':60})
+            else:
+                rows.append(dict(stem=stem,row=1,split=split,group=group))
+                row_log.append(base,name,{'事件':'预标注','预测答案':'F'})
+        write_csv(base/('labels.csv' if task=='digit' else 'manifest.csv'),rows,list(rows[0]))
+        return base
+
+    def test_increment_review_and_reserved_validation(self):
+        base=self.make_increment()
+        old,_=cnn_data.collect('digit')
+        self.assertEqual(len(old),2)
+        for stem in ('new','reserve','test'):
+            row_log.append(base,stem+'_001',{'事件':'审核','标签':60})
+        rows,_=cnn_data.collect('digit')
+        self.assertEqual(len(rows),3)
+        self.assertEqual([r for r in old if r['split']=='val'],[r for r in rows if r['split']=='val'])
+        self.assertEqual(rows[-1]['label'],60)
+        row_log.append(base,'new_001',{'事件':'撤销审核'})
+        self.assertEqual(len(cnn_data.collect('digit')[0]),2)
+
+    def test_increment_invalid_label_and_identity(self):
+        base=self.make_increment()
+        row_log.append(base,'new_001',{'事件':'审核','标签':61})
+        with self.assertRaises(ValueError):
+            cnn_data.collect('digit')
+        row_log.append(base,'new_001',{'事件':'审核','标签':60})
+        self.write_splits('page1,train,1,g1,物理\npage2,val,1,g2,物理\nnew,val,1,g3,英语\nreserve,val,1,g4,英语\ntest,test,1,g5,英语\n')
+        with self.assertRaises(ValueError):
+            cnn_data.collect('digit')
+
+    def test_choice_increment_requires_review_and_keeps_val(self):
+        from common.records import write_csv
+        base=self.data/'choice'
+        (base/'images').mkdir(parents=True)
+        old=[]
+        for stem in ('page1','page2'):
+            old.append(dict(stem=stem,row=1))
+            Image.new('L',(64,64),128).save(base/'images'/(stem+'_001.png'))
+            row_log.append(base,stem+'_001',{'事件':'审核','答案':'A'})
+        write_csv(base/'manifest.csv',old,['stem','row'])
+        increment=self.make_increment('choice')
+        before,_=cnn_data.collect('choice')
+        self.assertEqual(len(before),2)
+        for stem in ('new','reserve','test'):
+            row_log.append(increment,stem+'_001',{'事件':'审核','答案':'EF'})
+        after,_=cnn_data.collect('choice')
+        self.assertEqual(len(after),3)
+        self.assertEqual(after[-1]['answer'],'EF')
+        self.assertEqual([r for r in before if r['split']=='val'],[r for r in after if r['split']=='val'])
+        row_log.append(increment,'new_001',{'事件':'特殊','类型':'乱涂看不清'})
+        self.assertEqual(len(cnn_data.collect('choice')[0]),2)
 
 
 if __name__ == '__main__':

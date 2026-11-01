@@ -3,10 +3,12 @@
 
 输入：选择题区 crop 图 + 该图上的框（工具类别 2=题号，3=选项，归一化 cx/cy/w/h）
 输出：每题 {no, answer, digit_conf, choice_conf}
-      no=0 表示题号读成非数字（大概率误检），answer='' 表示选项读不出。
+      no=0 表示题号未读出，answer='' 表示未涂或选项读不出。
 """
 import os
 import sys
+from collections import Counter
+from statistics import median
 
 import cv2
 
@@ -35,20 +37,15 @@ def _box_px(cx, cy, bw, bh, w, h, pad=2):
 def crop_option_row(img, nums_px, ox1, oy1, ox2, oy2, paired=None, w=None):
     """从选项大框裁出纯选项部分（左上/右下像素坐标）。
 
-    框内有题号：起点 = 框内最右侧题号的右边缘；
-    框内没有题号（2026.10 多选 Q11/Q12，题号印在框外）：起点 = 大框左边缘；
-    特例：框内没有题号、且大框左缘离题号太近（框把「（多选）」也框进去了，
-    如 2026.10.0311），起点右移 8% 图宽，跳过文字。
+    只去掉已配对且确实位于框内的题号。框外题号不改变选项左边缘；
+    不以整图宽度猜测“多选”等文字的长度，避免截掉A选项。
     """
-    inside = [n for n in nums_px if ox1 <= n[0] <= ox2 and oy1 <= n[1] <= oy2]
+    candidates = [paired] if paired is not None else nums_px
+    inside = [n for n in candidates if ox1 <= n[0] <= ox2 and oy1 <= n[1] <= oy2]
     if inside:
         cut = int(max(n[0] + n[2] / 2 for n in inside)) + 2
     else:
         cut = ox1
-        if paired is not None and w:
-            px2 = paired[0] + paired[2] / 2
-            if ox1 - px2 < 0.05 * w:
-                cut = int(px2 + 0.08 * w)
     if cut >= ox2 - 20 or cut < ox1:
         cut = ox1
     return img[oy1:oy2, cut:ox2]
@@ -81,6 +78,9 @@ def read_choice_zone(img, boxes, digit_reader=None, choice_reader=None,
         ans, aconf = cr.read(cc)
         rows.append({
             "no": no,
+            "no_raw": no,
+            "no_source": "model",
+            "number_conf": round(nconf, 3),
             "answer": ans,
             "digit_conf": round(nconf, 3),
             "choice_conf": round(aconf, 3),
@@ -92,9 +92,11 @@ def read_choice_zone(img, boxes, digit_reader=None, choice_reader=None,
     rows.sort(key=lambda r: (r["no"] if r["no"] > 0 else 999, -r["choice_conf"]))
     if fix_no:
         fix_no_sequence(rows, is_en=is_en)
-        for r in rows:
-            r["valid"] = bool(r["no"] > 0 and r["digit_conf"] >= min_digit_conf
-                              and r["choice_conf"] >= min_choice_conf)
+    counts = Counter(r["no"] for r in rows)
+    for r in rows:
+        r["valid"] = bool(r["no"] > 0 and counts[r["no"]] == 1
+                          and r["number_conf"] >= min_digit_conf
+                          and r["choice_conf"] >= min_choice_conf)
     return rows
 
 
@@ -107,34 +109,34 @@ def sequence_score(rows):
 
 
 # ---------- 题号连续性纠正 ----------
-# 卷面题号必然连续，单个读错可以用位置纠正：按行/列排好序，用读数投票定起点，
-# 再按位置重新赋题号。三种候选排序（列优先 / 行优先 / 按 y 分块后列优先），
-# 取投票一致性最高且起点 >= 1 的那个。
+# 连续编号只是一种假设；跳号、缺框和稀疏语文题区均不能强排为1..N。
+
+
+def _anchor(row):
+    return row.get("num_box", row["opt_box"])
+
+
+def _groups(items, axis):
+    """以题号框尺寸和组中心分组，避免相邻项逐步串联成同一行/列。"""
+    groups = []
+    for row in sorted(items, key=lambda r: _anchor(r)[axis]):
+        box = _anchor(row)
+        if groups:
+            group = groups[-1]
+            center = median(_anchor(r)[axis] for r in group)
+            tolerance = 0.6 * min(box[axis + 2], median(_anchor(r)[axis + 2] for r in group))
+        if not groups or abs(box[axis] - center) > tolerance:
+            groups.append([row])
+        else:
+            groups[-1].append(row)
+    return groups
 
 def _order_col(items):
-    s = sorted(items, key=lambda r: r["opt_box"][0])
-    cols, cur = [], []
-    for r in s:
-        if cur and r["opt_box"][0] - cur[-1]["opt_box"][0] > 0.08:
-            cols.append(cur)
-            cur = []
-        cur.append(r)
-    if cur:
-        cols.append(cur)
-    return [r for c in cols for r in sorted(c, key=lambda r: r["opt_box"][1])]
+    return [r for c in _groups(items, 0) for r in sorted(c, key=lambda r: _anchor(r)[1])]
 
 
 def _order_row(items):
-    s = sorted(items, key=lambda r: r["opt_box"][1])
-    groups, cur = [], []
-    for r in s:
-        if cur and r["opt_box"][1] - cur[-1]["opt_box"][1] > 0.06:
-            groups.append(cur)
-            cur = []
-        cur.append(r)
-    if cur:
-        groups.append(cur)
-    return [r for g in groups for r in sorted(g, key=lambda r: r["opt_box"][0])]
+    return [r for g in _groups(items, 1) for r in sorted(g, key=lambda r: _anchor(r)[0])]
 
 
 def _order_block_col(items, gap=0.25):
@@ -152,7 +154,6 @@ def _order_block_col(items, gap=0.25):
 
 
 def _vote_seq(seq):
-    from collections import Counter
     v = [r["no"] for r in seq]
     cand = Counter(x - i for i, x in enumerate(v) if x > 0)
     if not cand:
@@ -161,8 +162,46 @@ def _vote_seq(seq):
     return hits / len(v), m
 
 
+def _supported_sequence(seq, min_conf):
+    conf, start = _vote_seq(seq)
+    if len(seq) < 3 or start < 1 or conf < min_conf:
+        return None
+    # 两个误读也可能碰巧连续，至少需要三个独立位置支持才能改写题号。
+    if sum(r["no"] == start + i for i, r in enumerate(seq)) < 3:
+        return None
+    # 两个相邻读数若支持另一个连续起点，可能是真实跳号/漏框，不能覆盖。
+    for i in range(len(seq) - 1):
+        a, b = seq[i]["no"], seq[i + 1]["no"]
+        if a > 0 and b == a + 1 and a - i != start:
+            return None
+    return conf, start
+
+
+def _column_blocks(rows):
+    """同列内选项宽度突变或有大空隙时拆块，不跨不同版式投票。"""
+    blocks = []
+    for column in _groups(rows, 0):
+        column = sorted(column, key=lambda r: _anchor(r)[1])
+        gaps = [_anchor(b)[1] - _anchor(a)[1] for a, b in zip(column, column[1:])]
+        pitch = median(gaps) if gaps else 1.0
+        cur = []
+        for row in column:
+            if cur:
+                previous = cur[-1]
+                widths = [row["opt_box"][2], previous["opt_box"][2]]
+                changed = max(widths) > 1.5 * min(widths)
+                gap = _anchor(row)[1] - _anchor(previous)[1]
+                if changed or gap > 1.6 * pitch:
+                    blocks.append(cur)
+                    cur = []
+            cur.append(row)
+        if cur:
+            blocks.append(cur)
+    return blocks
+
+
 def fix_no_sequence(rows, is_en=False, min_conf=0.6):
-    """按位置 + 读数投票重赋题号。返回 (方法, 一致性, 起点)。
+    """有足够连续读数支持才纠正，冲突时保留原读数。返回 (方法, 一致性, 起点)。
 
     行数 < 3 的区不做纠正（2 个读数投票没有冗余）。
     一致性低于 min_conf 或算不出起点 >= 1 时保持原值。
@@ -174,16 +213,33 @@ def fix_no_sequence(rows, is_en=False, min_conf=0.6):
     best = None
     pref = "row" if is_en else "col"
     for name, seq in cands:
-        conf, m = _vote_seq(seq)
-        if m < 1:
+        supported = _supported_sequence(seq, min_conf)
+        if supported is None:
             continue
+        conf, m = supported
         score = conf + (0.001 if name == pref else 0)
         if best is None or score > best[0]:
             best = (score, name, seq, conf, m)
-    if best is None or best[3] < min_conf:
-        return "keep", 0.0, 0
-    _, name, seq, conf, m = best
-    for i, r in enumerate(seq):
-        r["no"] = m + i
+    if best is None:
+        # 全区不连续时，仅纠正各自有证据的版式块；不猜其他块的起始题号。
+        plans = []
+        for seq in _column_blocks(rows):
+            supported = _supported_sequence(seq, min_conf)
+            if supported is not None:
+                conf, start = supported
+                plans.append((seq, conf, start))
+        if not plans:
+            return "keep", 0.0, 0
+        name, conf, m = "blocks", min(p[1] for p in plans), 0
+    else:
+        _, name, seq, conf, m = best
+        plans = [(seq, conf, m)]
+    for seq, confidence, start in plans:
+        for i, r in enumerate(seq):
+            r.setdefault("no_raw", r["no"])
+            if r["no"] != start + i:
+                r["no"] = start + i
+                r["no_source"] = "sequence"
+                r["number_conf"] = round(confidence, 3)
     rows.sort(key=lambda r: (r["no"], -r["choice_conf"]))
     return name, conf, m

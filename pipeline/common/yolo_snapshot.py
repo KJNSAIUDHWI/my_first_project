@@ -3,26 +3,43 @@ from pathlib import Path
 from collections import Counter
 import math
 import shutil
+import hashlib
 from PIL import Image
 from .paths import DATA, TRAIN, ROOT
 from .fixed_dataset import read_plan
 from . import events, fixed_dataset
 from .records import read_csv, read_json, write_json, write_csv
 
-MAPS = {'m1':{0:0,1:1,4:2},'m2':{2:0,3:1},'m3':{5:0,6:1},'m4':{7:0,9:1}}
-NAMES = {'m1':['info','choice','fill'],'m2':['num','option'],'m3':['block','number'],'m4':['number','line']}
+MAPS = {'m1':{0:0,1:1,4:2},'m2':{2:0,3:1},'m3':{5:0,6:1}}
+NAMES = {'m1':['info','choice','fill'],'m2':['num','option'],'m3':['block','number']}
 
-# 验证名单来自最近正式训练；新增预留页不能自动进入。
-VALIDATION_BASELINES = {'m1': ('m1_20261023_164732_全学科累计140页每科最终候选', 147), 'm2': ('m2_20261023_181744_全学科首轮120裁图微调', 115)}
+# M3按已审val更新名单，配套元数据锁定本次数量与指纹；m1/m2沿用原基线。
+VALIDATION_BASELINES = {'m1': ('m1_20261023_164732_全学科累计140页每科最终候选', 147), 'm2': ('m2_20261023_181744_全学科首轮120裁图微调', 115), 'm3': ('data/m3/validation_baseline.csv', None)}
 
 
 def validation_names(task, plan):
     if task not in VALIDATION_BASELINES:
         raise ValueError('该模块尚未建立固定验证基线：' + task)
     run, count = VALIDATION_BASELINES[task]
-    folder = TRAIN / run / 'dataset_snapshot/images/val'
-    names = sorted(p.stem for p in folder.glob('*.jpg'))
-    if len(names) != count:
+    folder = ROOT / run if task == 'm3' else TRAIN / run / 'dataset_snapshot/images/val'
+    if task == 'm3' and count is None:
+        metadata = read_json(folder.with_suffix('.json'), {})
+        count = metadata.get('count')
+        if not isinstance(count, int) or count <= 0 or not folder.is_file():
+            raise ValueError('M3验证名单缺少有效数量登记')
+        if hashlib.sha256(folder.read_bytes()).hexdigest() != metadata.get('sha256'):
+            raise ValueError('M3验证名单与登记指纹不一致')
+    if task != 'm3' and not folder.is_dir():
+        # 清理旧训练快照后仍使用完全相同的固定验证身份，绝不重抽。
+        baseline = ROOT / 'data' / task / 'validation_baseline.json'
+        metadata = read_json(baseline, {})
+        names = metadata.get('names', [])
+        digest = hashlib.sha256('\n'.join(names).encode()).hexdigest()
+        if metadata.get('source_run') != run or metadata.get('task') != task or metadata.get('count') != count or metadata.get('names_sha256') != digest:
+            raise ValueError('固定验证基线登记缺失或指纹不一致：' + str(baseline))
+    else:
+        names = [r['new_name'] for r in read_csv(folder)] if task == 'm3' else sorted(p.stem for p in folder.glob('*.jpg'))
+    if len(names) != count or len(set(names)) != count:
         raise ValueError('固定验证基线缺失或名单变化：' + str(folder))
     if any(n not in plan or plan[n]['split'] != 'val' for n in names):
         raise ValueError('固定验证名单与splits身份不一致')
@@ -62,6 +79,8 @@ def freeze(task, subset, output, decisions=None, check_only=False, stage=None, s
     val_names = validation_names(task, plan)
     deferred = read_deferrals(defer_list, plan, stage, task)
     requested = {r['new_name'] for r in read_csv(subset)} if subset else set()
+    if task == 'm3' and not requested:
+        raise ValueError('M3逐批迭代必须用--subset显式指定本轮已审名单')
     if requested-set(plan):
         raise ValueError('名单里有身份未知的图：' + ', '.join(sorted(requested-set(plan))[:5]))
     decisions = read_json(decisions,{}) if decisions else {}
@@ -85,6 +104,9 @@ def freeze(task, subset, output, decisions=None, check_only=False, stage=None, s
             else:
                 skipped['stage'] += 1
             continue
+        if task == 'm3' and identity['split'] == 'train' and name not in requested:
+            skipped['outside_review_batch'] += 1
+            continue
         if name in deferred:
             excluded.append({'name': name, **deferred[name]})
             continue
@@ -106,6 +128,7 @@ def freeze(task, subset, output, decisions=None, check_only=False, stage=None, s
                 size = im.size
                 im.verify()
             labels = []
+            row_clips = []
             for i,box in enumerate(st['boxes']):
                 if len(box)!=5 or not all(math.isfinite(float(v)) for v in box):
                     raise ValueError('非有限或损坏标签（第%d框）：%s' % (i, name))
@@ -119,7 +142,7 @@ def freeze(task, subset, output, decisions=None, check_only=False, stage=None, s
                 bounds = [max(0,x1),max(0,y1),min(1,x2),min(1,y2)]
                 if bounds[2]<=bounds[0] or bounds[3]<=bounds[1]:
                     raise ValueError('裁剪后无面积（第%d框）：%s' % (i, name))
-                if bounds != [x1,y1,x2,y2]: clips.append({'name':name,'index':i,'source':box,'export_bounds':bounds})
+                if bounds != [x1,y1,x2,y2]: row_clips.append({'name':name,'index':i,'source':box,'export_bounds':bounds})
                 a,b,c2,d=bounds
                 labels.append([MAPS[task][int(c)],(a+c2)/2,(b+d)/2,c2-a,d-b])
         except (OSError, ValueError) as exc:
@@ -128,6 +151,7 @@ def freeze(task, subset, output, decisions=None, check_only=False, stage=None, s
             else:
                 errors.append(str(exc))
             continue
+        clips.extend(row_clips)
         selected.append({'new_name':name,**identity,'labels':labels})
     if errors:
         raise ValueError('快照未执行，共 %d 项问题（按 00 规范修日志后重跑）：\n%s'
@@ -142,6 +166,8 @@ def freeze(task, subset, output, decisions=None, check_only=False, stage=None, s
            'train_subject_counts':dict(Counter(r['subject_original'] for r in selected if r['split']=='train')),
            'skipped_unreviewed':skipped['unreviewed'],'skipped_stage':skipped['stage'],
            'skipped_invalid':invalid}
+    if task == 'm3':
+        audit['outside_review_batch'] = skipped['outside_review_batch']
     if check_only: return audit
     output.mkdir(parents=True, exist_ok=False)
     try:

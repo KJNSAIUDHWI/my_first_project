@@ -58,7 +58,7 @@ class EntryBoundaries(unittest.TestCase):
 
     def test_legacy_cli_stops(self):
         env = {**os.environ,'PYTHONIOENCODING':'utf-8','PYTHONDONTWRITEBYTECODE':'1'}
-        scripts = [f'pipeline/{m}/build_dataset.py' for m in ('m1','m2','m3','m4')]
+        scripts = [f'pipeline/{m}/build_dataset.py' for m in ('m1','m2','m3')]
         scripts += ['pipeline/m2/build_snapshot.py','tools/补多选区样本.py']
         for script in scripts:
             p = subprocess.run([sys.executable,'-B',str(self.root/script)],cwd=self.root,

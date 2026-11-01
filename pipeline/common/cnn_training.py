@@ -6,7 +6,7 @@ import torch
 from .records import append, write_json
 
 
-def initialize(net, initial, scratch):
+def initialize(net, initial, scratch, expand_digit=False):
     if scratch:
         if initial:
             raise ValueError('随机重训不能同时指定旧权重')
@@ -25,6 +25,16 @@ def initialize(net, initial, scratch):
     else:
         state = torch.load(io.BytesIO(raw),map_location='cpu',weights_only=True)
         state = state.get('model_state',state)
+    if expand_digit:
+        from .digit_classes import DIGIT_NC, LEGACY_DIGIT_NC
+        target = net.state_dict()
+        old_nc = state['fc2.weight'].shape[0]
+        if old_nc == LEGACY_DIGIT_NC and target['fc2.weight'].shape[0] == DIGIT_NC:
+            # 只扩题号输出层：旧类别逐值保留，新类别沿用本轮随机初始化。
+            for key in ('fc2.weight', 'fc2.bias'):
+                expanded = target[key].clone()
+                expanded[:old_nc] = state[key]
+                state[key] = expanded
     net.load_state_dict(state, strict=True)
 
 

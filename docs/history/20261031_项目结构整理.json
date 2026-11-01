@@ -1,0 +1,38 @@
+{
+  "models_unchanged": true,
+  "data_csv_unchanged": 55,
+  "validation_counts": {
+    "m1": 147,
+    "m2": 115,
+    "m3": 218
+  },
+  "config_matches_original_sha": true,
+  "pinned_versions_match": 16,
+  "indexed_files": 129,
+  "unique_weight_sha": 124,
+  "candidate_record_sha_issues": [],
+  "active_python_ast": "passed",
+  "tests": [
+    "9退休入口在隔离无site-packages子进程安全停止",
+    "索引角色/来源/相同内容/部署篡改拒绝",
+    "固定验证名单迁移/拒绝清理目录回退/篡改拒绝",
+    "无raw工作图指纹检查",
+    "6项数据准入回归",
+    "两个CLI帮助入口成功"
+  ],
+  "not_checked": [
+    "全新环境安装",
+    "完整推理/训练/GPU稳定性",
+    "浏览器UI",
+    "生产API/整卷评分"
+  ],
+  "shared_pip_check": {
+    "exit_code": 1,
+    "issues": [
+      "basic-pitch missing tensorflow",
+      "basic-pitch requires resampy<0.4.3, installed 0.4.3",
+      "pdfplumber missing pdfminer-six"
+    ],
+    "project_requirements_include_these": false
+  }
+}

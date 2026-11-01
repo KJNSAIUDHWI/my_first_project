@@ -1,0 +1,172 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>试卷识别验收</title>
+<link rel="stylesheet" href="/asset/vendor/katex/katex.min.css"><script defer src="/asset/vendor/katex/katex.min.js"></script>
+<style>
+:root{font-family:"Microsoft YaHei",system-ui,sans-serif;color:#233641;background:#eef3f6;font-size:15px}*{box-sizing:border-box}body{margin:0}button,select,textarea{font:inherit}button,select{border:1px solid #ccd9df;background:white;border-radius:8px;padding:8px 12px;color:inherit;cursor:pointer}button:hover{border-color:#168584}button:disabled{opacity:.4;cursor:default}.primary,.active{background:#147d7b!important;color:white}.wrap{max-width:1520px;margin:auto;padding:24px}h1{font-size:28px;margin:5px 0 8px}h2{font-size:20px;margin:0}.muted{color:#607782;font-size:13px;line-height:1.7}.bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.between{justify-content:space-between}.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:22px 0}.stat,.card{background:white;border:1px solid #dbe4e8;border-radius:12px;padding:16px}.stat b{display:block;font-size:25px;color:#147d7b;margin-bottom:5px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:16px;margin-top:18px}.page-card{padding:12px;cursor:pointer}.page-card:hover{box-shadow:0 5px 20px #1232}.thumb{height:230px;background:#f2f5f7;display:flex;justify-content:center;overflow:hidden;border-radius:7px}.thumb img{height:100%;object-fit:contain}.name{font-weight:600;margin:12px 0 5px}.tag{display:inline-block;border-radius:5px;padding:3px 7px;font-size:12px;background:#e9f1f4;margin:3px 3px 3px 0}.warning{background:#fff0d5;color:#945800}.good{background:#e4f6ee;color:#1b7051}.bad{background:#fce6e6;color:#b23a38}.notice{background:#fff6e4;border-left:4px solid #d49a26;padding:12px 15px;border-radius:7px;line-height:1.7}.workspace{display:grid;grid-template-columns:minmax(380px,44%) 1fr;gap:18px;margin-top:18px}.map-panel{position:sticky;top:14px;align-self:start}.map{height:69vh;overflow:auto;background:#edf1f4;border-radius:8px;cursor:crosshair}.map svg{width:100%;height:100%}.hit{cursor:pointer}.item-list{display:grid;gap:14px}.item.selected{border:2px solid #147d7b}.item-head{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:12px}.comparison{display:grid;grid-template-columns:55% 1fr;gap:12px}.crop{width:100%;border:1px solid #e1e7ea;max-height:430px;object-fit:contain;background:#fafafa;cursor:zoom-in}.answer{background:#f1f7f7;border-radius:7px;padding:9px 12px;margin:6px 0;overflow-wrap:anywhere}.answer small{display:block;color:#647b83;margin-bottom:4px}.text{white-space:pre-wrap;line-height:1.7}.blank{color:#7e8c93}.unclear{color:#ae6d0a}.feedback{border-top:1px solid #e1e8ed;margin-top:12px;padding-top:12px}.feedback textarea{display:block;width:100%;min-height:64px;border:1px solid #ccd9df;border-radius:6px;padding:9px;margin:8px 0;resize:vertical}details{margin-top:10px}summary{cursor:pointer;color:#437778}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7f8;padding:10px;font-size:13px}.saved{color:#147d7b;font-size:12px}dialog{width:min(95vw,1400px);max-height:94vh;border:0;border-radius:12px;padding:18px}dialog::backdrop{background:#15252ebb}dialog img{max-width:100%;display:block;margin:12px auto}.empty{padding:35px;text-align:center;color:#71848c}#detail{display:none}.navsticky{position:sticky;top:0;z-index:4;background:#eef3f6ed;padding:12px 0;backdrop-filter:blur(8px)}.legend{display:flex;gap:15px;font-size:12px;margin:8px 0}.legend span:before{content:'●';margin-right:5px}.error{color:#a93636}#toast{position:fixed;bottom:20px;right:25px;background:#183e49;color:white;padding:13px 20px;border-radius:9px;z-index:20;display:none}.page-feedback{margin-bottom:14px}.bottom{margin:24px 0;color:#71848c;font-size:12px}@media(max-width:950px){.workspace{grid-template-columns:1fr}.map-panel{position:static}.map{height:50vh}.stats{grid-template-columns:repeat(3,1fr)}.comparison{grid-template-columns:1fr}}
+
+/* Each pane owns its scroll; the paper controls stay reachable at every item. */
+html.review-mode{overflow:hidden;height:100%}body.review-mode{position:fixed;inset:0;overflow:hidden;width:100%;height:100dvh}.review-mode .wrap{max-width:none;padding:12px 18px;height:100dvh;overflow:hidden}
+.review-mode #detail{height:calc(100dvh - 24px);display:flex!important;flex-direction:column;min-height:0}
+.review-mode .navsticky{position:static;flex:none;padding:4px 0 10px}.review-mode .workspace{flex:1;min-height:0;grid-template-columns:minmax(380px,49%) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:14px;margin-top:10px;overflow:hidden}
+#pageNotice{flex:none;max-height:64px;overflow:auto}.map-panel{position:static;display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;padding:12px;gap:8px}
+.map-panel .legend{margin:0}.map{flex:1;height:auto;min-height:120px;overflow:hidden;touch-action:none;cursor:grab;user-select:none;outline-offset:2px}
+.map.dragging{cursor:grabbing}.map svg{display:block;width:100%;height:100%}.map-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:none}.map-tools button{padding:6px 9px}.map-tools .zoom-readout{min-width:46px;text-align:center;font-variant-numeric:tabular-nums}
+.map-toggle{font-size:12px;display:flex;gap:4px;align-items:center}.map-help{font-size:12px;color:#607782}.map-footer{flex:none;max-height:25vh;overflow:auto}.map-footer details{margin:0}.map-footer .feedback{margin-top:6px;padding-top:6px}.map-footer textarea{min-height:48px}
+.answer-panel{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}.answer-toolbar{flex:none;margin-bottom:10px}#items{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:0 8px 30px 1px;align-content:start;display:block}
+.item{padding:12px;margin-bottom:10px}.item-list{gap:10px}.item-head{margin-bottom:6px}.item-head .muted{font-size:11px}.comparison{gap:10px}.item.fill .comparison{display:block}.item.fill .crop{max-height:245px;width:100%;height:auto;object-fit:contain}.item.fill .recognition-result{margin-top:8px}.item.fill .recognition-result>.muted{display:none}
+.answer-row{display:flex;gap:8px;align-items:baseline;padding:6px 8px;background:#f1f7f7;border-radius:6px;margin:4px 0;min-width:0}.sub-label{color:#577280;font-size:13px;flex:none;min-width:38px;font-weight:600}.blank-list{display:flex;gap:5px 14px;flex-wrap:wrap;min-width:0;flex:1}.blank-chip{display:inline-flex;gap:5px;align-items:baseline;min-width:36px;max-width:100%;line-height:1.55;overflow-wrap:anywhere}.blank-chip>small{color:#80939b;font-size:11px;flex:none}.blank-chip .text{display:inline;white-space:pre-wrap;min-width:0;line-height:1.55}.blank-chip .katex{font-size:1.05em}.answer{padding:7px 9px}.input-links{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:11px;color:#607782;margin:4px 0}.input-links button{padding:3px 7px;font-size:12px}.item details{margin-top:6px}.feedback-toggle{border-top:1px solid #e1e8ed;padding-top:6px}.feedback-toggle .feedback{border:0;margin-top:6px;padding-top:0}.feedback-toggle summary{font-size:12px}.feedback-toggle textarea{min-height:48px}.item .tag{font-size:11px;padding:2px 5px}.map-answer{pointer-events:none}
+@media(max-width:950px){.review-mode .wrap{padding:8px}.review-mode #detail{height:calc(100dvh - 16px)}.review-mode .workspace{grid-template-columns:minmax(250px,45%) minmax(0,1fr)}.map-panel{padding:8px}.comparison{grid-template-columns:1fr}.map-tools{gap:4px}.map-tools button{padding:5px 7px}.navsticky #pageTitle{font-size:12px}}
+@media(max-width:620px){.review-mode .workspace{display:flex;flex-direction:column}.map-panel{height:43%;flex:none;min-height:170px}.answer-panel{flex:1}.map-footer{display:none}.map-help,.legend{display:none}.navsticky .bar{gap:4px}.navsticky button{padding:5px 7px}#pagePosition{display:none}}
+#fatal:not(:empty){position:fixed;z-index:30;bottom:14px;left:18px;width:min(680px,calc(100vw - 36px));max-height:38vh;overflow:auto;background:#fff0ed;border:2px solid #b34232;border-radius:10px;padding:12px;box-shadow:0 4px 20px #0003;font-size:13px}#fatal ol{padding-left:22px;margin:8px 0}#fatal pre{font-size:12px;margin:4px 0}.diagnostic{font-size:13px;line-height:1.7;margin-top:8px}.math-error{display:block;color:#a93636;background:#fff0ed;padding:5px;border-radius:4px}
+</style></head><body><main class="wrap">
+<section id="overview"><div class="bar between"><div><div class="muted">自动改卷 · 人工验收</div><h1>看原卷，核对每一道答案</h1><div class="muted">支持选择题、填空及实验题。点击试卷开始核对。</div></div><button id="refresh">刷新运行结果</button></div><div id="stats" class="stats"></div><div id="notice" class="notice"></div><div id="benchmark"></div><div class="bar between" style="margin-top:20px"><h2 id="batchTitle">本批试卷</h2><select id="pageFilter"><option value="all">全部页面</option><option value="issues">待核对</option><option value="unchecked">尚未检查完整</option></select></div><div id="pages" class="grid"></div><div id="metrics" class="bottom"></div></section>
+<section id="detail"><div class="bar between navsticky"><div class="bar"><button id="back" title="Esc逐级返回：图片→整卷→总览">← 返回总览</button><button id="prevPage">上一页</button><button id="nextPage">下一页</button><strong id="pageTitle"></strong></div><span id="pagePosition" class="muted"></span></div><div id="pageNotice"></div><div class="workspace"><aside class="card map-panel"><div class="bar between"><h2>整页原卷</h2><button id="openRaw">高清原图</button></div><div class="map-tools"><button id="fullPage" title="恢复整张试卷">整卷复位</button><button id="zoomOut" aria-label="缩小试卷">−</button><span id="zoomReadout" class="zoom-readout">100%</span><button id="zoomIn" aria-label="放大试卷">＋</button><button id="zoomItem">本题</button><label class="map-toggle"><input id="showAnswers" type="checkbox" checked>卷面显示选择答案</label></div><div class="legend"><span style="color:#147d7b">选择</span><span style="color:#5b65b5">填空</span><span style="color:#a76b12">姓名 / 未配对</span></div><div id="map" class="map" tabindex="0" aria-label="原卷查看器：滚轮缩放，拖动平移，按F恢复整卷"></div><div class="map-help">滚轮缩放 · 拖动平移 · 双击放大 · 点框看题 · F整卷复位 · Esc逐级返回</div><div class="map-footer"><details><summary>整页反馈 / 补记漏题</summary><div id="pageFeedback" class="feedback page-feedback"></div></details></div></aside><section class="answer-panel"><div class="bar between answer-toolbar"><div class="bar"><button id="prevItem">上一题</button><button id="nextItem">下一题</button><span id="itemPosition" class="muted"></span></div><select id="itemFilter"><option value="all">全部题目</option><option value="fill">只看填空</option><option value="choice">只看选择题</option><option value="issues">仅待核对</option><option value="unchecked">仅未检查</option></select></div><div id="items" class="item-list"></div></section></div></section><div id="fatal" class="error"></div></main>
+<dialog id="imageDialog"><div class="bar between"><strong id="imageTitle"></strong><button id="closeImage">关闭</button></div><div id="imageMeta" class="muted"></div><img id="bigImage" alt="验收原图"></dialog><div id="toast" role="status"></div>
+<script>
+'use strict';
+const TOKEN='__TOKEN__', $=id=>document.getElementById(id), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const asset=p=>'/asset/'+p.split('/').map(encodeURIComponent).join('/');
+const labels=['正确','识别错误','漏题／漏空','对应错误','看不清'];
+let DATA,FEEDBACK,pi=0,selected=null,focused=false,dirty=new Set(),view=null,drag=null,overviewScroll=0;
+const pending=id=>!FEEDBACK.items[id]?.label;
+const ownIssues=p=>p.issues.length+p.items.filter(i=>i.issues.length).length;
+const pageUnchecked=p=>pending(p.id)||p.items.some(i=>pending(i.id));
+const humanErrors=p=>[p.id,...p.items.map(i=>i.id)].filter(id=>FEEDBACK.items[id]?.label&&FEEDBACK.items[id].label!=='正确').length;
+function issueText(value){return String(value).replace('M1未检测到区域，不能视为空白卷','未找到可识别的答题区').replace('题号或涂黑置信不足，需核对（空白不自动判错）','题号或涂黑结果待核对')}
+const uiErrors=new Map();
+function reportError(stage,error,location=''){
+ const p=DATA?.pages?.[pi],where=location||(document.body.classList.contains('review-mode')?`${p?.name||''} / ${selected||p?.id||''}`:'整批总览');
+ const message=error?.message||String(error),key=stage+'|'+where+'|'+message;
+ uiErrors.set(key,{stage,where,message});
+ $('fatal').innerHTML=`<div class="bar between"><strong>操作异常 · 请查看原因</strong><button id="dismissErrors">关闭提示</button></div><ol>${[...uiErrors.values()].slice(-20).map(e=>`<li><b>${esc(e.stage)}</b> · ${esc(e.where)}<pre>${esc(e.message)}</pre></li>`).join('')}</ol>`;
+ $('fatal').setAttribute('role','alert');$('dismissErrors').onclick=()=>{uiErrors.clear();$('fatal').innerHTML=''};
+}
+window.addEventListener('error',e=>{if(e.target!==window&&e.target?.tagName){reportError('资源加载失败',e.target.currentSrc||e.target.src||e.target.href||e.target.tagName);return}reportError('页面脚本错误',`${e.message||'未知错误'}${e.filename?' · '+e.filename+':'+e.lineno:''}`)},true);
+window.addEventListener('unhandledrejection',e=>{e.preventDefault();reportError('异步操作失败',e.reason||'未知错误')});
+function choiceDiagnostic(item){
+ const r=item.recognition;
+ if(!r)return `<div class="notice diagnostic">缺少识别详情，请对照原卷。位置 ${esc(item.id)}</div>`;
+ const number=r.number_conf??r.digit_conf,choice=r.choice_conf,pct=v=>typeof v==='number'&&Number.isFinite(v)?(v*100).toFixed(1)+'%':'未记录';
+ const reasons=[];
+ if(!item.answer)reasons.push('涂黑识别：未检出选中项。');
+ if(!(r.no>0))reasons.push('题号识别：没有可靠题号。');
+ else if(typeof number==='number'&&number<.3)reasons.push('题号识别：分数不足，需核对题号。');
+ if(item.answer&&r.valid===false)reasons.push('结果校验：未通过，需结合题号、涂黑及配对提示核对。');
+ return `<details class="diagnostic"><summary>识别详情</summary><div>${reasons.map(esc).join('<br>')}</div><div>题号分数 ${pct(number)} · ${item.answer?'所选项最低涂黑分数':'最高涂黑分数'} ${pct(choice)}</div><div class="muted">环节：本地题号 / 涂黑识别，不经过豆包。位置 ${esc(item.id)}；配对代价 ${esc(r.pair_cost??'未记录')}。</div></details>`;
+}
+function toast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',3500)}
+async function load(){if(dirty.size&&!confirm('还有未保存的反馈，刷新会保留在草稿中，是否继续？'))return;const r=await fetch('/api/state',{cache:'no-store'});const x=await r.json();if(!r.ok)throw Error(x.error);DATA=x.result;FEEDBACK=x.feedback;renderOverview();if($('detail').style.display==='block')showPage(pi);}
+function renderOverview(){const pages=DATA.pages,s=DATA.stats||{},all=pages.flatMap(p=>p.items),checked=all.filter(i=>!pending(i.id)).length;const values=[['页面',pages.length],['选择题',all.filter(i=>i.kind==='choice').length],['填空大题',all.filter(i=>i.kind==='fill').length],['已人工检查',checked+'/'+all.length],['待核对项',all.filter(i=>i.issues.length).length],['豆包拼图',(s.api_success??0)+'/'+(s.grids??DATA.grids.length)]];$('stats').innerHTML=values.map(([k,v])=>`<div class="stat"><b>${esc(v)}</b><span class="muted">${k}</span></div>`).join('');$('notice').textContent='本批状态：'+DATA.status+(DATA.local_correction?' · 已补配选择题；耗时表保留原始测速记录。':'');renderPages();$('metrics').textContent=`实际输入token ${s.prompt_tokens??'—'} · 输出token ${s.completion_tokens??'—'} · 并发 ${s.concurrency??'—'} · 本地检测 ${s.detection_sum_seconds??'—'}秒 · 本轮墙钟 ${s.wall_seconds??'—'}秒 · API请求尝试 ${s.attempts??'—'} 次。已复用调用 ${s.reused??0}。`;$('batchTitle').textContent=`${pages.length}${DATA.benchmark&&!DATA.benchmark.complete?' / '+DATA.benchmark.total_pages:''}页试卷`;renderBenchmark();renderStageProfile();}
+function renderBenchmark(){const b=DATA.benchmark;if(!b){$('benchmark').innerHTML='';return}const seconds=b.wall_seconds??b.elapsed_seconds??0;const duration=seconds>=60?`${Math.floor(seconds/60)}分${Math.round(seconds%60)}秒`:`${seconds.toFixed(1)}秒`;const values=[[b.timing_mode==='interrupted_resume'?(b.complete?'分段处理合计':'本次补跑耗时'):'本轮耗时',duration],['本地处理进度',`${b.processed_pages} / ${b.total_pages}`],['API累计token',((b.input_tokens||0)+(b.output_tokens||0)).toLocaleString()],['估算费用',`¥${Number(b.estimated_cost_cny||0).toFixed(4)}`]];$('benchmark').innerHTML=`<div class="stats" style="grid-template-columns:repeat(4,1fr);margin:14px 0">${values.map(([k,v])=>`<div class="stat"><b>${esc(v)}</b><span class="muted">${esc(k)}</span></div>`).join('')}</div><div class="muted">${b.blocked?esc(b.status):b.complete?'本轮测试完成':'正在运行，点击刷新查看最新进度'} · high拼图 / CPU FP32 / 4并发 · 费用按实际usage及<a href="https://console.volcengine.com/ark/region%3Acn-beijing/docs/model-pricing" target="_blank" rel="noopener noreferrer">公开单价</a>估算，非账户扣费。${b.timing_mode==='interrupted_resume'?` 本地处理${b.local_wall_seconds.toFixed(1)}秒；本次补跑${b.resume_seconds.toFixed(1)}秒；不含调整额度等待，不是一次连续计时。`:''}${b.complete?` ${b.timing_mode==='interrupted_resume'?'分段合计均摊':'平均'}${b.seconds_per_page.toFixed(2)}秒/页，约¥${b.cost_per_1000_pages_cny.toFixed(2)}/千页。`:''}</div>`}
+function renderStageProfile(){
+ const b=DATA.benchmark;if(!b?.stage_profile)return;
+ const labels={model_initialization:'首次模型加载',orientation:'方向检查',m1:'M1分区',m2:'M2选择题检测',m3:'M3大题检测',paddle_number:'Paddle题号',choice_reader:'涂黑识别',image_encoding_write:'图片编码与保存（含拼图）',local_page_total:'本地单页处理合计',packing:'拼图（含编码保存）',json_validation:'JSON解析与校验',result_merge:'结果合并'};
+ $('benchmark').innerHTML+=`<details open class="card" style="margin-top:12px"><summary>本轮各环节实测耗时</summary><div class="muted">已转正工作图只检查方向，不二次旋转或倾斜校正。本地与API重叠；子项包含在合计中，不可直接相加。</div><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th align="left">环节</th><th align="right">累计秒</th><th align="right">调用次数</th></tr></thead><tbody>${Object.entries(b.stage_profile).map(([k,v])=>`<tr><td style="padding:5px">${esc(labels[k]||k)}</td><td align="right">${v.seconds.toFixed(3)}</td><td align="right">${v.calls}</td></tr>`).join('')}<tr><td>豆包请求阶段跨度（4并发）</td><td align="right">${b.api_phase_span_seconds.toFixed(3)}</td><td align="right">${b.api_requests}</td></tr><tr><td>导入准备</td><td align="right">${b.imports_seconds.toFixed(3)}</td><td align="right">1</td></tr></tbody></table></details>`;
+}
+function renderPages(){let f=$('pageFilter').value;$('pages').innerHTML=DATA.pages.map((p,i)=>({p,i})).filter(({p})=>f==='all'||(f==='issues'?(ownIssues(p)>0||humanErrors(p)>0):pageUnchecked(p))).map(({p,i})=>`<article class="card page-card" data-page="${i}" tabindex="0" role="button" aria-label="打开 ${esc(p.name)}"><div class="thumb">${p.thumbnail?`<img loading="lazy" src="${asset(p.thumbnail)}" alt="${esc(p.name)}">`:'本页处理失败'}</div><div class="name">${esc(p.name)}</div><div class="muted">${esc(p.status)}</div><span class="tag">${p.items.length}项</span><span class="tag ${ownIssues(p)?'warning':'good'}">${ownIssues(p)}项待核对</span><span class="tag ${pageUnchecked(p)?'':'good'}">${pageUnchecked(p)?'待人工检查':'人工已检查'}</span>${humanErrors(p)?`<span class="tag bad">人工标记${humanErrors(p)}项问题</span>`:''}</article>`).join('')||'<div class="empty">没有符合筛选的页面</div>';document.querySelectorAll('[data-page]').forEach(e=>{e.onclick=()=>showPage(+e.dataset.page);e.onkeydown=v=>{if(v.key==='Enter')showPage(+e.dataset.page)}})}
+function visibleItems(){const f=$('itemFilter').value;return DATA.pages[pi].items.filter(i=>f==='all'||(f==='fill'||f==='choice'?i.kind===f:f==='issues'?(i.issues.length||FEEDBACK.items[i.id]?.label&&FEEDBACK.items[i.id].label!=='正确'):pending(i.id)))}
+function showPage(index){
+ if(index<0||index>=DATA.pages.length)return;
+ if(!document.body.classList.contains('review-mode'))overviewScroll=window.scrollY||0;
+ stopDrag();window.scrollTo(0,0);document.documentElement.classList.add('review-mode');
+ pi=index;const p=DATA.pages[pi];document.body.classList.add('review-mode');
+ $('overview').style.display='none';$('detail').style.display='block';$('pageTitle').textContent=p.name;
+ $('pagePosition').textContent=`第 ${pi+1} / ${DATA.pages.length} 页`;
+ $('pageNotice').innerHTML=p.issues.length?`<div class="notice">${p.issues.map(v=>esc(issueText(v))).join('<br>')}</div>`:'';
+ $('prevPage').disabled=pi===0;$('nextPage').disabled=pi===DATA.pages.length-1;
+ $('pageFeedback').innerHTML=feedbackForm(p.id);bindFeedback($('pageFeedback'));
+ selected=visibleItems()[0]?.id||null;focused=false;view=null;
+ drawItems();drawMap();$('items').scrollTop=0;
+}
+function feedbackForm(id){const saved=FEEDBACK.items[id]||{};let draft;try{draft=JSON.parse(localStorage.getItem('draft:'+FEEDBACK.run+':'+id)||'null')}catch(e){reportError('读取反馈草稿失败',e,id)}const v=draft||saved;return `<div data-feedback="${id}"><div class="bar"><select aria-label="人工核对结论" class="label"><option value="">尚未检查</option>${labels.map(l=>`<option value="${esc(l)}" ${v.label===l?'selected':''}>${l}</option>`).join('')}</select><button class="save primary">保存反馈</button><span class="saved">${draft?'有未保存草稿':saved.updated?'已保存 '+esc(saved.updated):'未保存'}</span></div><textarea aria-label="正确转录或漏题说明" placeholder="正确转录、漏题位置或问题说明；只保存本次反馈，不改训练数据">${esc(v.correction||'')}</textarea></div>`}
+function bindFeedback(root){root.querySelectorAll('[data-feedback]').forEach(form=>{const id=form.dataset.feedback,key='draft:'+FEEDBACK.run+':'+id;const remember=()=>{dirty.add(id);localStorage.setItem(key,JSON.stringify({label:form.querySelector('select').value,correction:form.querySelector('textarea').value}));form.querySelector('.saved').textContent='有未保存草稿'};form.querySelector('select').onchange=remember;form.querySelector('textarea').oninput=remember;form.querySelector('.save').onclick=async()=>{const button=form.querySelector('.save');button.disabled=true;try{const r=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':TOKEN},body:JSON.stringify({id,label:form.querySelector('select').value,correction:form.querySelector('textarea').value,revision:FEEDBACK.revision})});const v=await r.json();if(!r.ok)throw Error(v.error);FEEDBACK=v;localStorage.removeItem(key);dirty.delete(id);form.querySelector('.saved').textContent='已保存 '+FEEDBACK.items[id].updated;const summary=form.closest('.feedback-toggle')?.querySelector('summary');if(summary)summary.textContent='人工反馈 · '+(FEEDBACK.items[id].label||'尚未检查');renderOverview();toast('反馈已保存')}catch(e){form.querySelector('.saved').textContent='保存失败，草稿保留';reportError('保存人工反馈失败',e,id)}finally{button.disabled=false}}})}
+function answerHTML(item){
+ const t=item.transcription;
+ if(item.kind==='choice')return `<div class="answer"><small>题号${esc(item.number||'未确定')} · 识别选项</small><strong>${item.answer?esc(item.answer):'<span class="unclear">未检出选中项 · 待核对</span>'}</strong></div>${!item.answer||item.recognition?.valid===false||item.issues.length?choiceDiagnostic(item):''}`;
+ if(!t)return `<div class="notice">${esc(item.status)}：暂无转录。</div>`;
+ if(item.kind==='identity')return ['name','sid'].map((k,i)=>`<div class="answer"><small>${i?'学号':'姓名'}</small><div class="text">${esc(t[k]||'（空白）')}</div></div>`).join('');
+ return Object.entries(t.answers).map(([sub,blanks])=>blanks['舍弃']==='舍弃'?`<div class="answer-row"><span class="sub-label">${sub==='无小题号'?'填空':`(${esc(sub)})`}</span><strong style="color:#9a6218">含图，整小题舍弃</strong></div>`:`<div class="answer-row"><span class="sub-label">${sub==='无小题号'?'填空':`(${esc(sub)})`}</span><div class="blank-list">${Object.entries(blanks).map(([n,v])=>`<span class="blank-chip"><small title="空位原编号 ${esc(n)}">${/^[1-9]\d*$/.test(n)&&+n<=20?String.fromCodePoint(9311+(+n)):esc(n)}</small>${v===''?'<span class="blank">空白</span>':v==='看不清'?'<strong class="unclear">看不清</strong>':`<span class="text mathtext" data-value="${esc(v)}"></span>`}</span>`).join('')}</div></div>`).join('');
+}
+function drawItems(){
+ const items=visibleItems();
+ $('items').innerHTML=items.map(i=>`<article class="card item ${i.kind} ${i.id===selected?'selected':''}" id="item-${i.id}">
+ <div class="item-head"><strong>${{fill:'填空',choice:'选择题',identity:'姓名学号',unmatched:'未配对'}[i.kind]} ${i.kind==='fill'||i.kind==='choice'?'· '+esc(i.number||'题号未确定'):''}</strong><button data-locate="${i.id}">原卷定位</button></div>
+ ${i.issues.map(v=>`<span class="tag warning">${esc(issueText(v))}</span>`).join('')}
+ <div class="comparison"><div><img class="crop" loading="lazy" src="${asset(i.crop)}" data-image="${esc(i.crop)}" alt="${i.id}原始裁图">
+ <div class="input-links">${i.grid?`<button data-grid="${i.id}">实际拼图 ${esc(i.grid_id)}</button><span>缩放${(i.scale*100).toFixed(0)}%</span>`:''}<span>${i.id}</span></div>
+ ${i.model_input?`<details><summary>涂黑模型输入</summary><img class="crop" src="${asset(i.model_input)}"></details>`:''}</div>
+ <div class="recognition-result"><div class="muted">识别结果</div>${answerHTML(i)}</div></div>
+ ${i.transcription?`<details><summary>原始转录文字</summary><pre>${esc(i.kind==='identity'?`${i.transcription.name}\n${i.transcription.sid}`:Object.entries(i.transcription.answers).map(([s,b])=>Object.entries(b).map(([n,v])=>`${s} / ${n}：${v}`).join('\n')).join('\n'))}</pre></details>`:''}
+ <details class="feedback-toggle" ${dirty.has(i.id)?'open':''}><summary>人工反馈 · ${esc(FEEDBACK.items[i.id]?.label||'尚未检查')}</summary><div class="feedback">${feedbackForm(i.id)}</div></details></article>`).join('')||`<div class="card empty">${DATA.pages[pi].items.length?'当前筛选下没有题目，可切换为“全部题目”。':DATA.pages[pi].error?'本页处理失败，请查看上方错误信息。':'本页未找到可识别的答题区。'}</div>`;
+ bindFeedback($('items'));
+ document.querySelectorAll('[data-locate]').forEach(b=>b.onclick=()=>selectItem(b.dataset.locate,true));
+ document.querySelectorAll('[data-image]').forEach(e=>e.onclick=()=>openImage(e.dataset.image,'原始裁图'));
+ document.querySelectorAll('[data-grid]').forEach(e=>e.onclick=()=>{const i=DATA.pages[pi].items.find(i=>i.id===e.dataset.grid);openImage(i.grid,'豆包实际输入 · '+i.grid_id,`本题 ID ${i.id}，图内位置 ${i.grid_box.join('，')}。多个页面同题号通过ID区分。`)});
+ renderMath();updatePosition();
+}
+function renderMath(){document.querySelectorAll('.mathtext').forEach(e=>{const v=e.dataset.value;e.textContent='';const parts=(!v.includes('$') && /\\(?:frac|sqrt|sum|int|mathrm|text|begin)\b/.test(v)) ? ['$'+v+'$'] : v.split(/(\$\$[\s\S]+?\$\$|\$[^$]+\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\])/g);for(const p of parts){if(!p)continue;let formula=null,display=false;if(p.startsWith('$$')){formula=p.slice(2,-2);display=true}else if(p.startsWith('$'))formula=p.slice(1,-1);else if(p.startsWith('\\(')||p.startsWith('\\[')){formula=p.slice(2,-2);display=p.startsWith('\\[')}const span=document.createElement('span');if(formula!==null){try{if(!window.katex)throw Error('公式显示组件未加载');katex.render(formula,span,{throwOnError:true,trust:false,displayMode:display})}catch(error){span.className='math-error';span.textContent='公式显示失败：'+error.message+'；原始转录：'+p;reportError('公式显示失败',error,DATA.pages[pi].name+' / '+e.closest('.item')?.id)}}else span.textContent=p;e.appendChild(span)}})}
+function mapSize(){const r=$('map').getBoundingClientRect();return {width:r.width||600,height:r.height||700,left:r.left||0,top:r.top||0}}
+function fitView(box){
+ const size=mapSize(),aspect=size.width/size.height;
+ const w=Math.max(box[2]-box[0],(box[3]-box[1])*aspect),h=w/aspect;
+ return {x:(box[0]+box[2]-w)/2,y:(box[1]+box[3]-h)/2,w,h};
+}
+function fullView(){const p=DATA.pages[pi];return fitView([0,0,p.width||1,p.height||1])}
+function zoomedView(old,factor,anchor){const base=fullView(),scale=Math.max(.25,Math.min(16,base.w/old.w*factor)),w=base.w/scale,h=w*old.h/old.w;return {x:old.x+old.w*anchor.x-w*anchor.x,y:old.y+old.h*anchor.y-h*anchor.y,w,h}}
+function applyView(){const svg=$('map').querySelector('svg');if(!svg||!view)return;svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);$('zoomReadout').textContent=Math.round(fullView().w/view.w*100)+'%'}
+function resetPaper(){focused=false;view=fullView();drawMap()}
+function focusPaper(){const i=DATA.pages[pi].items.find(i=>i.id===selected);if(!i)return;const b=i.box;view=fitView([b[0]-40,b[1]-45,b[2]+40,b[3]+45]);focused=true;drawMap()}
+function zoomPaper(factor,anchor={x:.5,y:.5}){view=zoomedView(view||fullView(),factor,anchor);focused=false;drawMap()}
+function drawMap(){
+ const p=DATA.pages[pi];if(!p.image){$('map').textContent='本页没有可用图像';return}
+ if(!view)view=fullView();const font=view.w/mapSize().width*12.5;
+ const colors={choice:'#147d7b',fill:'#5b65b5',identity:'#a76b12',unmatched:'#a76b12'};
+ $('map').innerHTML=`<svg preserveAspectRatio="none" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" xmlns="http://www.w3.org/2000/svg"><image href="${asset(p.image)}" width="${p.width}" height="${p.height}"/>${p.items.map(i=>{
+ const b=i.box,c=colors[i.kind],isChoice=i.kind==='choice';
+ const label=isChoice?`${i.number||'?'}：${i.answer||'空白/未读出'}${i.issues.length?' ?':''}`:String(i.number||(i.kind==='identity'?'姓名学号':'未配对'));
+ const show=!isChoice||$('showAnswers').checked;
+ const x=b[0],y=Math.max(font+3,b[1]-font*.18),width=Math.max(font*2,[...label].length*font*.72+font*.5);
+ return `<g class="hit" data-hit="${i.id}"><rect x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" fill="${i.id===selected?c+'18':'transparent'}" stroke="${c}" stroke-width="${i.id===selected?2.5:1}" vector-effect="non-scaling-stroke"/>${show?`<g class="map-answer" data-answer-for="${i.id}"><rect x="${x}" y="${y-font}" width="${width}" height="${font*1.22}" rx="${font*.13}" fill="white" fill-opacity=".94"/><text x="${x+font*.16}" y="${y}" font-size="${font}" font-weight="600" fill="${isChoice&&i.issues.length?'#99600d':c}">${esc(label)}</text></g>`:''}</g>`;
+ }).join('')}</svg>`;
+ applyView();
+}
+function selectItem(id,zoom=false){
+ selected=id;if(!visibleItems().some(i=>i.id===id)){$('itemFilter').value='all';drawItems()}
+ document.querySelectorAll('.item.selected').forEach(e=>e.classList.remove('selected'));const card=$('item-'+id);card?.classList.add('selected');
+ if(card){const list=$('items');list.scrollTop+=card.getBoundingClientRect().top-list.getBoundingClientRect().top-8}
+ if(zoom)focusPaper();else drawMap();updatePosition();
+}
+function updatePosition(){const items=visibleItems();$('itemPosition').textContent=`${Math.max(0,items.findIndex(i=>i.id===selected)+1)} / ${items.length} 项`;}
+function moveItem(delta){const items=visibleItems();if(!items.length)return;const old=items.findIndex(i=>i.id===selected);selectItem(items[Math.max(0,Math.min(items.length-1,old+delta))].id,focused)}
+function openImage(path,title,meta=''){if(!path){toast('本页没有可用图像');return}$('bigImage').src=asset(path);$('imageTitle').textContent=title;$('imageMeta').textContent=meta;$('imageDialog').showModal()}
+function stopDrag(){if(drag&&paper.hasPointerCapture?.(drag.pointerId))paper.releasePointerCapture(drag.pointerId);drag=null;paper.classList.remove('dragging')}
+function showOverview(){stopDrag();document.documentElement.classList.remove('review-mode');document.body.classList.remove('review-mode');$('detail').style.display='none';$('overview').style.display='block';renderOverview();window.scrollTo(0,overviewScroll)}
+function goBack(){
+ if($('imageDialog').open){$('imageDialog').close();return}
+ if(!document.body.classList.contains('review-mode'))return;
+ stopDrag();const full=fullView();
+ if(view&&['x','y','w','h'].some(k=>Math.abs(view[k]-full[k])>.01)){resetPaper();return}
+ showOverview();
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.isComposing){e.preventDefault();goBack()}},true);
+$('closeImage').onclick=()=>$('imageDialog').close();
+$('pageFilter').onchange=renderPages;$('itemFilter').onchange=()=>{drawItems();drawMap()};
+$('refresh').onclick=()=>load().catch(e=>reportError('刷新识别结果失败',e));
+$('back').onclick=showOverview;
+$('prevPage').onclick=()=>showPage(pi-1);$('nextPage').onclick=()=>showPage(pi+1);
+$('prevItem').onclick=()=>moveItem(-1);$('nextItem').onclick=()=>moveItem(1);
+$('fullPage').onclick=resetPaper;$('zoomItem').onclick=focusPaper;
+$('zoomIn').onclick=()=>zoomPaper(1.3);$('zoomOut').onclick=()=>zoomPaper(1/1.3);
+$('showAnswers').onchange=drawMap;
+$('openRaw').onclick=()=>openImage(DATA.pages[pi].image,DATA.pages[pi].name);
+const paper=$('map');
+paper.addEventListener('wheel',e=>{e.preventDefault();const r=mapSize();zoomPaper(Math.exp(-Math.max(-180,Math.min(180,e.deltaY))*.003),{x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height})},{passive:false});
+paper.onpointerdown=e=>{if(e.button!==0)return;e.preventDefault();paper.focus({preventScroll:true});drag={pointerId:e.pointerId,x:e.clientX,y:e.clientY,original:{...view},moved:false,hit:e.target.closest('[data-hit]')?.dataset.hit};paper.setPointerCapture?.(e.pointerId);paper.classList.add('dragging')};
+paper.onpointermove=e=>{if(!drag||drag.pointerId!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>4)drag.moved=true;const size=mapSize();view={...drag.original,x:drag.original.x-dx/size.width*drag.original.w,y:drag.original.y-dy/size.height*drag.original.h};focused=false;applyView()};
+paper.onpointerup=e=>{if(!drag||drag.pointerId!==e.pointerId)return;const old=drag;drag=null;paper.classList.remove('dragging');if(paper.hasPointerCapture?.(e.pointerId))paper.releasePointerCapture(e.pointerId);if(!old.moved&&old.hit)selectItem(old.hit,false)};
+paper.onpointercancel=stopDrag;paper.onlostpointercapture=()=>{drag=null;paper.classList.remove('dragging')};
+paper.ondblclick=e=>{const r=mapSize();zoomPaper(2,{x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height})};
+paper.onkeydown=e=>{if(['+','=','-','f','F','0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))e.preventDefault();if(e.key==='+'||e.key==='=')zoomPaper(1.3);else if(e.key==='-')zoomPaper(1/1.3);else if(['f','F','0'].includes(e.key))resetPaper();else if(e.key.startsWith('Arrow')){const delta={ArrowLeft:[-.12,0],ArrowRight:[.12,0],ArrowUp:[0,-.12],ArrowDown:[0,.12]}[e.key];view.x+=view.w*delta[0];view.y+=view.h*delta[1];focused=false;applyView()}};
+window.addEventListener('resize',()=>{if(!DATA||!document.body.classList.contains('review-mode'))return;if(focused)focusPaper();else resetPaper()});
+window.addEventListener('beforeunload',e=>{if(dirty.size){e.preventDefault();e.returnValue=''}});
+load().catch(e=>reportError('加载识别结果失败',e));
+</script></body></html>

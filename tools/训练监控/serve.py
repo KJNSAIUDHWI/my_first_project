@@ -3,6 +3,8 @@
 
 自动找训练目录下最新的 results.csv（默认 自动改卷/train/），供网页实时显示：
 进度、loss、val 指标、GPU 利用率/显存/功耗/温度、python 进程数。
+错误面板同时读取训练输出、监督器异常、收尾检查和数值保护记录。
+这是只读观察器：不终止训练、不改参数、不执行日志里出现的命令。
 
 关键：读 csv 用 Python 的 open()（共享读、不阻止写入），绝不干扰训练。
 
@@ -43,17 +45,25 @@ def _mtime(path):
         return 0.0
 
 
+def resolve_run(chosen):
+    candidate = Path(chosen)
+    # CLI accepts a short run name as well as the existing train/<run> path.
+    if not candidate.is_absolute() and len(candidate.parts) == 1:
+        candidate = Path(SCAN_DIR) / candidate
+    candidate = candidate.resolve()
+    if not candidate.is_relative_to(Path(SCAN_DIR).resolve()):
+        raise ValueError('监控运行必须位于扫描目录内')
+    return candidate
+
+
 def find_latest_run():
     """优先跟随 active.json / --run 指定的训练；指针失效时回退到最新一份"""
     active = read_json(Path(SCAN_DIR) / 'active.json', {})
     chosen = PINNED_RUN or (active.get('run') if isinstance(active, dict) else None)
     if chosen:
-        candidate = Path(chosen).resolve()
-        if not candidate.is_relative_to(Path(SCAN_DIR).resolve()):
-            raise ValueError('监控运行必须位于扫描目录内')
+        candidate = resolve_run(chosen)
         # run 目录被删、还没产出指标、或 results.csv 读不了时，不要让整个页面挂掉
-        if (candidate / 'results.csv').exists():
-            return str(candidate / 'results.csv')
+        return str(candidate / 'results.csv')
     cands = glob.glob(os.path.join(SCAN_DIR, "**", "results.csv"), recursive=True)
     if not cands:
         return None
@@ -127,6 +137,9 @@ def cached_probe():
 
 def read_epochs(csv_path):
     """从训练目录的 args.yaml 读总轮数（供进度条/ETA 用）"""
+    args = read_json(Path(csv_path).parent / 'training_args.json', {})
+    if args.get('epochs'):
+        return int(args['epochs'])
     y = os.path.join(os.path.dirname(csv_path), "args.yaml")
     try:
         with open(y, encoding="utf-8") as fh:
@@ -171,7 +184,7 @@ def scan_health(run_dir, rows):
         try:
             with open(log, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
-                    s = line.strip()
+                    s = ANSI_RE.sub('', line).strip()
                     m = re.match(r"(\d+)/(\d+)\s", s)
                     if m:
                         cur_ep = int(m.group(1))
@@ -215,7 +228,25 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # tqdm 进度行：`      12/120      2.7G     0.98 ... 1024: 77% ━━━ 201/260 8.3it/s 24.4s<7.1s`
 # 抓 epoch、batch 进度、已用秒数、本轮到结束的剩余秒数
 PROG_RE = re.compile(
-    r"(\d+)/(\d+)\s+[\d.]+G.*?(\d+)/(\d+)\s+[\d.]+it/s\s+([\d.]+)s<([\d.]+)s")
+    r"(\d+)/(\d+)\s+[\d.]+G.*?(\d+)/(\d+)\s+[\d.]+(?:it/s|s/it)\s+"
+    r"([\d:.]+(?:ms|[smh])?)<([\d:.]+(?:ms|[smh])?)")
+
+
+def duration_seconds(value):
+    """兼容 tqdm 的 24.4s、1:13 和 1:02:03，统一给前端返回秒。
+
+    不能直接 float(value)：长一轮的训练通常输出分秒，曾导致监控
+    跳过最新进度、误显示上一轮。先检查 ':'，再按单位解析。
+    """
+    if ':' in value:
+        seconds = 0.0
+        for part in value.split(':'):
+            seconds = seconds * 60 + float(part)
+        return seconds
+    for suffix, factor in [('ms', .001), ('s', 1), ('m', 60), ('h', 3600)]:
+        if value.endswith(suffix):
+            return float(value[:-len(suffix)]) * factor
+    return float(value)
 
 
 def scan_live(run_dir):
@@ -229,25 +260,96 @@ def scan_live(run_dir):
     except OSError:
         return {}
     data = ANSI_RE.sub("", data)
+    cnn_epochs = re.findall(r'ep\s+\d+\s+loss\s+.*?\s+(\d+)s\s*$', data, re.M)
+    if cnn_epochs:
+        return {'seconds_per_epoch': sum(map(int, cnn_epochs[-5:])) / len(cnn_epochs[-5:])}
     for line in reversed(re.split(r"[\r\n]+", data)):
         m = PROG_RE.search(line)
         if m:
             ep, eps, step, steps, elapsed, remain = m.groups()
             return {"epoch": int(ep), "epochs": int(eps),
                     "step": int(step), "steps": int(steps),
-                    "elapsed": float(elapsed), "remain": float(remain),
+                    "elapsed": duration_seconds(elapsed), "remain": duration_seconds(remain),
                     "pct": round(100.0 * int(step) / max(1, int(steps)), 1)}
     return {}
 
 
+def scan_errors(run_dir):
+    """只读提取当前 run 的日志错误与警告，保留来源、行号和 traceback。
+
+    读取完整文本而不是只搜日志尾部，避免早期错误被后续进度条挤掉。
+    只回传最后40条，累计次数仍覆盖完整日志；不把普通loss或AMP跳步
+    文本判成致命错误。结构化数值故障/AMP事件由 scan_health 单独提供。
+    日志中的文字只作为证据显示，绝不作为命令或自动修复指令执行。
+    """
+    items = []
+    error_re = re.compile(r'^(?:[\w.]*Error|[\w.]*Exception|KeyboardInterrupt|SystemExit)\b|'
+                          r'\b(?:CUDA error|CUDA out of memory|CUDNN_STATUS_\w+|'
+                          r'Device-side assert|NCCL error|Segmentation fault)\b', re.I)
+    warning_re = re.compile(r'\b(?:\w*Warning:|WARNING\b)', re.I)
+    for name in ('train.log', 'train.err.log'):
+        path = Path(run_dir) / name
+        try:
+            lines = ANSI_RE.sub('', path.read_text(encoding='utf-8', errors='replace')).splitlines()
+        except OSError:
+            continue
+        trace_start = None
+        for index, line in enumerate(lines):
+            s = line.strip()
+            if s.startswith('Traceback (most recent call last):'):
+                trace_start = index
+            if error_re.search(s):
+                # 最多带60行上下文，足以定位大多数调用栈，同时限制接口体积。
+                start = max(trace_start if trace_start is not None else index, index - 59)
+                items.append({'level': 'error', 'source': name, 'line': index + 1,
+                              'message': s[:1000], 'detail': '\n'.join(lines[start:index + 1])[-12000:]})
+                trace_start = None
+            elif warning_re.search(s):
+                items.append({'level': 'warning', 'source': name, 'line': index + 1,
+                              'message': s[:1000], 'detail': s[:4000]})
+        # 训练在输出调用栈中途退出时仍展示已有证据，不冒称完整异常已捕获。
+        if trace_start is not None:
+            items.append({'level': 'error', 'source': name, 'line': trace_start + 1,
+                          'message': '检测到未完整输出的异常调用栈',
+                          'detail': '\n'.join(lines[trace_start:trace_start + 60])[-12000:]})
+    for name, field in [('supervisor_error.json', 'traceback'), ('completion_check.json', 'error')]:
+        record = read_json(Path(run_dir) / name, {})
+        if record.get(field):
+            items.append({'level': 'error', 'source': name, 'line': None,
+                          'message': str(record[field]).splitlines()[-1][:1000],
+                          'detail': str(record[field])[-12000:]})
+    # 数值保护记录比纯文本匹配更权威，保留阶段、步数和样本路径供复查。
+    # AMP的skip_update不在这里计为error，继续由health返回恢复次数。
+    for index, record in enumerate(read_events(Path(run_dir) / 'numerical_failure.jsonl')):
+        items.append({'level': 'error', 'source': 'numerical_failure.jsonl', 'line': index + 1,
+                      'message': '数值保护：第%s轮 · %s · %s' %
+                                 (record.get('epoch', '?'), record.get('where', ''), record.get('details', '')),
+                      'detail': json.dumps(record, ensure_ascii=False, indent=2)[-12000:]})
+    return {'errors': sum(i['level'] == 'error' for i in items),
+            'warnings': sum(i['level'] == 'warning' for i in items), 'items': items[-40:]}
+
+
 def state():
+    # 所有数据固定到同一run；日志、CSV、心跳、诊断可能更新时间不同。
+    # CSV一轮验证后才落盘，不能用它的更新时间代替逐batch进度/心跳。
     csv_path = find_latest_run()
     probe = cached_probe()
     gpu, py = probe["gpu"], probe["py"]
     now = time.time()
-    if not csv_path:
-        return {"ok": False,
-                "msg": "还没有 results.csv：训练启动后第一轮验证结束才会写入",
+    if not csv_path or not os.path.isfile(csv_path):
+        active = read_json(Path(SCAN_DIR) / 'active.json', {})
+        chosen = PINNED_RUN or active.get('run') or SCAN_DIR
+        run_dir = resolve_run(chosen)
+        diagnosis = diagnose(run_dir)
+        heartbeat = read_json(run_dir / 'heartbeat.json', {})
+        exited = diagnosis.get('exit', {}).get('exit_code')
+        message = ('训练已停止：异常退出，见下方故障诊断' if exited not in (None, 0) else
+                   '训练已退出，尚无首轮指标' if exited == 0 else
+                   '还没有 results.csv：训练启动后第一轮验证结束才会写入')
+        return {"ok": False, "msg": message, "run": os.path.relpath(run_dir, PROJ),
+                "diagnosis": diagnosis, "heartbeat": heartbeat,
+                "health": scan_health(str(run_dir), []), "live": scan_live(str(run_dir)),
+                "errors": scan_errors(run_dir),
                 "scan": SCAN_DIR, "gpu": gpu, "py": py, "now": now}
     mtime = _mtime(csv_path)
     if not mtime and not os.path.isdir(os.path.dirname(csv_path)):
@@ -265,6 +367,7 @@ def state():
         "epochs": read_epochs(csv_path),
         "rows": rows,
         "health": scan_health(run_dir, rows),
+        "errors": scan_errors(run_dir),
         "live": scan_live(run_dir),
         "gpu": gpu,
         "py": py,

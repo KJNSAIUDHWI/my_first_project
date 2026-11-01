@@ -29,7 +29,7 @@ sys.path.insert(0, PIPE)
 from common.paths import DATA, MODELS, TRAIN  # noqa: E402
 
 from common.cnn_data import load_frozen
-from common.records import write_json
+from common.records import write_json, read_json
 from common.cnn_training import initialize, guard, metrics
 cv2.setNumThreads(0)
 W, H = 192, 48
@@ -108,6 +108,14 @@ def to_label(answer):
     return y
 
 
+def training_indices(items, english_repeat=1):
+    """每轮英语精确出现指定次数；仅传训练分区，验证名单不变。"""
+    if english_repeat < 1:
+        raise ValueError('英语重采样倍数必须至少为1')
+    return [i for i, it in enumerate(items)
+            for _ in range(english_repeat if '.英语.' in it['stem'] else 1)]
+
+
 
 
 def main():
@@ -116,11 +124,15 @@ def main():
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--patience", type=int, default=15)
+    ap.add_argument('--english-repeat', type=int, default=1, help='训练集英语每轮出现次数，默认1')
+    ap.add_argument('--architecture', choices=('flat', 'sequence'), default='flat')
     ap.add_argument('--name', required=True)
     ap.add_argument('--data', required=True, help='独立CNN dataset_snapshot目录')
     ap.add_argument('--initial', help='微调起点，支持本架构TorchScript或state_dict')
     ap.add_argument('--scratch', action='store_true')
     args = ap.parse_args()
+    if args.english_repeat < 1:
+        ap.error('--english-repeat必须至少为1')
 
     random.seed(42)
     np.random.seed(42)
@@ -133,12 +145,19 @@ def main():
         return 1
     tr = [it for it in items if it['split'] == 'train']
     va = [it for it in items if it['split'] == 'val']
+    if not tr or not va:
+        raise ValueError('训练和验证必须均非空')
+    epoch_indices = training_indices(tr, args.english_repeat)
     run = args.name
     out_dir = os.path.join(TRAIN, run)
     os.makedirs(out_dir, exist_ok=True)
     if os.path.exists(os.path.join(out_dir, 'results.csv')):
         raise FileExistsError('运行已有指标，禁止覆盖')
     write_json(Path(out_dir)/'training_args.json', vars(args))
+    write_json(Path(out_dir)/'sampling.json', {
+        'english_repeat': args.english_repeat, 'unique_train': len(tr),
+        'english_train': sum('.英语.' in it['stem'] for it in tr),
+        'samples_per_epoch': len(epoch_indices), 'validation': len(va)})
     logf = open(os.path.join(out_dir, "trainer.log"), "w", encoding="utf-8", buffering=1)
 
     def log(s):
@@ -149,6 +168,9 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net = Net(6).to(device)
+    if args.architecture == 'sequence':
+        from choice_sequence import SequenceNet
+        net = SequenceNet().to(device)
     initialize(net, args.initial, args.scratch)
     guard(out_dir, net)
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -203,7 +225,7 @@ def main():
     bad = 0
     for ep in range(1, args.epochs + 1):
         net.train()
-        idx = list(range(len(tr)))
+        idx = list(epoch_indices)
         random.shuffle(idx)
         t0 = time.time()
         total = 0.0
@@ -247,6 +269,8 @@ def main():
         f.write(buffer.getvalue())
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump({"letters": LETTERS, "size": [H, W], "best_exact": best,
+                   "architecture": args.architecture,
+                   "subject": read_json(Path(args.data)/'selection.json').get('subject'),
                    "train": len(tr), "val": len(va), "args": vars(args)}, f,
                   ensure_ascii=False, indent=1)
     logf.close()

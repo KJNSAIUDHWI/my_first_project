@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>训练监控</title>
 <style>
   :root{
@@ -98,6 +99,41 @@
   #tip .tr{display:flex;gap:14px;justify-content:space-between;align-items:baseline}
   #tip .tr b{font-family:"Cascadia Mono",monospace;font-weight:600;color:#e8edf5}
   canvas{cursor:crosshair}
+  /* 视觉层只组织已有监控信息，不改变训练和审核行为。
+     大屏突出进度，小屏自然换行；错误原文折叠，避免挤走核心指标。 */
+  :root{--bg:#0a1119;--panel:#111e2a;--line:#243342;--muted:#a4b3c4;--dim:#8495a8}
+  body{background:radial-gradient(900px 600px at 0% 0%,#153b40 0%,transparent 65%),var(--bg)}
+  #wrap{max-width:1360px;padding-top:32px}
+  .bar{padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:18px}
+  h1{font-size:24px;letter-spacing:0;color:#f1f6fc;background:none}
+  #run{max-width:100%;overflow-wrap:anywhere;border-radius:8px}
+  .intro{display:flex;justify-content:space-between;gap:20px;align-items:center;margin:22px 0}
+  .eyebrow{color:#67d9c5;font-size:11px;letter-spacing:2px;font-weight:700}
+  .intro h2{font-size:30px;letter-spacing:-1px;margin:7px 0;color:#f1f6fc}
+  .intro p{font-size:13px;color:var(--muted);margin:0;line-height:1.8}
+  .quick{display:flex;gap:30px;flex-wrap:wrap}
+  .quick span{font-size:12px;color:var(--muted)}
+  .quick strong{display:block;font:600 25px Consolas,monospace;color:#d8fff4;margin-top:8px}
+  .grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+  .card{padding:20px;border-radius:16px;background:linear-gradient(145deg,#152431,#101c28);box-shadow:0 8px 24px #00000018}
+  .card .k{font-size:12px;line-height:1.6}.card .v{font-size:30px}.card .sub{color:var(--muted)}
+  .card:first-child{grid-column:span 2;background:linear-gradient(120deg,#143c3b,#142a36)}
+  .panel{padding:20px;border-radius:16px;background:#111d29;margin-bottom:16px}
+  .panel h2{font-size:14px;color:#e1ebf5;margin-bottom:16px}
+  #diagnosis{font:12px/1.9 Consolas,'Microsoft YaHei',monospace;color:#aabccd;margin:0}
+  .section-title{font-size:12px;color:#8299b0;letter-spacing:1px;margin:24px 0 14px}
+  .alert-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .alert-head h2{margin:0;flex:1}.alert-head select,.alert-head button{background:#172938;color:#d8e6f3;border:1px solid #354a5e;border-radius:8px;padding:7px 10px;font:12px 'Microsoft YaHei';cursor:pointer}
+  .alert-summary{color:var(--muted);font-size:12px;line-height:1.8;margin:10px 0}
+  .alert-item{padding:13px 14px;background:#142330;border-left:3px solid #f2ba64;border-radius:8px;margin:8px 0;font-size:12px}
+  .alert-item.error{border-left-color:#fc8181;background:#2a1e27}
+  .alert-item summary{cursor:pointer;overflow-wrap:anywhere;line-height:1.8;color:#e5edf5}
+  .alert-item pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 Consolas,monospace;color:#bdcddd;max-height:320px;overflow:auto}
+  .source{display:block;font-size:11px;color:#93a9bd;margin:6px 0}
+  #error-list{max-height:520px;overflow:auto}#copy-result{font-size:11px;color:#89cdbb}
+  .ev.amp .tx{color:#f4ce8e}.pill{margin-left:0}.empty{line-height:1.8}
+  @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.intro{align-items:flex-start;flex-direction:column}.quick{gap:24px}}
+  @media(max-width:480px){#wrap{padding:18px 12px}.card{padding:15px}.card .v{font-size:24px}.bar .spacer{display:none}.intro h2{font-size:26px}}
 </style>
 </head>
 <body>
@@ -107,9 +143,13 @@
     <span id="dot"></span><span id="status" class="tag">连接中…</span>
     <span id="run"></span>
     <span class="spacer"></span>
-    <span class="tag">csv <span id="age">—</span></span>
+    <span class="tag">最近刷新 <span id="updated">—</span> · 每轮指标 <span id="age">—</span></span>
   </div>
   <div id="msg" style="display:none"></div>
+  <div class="intro">
+    <div><div class="eyebrow">TRAINING OBSERVATORY</div><h2>每一轮，都有迹可循。</h2><p>批次进度实时读取 · 验证曲线每轮更新 · 错误原文直接追溯</p></div>
+    <div class="quick"><span>最佳验证表现<strong id="best-score">—</strong></span><span>当前学习率<strong id="learning-rate">—</strong></span></div>
+  </div>
 
   <div class="grid" id="cards">
     <div class="card hi"><div class="k">训练进度</div><div class="v" id="ep">—</div>
@@ -117,10 +157,10 @@
     <div class="card"><div class="k" id="ktloss">train box loss</div><div class="v" id="tloss">—</div>
       <div class="sub" id="tlsub"></div></div>
     <div class="card"><div class="k" id="kvacc">mAP50 (val)</div><div class="v" id="vacc">—</div></div>
-    <div class="card"><div class="k">mAP50-95 <span class="cn">IoU 0.5~0.95</span></div><div class="v" id="vmap">—</div></div>
+    <div class="card" id="cardmap"><div class="k" id="kvmap">mAP50-95 <span class="cn">IoU 0.5~0.95</span></div><div class="v" id="vmap">—</div></div>
     <div class="card" id="cardrecall"><div class="k">recall <span class="cn">召回率 R</span></div><div class="v" id="vrecall">—</div>
       <div class="sub" id="recallsub">目标 100%</div></div>
-    <div class="card ok" id="cardnan"><div class="k">NaN / 坏梯度 <span class="cn">数值异常</span></div><div class="v" id="nanv">—</div>
+    <div class="card ok" id="cardnan"><div class="k">数值故障 <span class="cn">AMP恢复单独计数</span></div><div class="v" id="nanv">—</div>
       <div class="sub" id="nansub"></div></div>
     <div class="card"><div class="k">本轮剩余 <span class="cn">当前 epoch</span></div><div class="v" id="eprem">—</div><div class="sub" id="epremsub"></div></div>
     <div class="card"><div class="k">预计剩余 <span class="cn">整次训练</span></div><div class="v" id="eta">—</div><div class="sub" id="etasub"></div></div>
@@ -131,6 +171,12 @@
     <div class="card"><div class="k">功耗 / 温度</div><div class="v" id="gpwr">—</div><div class="sub" id="kpysub"></div></div>
   </div>
 
+  <div class="panel" id="error-panel">
+    <div class="alert-head"><h2>训练错误与警告</h2><select id="error-filter" aria-label="筛选日志事件"><option value="all">全部日志事件</option><option value="error">只看错误</option><option value="warning">只看警告</option></select><button id="copy-errors" type="button">复制错误原文</button><span id="copy-result" role="status"></span></div>
+    <div class="alert-summary" id="error-summary" role="status">正在读取训练日志…</div>
+    <div id="error-list"></div>
+  </div>
+  <div class="section-title">训练与验证曲线</div>
   <div class="charts">
     <div class="panel"><h2 id="hloss">train loss</h2>
       <div class="legend-box" id="losslegend">
@@ -149,7 +195,7 @@
 
   <div class="panel"><h2>训练状态与故障诊断</h2><pre id="diagnosis" style="white-space:pre-wrap;word-break:break-word">正在读取…</pre></div>
   <div class="panel" id="panelhealth">
-    <h2>异常事件 <span id="hcount" class="pill">0</span></h2>
+    <h2>数值保护记录 <span id="hcount" class="pill">0</span></h2>
     <div id="hevents" class="events"><div class="empty">没有异常</div></div>
   </div>
 
@@ -165,18 +211,23 @@
 const $ = id => document.getElementById(id);
 let hist = {loss: [], acc: [], lastEpochs: 0, lastChange: Date.now()};
 const chartState = {};   // 每个 canvas 最近一次绘制的数据，供 hover 反查
+let latestErrors = {items: []};
+let errorSignature = ''; // 相同事件不重建DOM，保留用户展开的调用栈和滚动位置。
 
 function fmt(x, n = 4){ return (x === undefined || x === null || isNaN(x)) ? '—' : Number(x).toFixed(n); }
 function isBadVal(v){ return v === undefined || v === null || String(v).toLowerCase() === 'nan' || String(v).toLowerCase() === 'inf' || isNaN(Number(v)); }
 
-async function tick(){
+async function refreshState(){
   let d;
   try {
-    d = await (await fetch('/api/state')).json();
+    const response = await fetch('/api/state', {cache: 'no-store', signal: AbortSignal.timeout(8000)});
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    d = await response.json();
   } catch(e){
     $('dot').className = 'off'; $('status').textContent = '服务断开了';
     return;
   }
+  $('updated').textContent = new Date().toLocaleTimeString('zh-CN', {hour12: false});
   const rows = d.rows || [];
   if (!d.ok){
     $('msg').style.display = 'block'; $('msg').textContent = d.msg || '没有找到训练结果';
@@ -188,10 +239,22 @@ async function tick(){
   const idleFor = (Date.now() - hist.lastChange) / 1000;
 
   // 状态灯
-  const live = ((d.csv_age || 1e9) < 180) || (idleFor < 180 && d.py >= 2);
-  const dark = (d.py <= 1);
-  if (!d.ok){
-    if (dark){ $('dot').className = ''; $('status').textContent = '没有训练在跑'; }
+  const heartbeat = d.heartbeat || {};
+  const heartbeatAge = (Date.now() - Date.parse((heartbeat.time || '').replace(' ', 'T'))) / 1000;
+  const heartbeatLive = heartbeat.status === 'running' && heartbeatAge >= 0 && heartbeatAge < 15;
+  const live = heartbeatLive || ((d.csv_age ?? 1e9) < 180) || (idleFor < 180 && d.py >= 2);
+  const dark = !heartbeatLive && (d.py <= 1);
+  const finishedCode = (d.diagnosis && d.diagnosis.exit || {}).exit_code;
+  if ((d.diagnosis || {}).category === 'manual_stop'){
+    $('dot').className = '';
+    $('status').textContent = '按用户要求停止，权重已验收';
+  } else if (finishedCode !== undefined){
+    $('dot').className = finishedCode === 0 ? '' : 'off';
+    $('status').textContent = finishedCode !== 0 ? '训练异常停止' : (d.diagnosis.completion || {}).success === true ? '训练完成，检查通过' : '训练已退出，正在收尾检查';
+  } else if (!d.ok){
+    const exitCode = (d.diagnosis && d.diagnosis.exit || {}).exit_code;
+    if (exitCode !== undefined){ $('dot').className = ''; $('status').textContent = exitCode === 0 ? '训练已退出，尚无首轮指标' : '训练异常停止'; }
+    else if (dark){ $('dot').className = ''; $('status').textContent = '没有训练在跑'; }
     else { $('dot').className = 'warnc'; $('status').textContent = '训练启动中，等待第一轮'; }
   }
   else if (live && !dark){ $('dot').className = 'on'; $('status').textContent = '训练进行中'; }
@@ -201,17 +264,30 @@ async function tick(){
   const last = rows[rows.length - 1] || {};
   const doneN = rows.length;
   const isDet = ('metrics/mAP50(B)' in last);
-  const accKey = isDet ? 'metrics/mAP50(B)' : 'metrics/accuracy_top1';
+  const isChoice = ('metrics/exact' in last);
+  const accKey = isDet ? 'metrics/mAP50(B)' : isChoice ? 'metrics/exact' : 'metrics/accuracy_top1';
   const lossKey = isDet ? 'train/box_loss' : 'train/loss';
   const acc = last[accKey];
   const loss = last[lossKey];
-  const mapKey = isDet ? 'metrics/mAP50-95(B)' : null;
+  const mapKey = isDet ? 'metrics/mAP50-95(B)' : isChoice ? 'metrics/char_accuracy' : null;
   const vmap = mapKey ? last[mapKey] : undefined;
+  // 最佳成绩仅在当前run内比较；不同验证集之间不能拿此数直接排名。
+  const scoreKey = isDet ? mapKey : accKey;
+  const scores = rows.map(r => Number(r[scoreKey])).filter(Number.isFinite);
+  const best = scores.length ? Math.max(...scores) : null;
+  $('best-score').textContent = best === null ? '—' : (best * 100).toFixed(2) + '%';
+  const lr = Number(last['lr/pg0'] ?? last['lr']);
+  $('learning-rate').textContent = Number.isFinite(lr) ? lr.toExponential(2) : '—';
 
   $('ktloss').innerHTML = isDet ? 'train box loss <span class="cn">框回归损失</span>' : 'train loss <span class="cn">训练损失</span>';
-  $('kvacc').innerHTML = isDet ? 'mAP50 <span class="cn">IoU=0.5 平均精度</span>' : 'val 准确率 <span class="cn">top-1</span>';
+  $('kvacc').innerHTML = isDet ? 'mAP50 <span class="cn">IoU=0.5 平均精度</span>' : isChoice ? '整行答案全对率 <span class="cn">验证集</span>' : 'val 准确率 <span class="cn">top-1</span>';
+  $('kvmap').textContent = isChoice ? '选项判断准确率（A–F）' : 'mAP50-95';
+  $('cardmap').style.display = isDet || isChoice ? '' : 'none';
+  $('cardrecall').style.display = isDet ? '' : 'none';
   $('ep').textContent = doneN ? doneN + ' 轮' : '—';
   const totalEp = d.epochs || 0;
+  const batch = d.live || {};
+  if (batch.epoch && finishedCode === undefined) $('ep').textContent = batch.epoch + ' / ' + (batch.epochs || totalEp) + ' 轮';
   $('epbar').style.width = (totalEp ? Math.min(100, doneN / totalEp * 100) : 0) + '%';
   $('run').textContent = (d.run ? d.run.split('\\').pop() : '') + (d.epochs ? '  ·  ' + doneN + '/' + d.epochs + ' 轮' : '');
 
@@ -220,7 +296,7 @@ async function tick(){
   const dflL = isDet ? fmt(last['train/dfl_loss']) : '—';
   $('tlsub').textContent = isDet ? ('cls ' + clsL + ' · dfl ' + dflL) : '';
   $('vacc').innerHTML = isBadVal(acc) ? '—' : (Number(acc) * 100).toFixed(2) + '<small> %</small>';
-  $('vmap').innerHTML = isBadVal(vmap) ? '—' : Number(vmap).toFixed(4);
+  $('vmap').innerHTML = isBadVal(vmap) ? '—' : isChoice ? (Number(vmap) * 100).toFixed(2) + '<small> %</small>' : Number(vmap).toFixed(4);
 
   // 召回率（硬要求 100%：漏一个就是直接丢分）
   const recKey = isDet ? 'metrics/recall(B)' : 'metrics/recall';
@@ -242,17 +318,22 @@ async function tick(){
   const exit = diag.exit || {};
   const check = diag.completion || {};
   const hb = d.heartbeat || {};
-  const status = exit.exit_code !== undefined ? (exit.exit_code !== 0 ? '训练异常退出' : check.success === true ? '完成并通过检查' : check.ready_for_regression ? '历史运行已验收' : '已退出，等待收尾检查') : hb.status === 'running' ? '训练中（以心跳时间核对）' : '状态未知，勿据此重复启动';
+  const status = diag.category === 'manual_stop' ? '按用户要求停止，最佳权重已验收' : exit.exit_code !== undefined ? (exit.exit_code !== 0 ? '训练异常退出' : check.success === true ? '完成并通过检查' : check.ready_for_regression ? '历史运行已验收' : '已退出，等待收尾检查') : hb.status === 'running' ? '训练中（以心跳时间核对）' : '状态未知，勿据此重复启动';
   $('diagnosis').textContent = status + '\n心跳：' + (hb.time || '无') + '\n' + (diag.suggestion || '') + '\nAMP可恢复溢出：' + (diag.amp_overflow_count || 0) + (diag.first_failure ? '\n首个异常：' + JSON.stringify(diag.first_failure, null, 2) : '') + (diag.traceback_tail ? '\n错误末尾：\n' + diag.traceback_tail : '');
   const h = d.health || {};
   const bad = !!h.bad;
-  const badN = (h.nan_epochs || []).length + (h.guard_skips || 0) + (h.recoveries || 0);
+  const badN = (h.nan_epochs || []).length + (h.guard_skips || 0) + (h.recoveries || 0) + (h.fatal_count || 0);
   $('cardnan').className = 'card ' + (bad ? 'danger' : 'ok');
   $('nanv').innerHTML = bad ? (badN + '<small> 次</small>') : '0 <small>次</small>';
   $('nansub').textContent = bad
     ? ('首次：第 ' + (h.first_bad_epoch || '?') + ' 轮' + (h.guard_skips ? ' · 坏梯度跳过 ' + h.guard_skips : '') + (h.recoveries ? ' · 恢复 ' + h.recoveries : ''))
-    : '全程干净';
+    : (h.amp_overflows ? '无致命数值故障 · AMP恢复 ' + h.amp_overflows + ' 次' : '未记录数值故障');
   renderHealth(h);
+  latestErrors = d.errors || {items: []};
+  $('error-summary').textContent = '日志错误 ' + (latestErrors.errors || 0) + ' · 警告 ' + (latestErrors.warnings || 0)
+    + ' · 数值保护故障 ' + (h.fatal_count || 0) + ' · AMP可恢复溢出 ' + (h.amp_overflows || 0)
+    + '。日志保留最近40条供查看；点击事件展开原文，数值保护详情见下方。';
+  renderErrors();
 
   // GPU
   const g = d.gpu || {};
@@ -281,13 +362,20 @@ async function tick(){
       + lv.step + '/' + lv.steps + ' 步 (' + lv.pct + '%)';
   } else {
     $('eprem').textContent = '—';
-    $('epremsub').textContent = '';
+    $('epremsub').textContent = lv.seconds_per_epoch ? '每轮结束更新，约 ' + lv.seconds_per_epoch.toFixed(0) + ' 秒/轮' : '';
   }
 
   // ETA
   const totalEpochs = d.epochs || 0;
   const t = Number(last['time']);
-  if (!totalEpochs){
+  $('etasub').textContent = '';
+  if (finishedCode !== undefined){
+    $('eta').textContent = finishedCode === 0 ? '已结束' : '已停止';
+  } else if (lv.seconds_per_epoch && totalEpochs){
+    const remain = Math.max(0, (totalEpochs - doneN) * lv.seconds_per_epoch);
+    $('eta').innerHTML = (remain/60).toFixed(1) + '<small> 分钟</small>';
+    $('etasub').textContent = '按最多 ' + totalEpochs + ' 轮估算，可能提前停止';
+  } else if (!totalEpochs){
     $('eta').textContent = '—';
   } else if (doneN > 0 && !isNaN(t) && t > 0){
     let per = t / doneN;
@@ -316,7 +404,7 @@ async function tick(){
   draw('cacc', rows, accKey, '#4ade80', !isDet, nanEps);
   $('hloss').textContent = 'train loss';
   $('losslegend').style.display = isDet ? '' : 'none';
-  $('hacc').textContent = isDet ? 'val mAP50' : 'val 准确率 (%)';
+  $('hacc').textContent = isDet ? 'val mAP50' : isChoice ? '验证集整行答案全对率 (%)' : 'val 准确率 (%)';
   $('panelmap').style.display = isDet ? '' : 'none';
   $('panelrecall').style.display = isDet ? '' : 'none';
   if (isDet) {
@@ -329,7 +417,7 @@ function renderHealth(h){
   const evs = h.events || [];
   const box = $('hevents');
   const cnt = $('hcount');
-  const total = (h.nan_epochs || []).length + (h.guard_skips || 0) + (h.recoveries || 0);
+  const total = (h.nan_epochs || []).length + (h.guard_skips || 0) + (h.recoveries || 0) + (h.fatal_count || 0) + (h.amp_overflows || 0);
   cnt.textContent = total;
   cnt.className = 'pill' + (total ? ' hot' : '');
   if (!evs.length){
@@ -337,11 +425,34 @@ function renderHealth(h){
     return;
   }
   box.innerHTML = evs.slice().reverse().map(e => {
-    const cls = e.type === 'guard' ? 'guard' : (e.type === 'val' ? 'val' : 'nan');
+    const cls = e.type === 'amp' ? 'amp' : e.type === 'guard' ? 'guard' : (e.type === 'val' ? 'val' : 'nan');
     const ep = e.epoch ? ('第 ' + e.epoch + ' 轮') : '';
     return '<div class="ev ' + cls + '"><span class="ep">' + ep + '</span><span class="tx">' + escapeHtml(e.text) + '</span></div>';
   }).join('');
 }
+
+/* 错误原文全部转义后再插入HTML，日志里即使出现标签也仅作为文字显示。
+   数据和筛选不变时不重绘，避免每1.5秒合上用户正在阅读的详情。 */
+function renderErrors(){
+  const filter = $('error-filter').value;
+  const signature = JSON.stringify([filter, latestErrors.items]);
+  if (signature === errorSignature) return;
+  errorSignature = signature;
+  const items = (latestErrors.items || []).filter(e => filter === 'all' || e.level === filter).slice().reverse();
+  $('error-list').innerHTML = items.length ? items.map(e => '<details class="alert-item ' + (e.level === 'error' ? 'error' : 'warning') + '"><summary>'
+    + (e.level === 'error' ? '错误 · ' : '警告 · ') + escapeHtml(e.message) + '</summary><span class="source">'
+    + escapeHtml(e.source) + (e.line ? ' · 第 ' + e.line + ' 行' : '') + '</span><pre>' + escapeHtml(e.detail) + '</pre></details>').join('')
+    : '<div class="empty">当前筛选下未捕获日志错误或警告。未捕获不等于训练已通过验收；完成状态以退出码和检查结果为准。</div>';
+}
+$('error-filter').addEventListener('change', renderErrors);
+$('copy-errors').addEventListener('click', async () => {
+  const items = (latestErrors.items || []).filter(e => e.level === 'error');
+  if (!items.length) { $('copy-result').textContent = '暂无日志错误可复制'; return; }
+  try {
+    await navigator.clipboard.writeText(items.map(e => e.source + (e.line ? ':' + e.line : '') + '\n' + e.detail).join('\n\n'));
+    $('copy-result').textContent = '已复制错误原文';
+  } catch(e) { $('copy-result').textContent = '复制失败，可展开原文手动选择'; }
+});
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -483,8 +594,19 @@ function onLeave(){ $('tip').style.display = 'none'; }
   cv.addEventListener('mouseleave', onLeave);
 });
 
+async function tick(){
+  // 等待完整请求与渲染结束再安排下一次，避免慢请求重叠和旧响应覆盖新数据。
+  // finally确保网络失败或渲染异常后仍自动重试；fetch另有8秒超时。
+  try {
+    await refreshState();
+  } catch(e){
+    $('dot').className = 'off';
+    $('status').textContent = '监控刷新失败，下次自动重试';
+  } finally {
+    setTimeout(tick, 1500);
+  }
+}
 tick();
-setInterval(tick, 1500);
 </script>
 </body>
 </html>

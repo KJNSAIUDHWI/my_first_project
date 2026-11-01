@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """每张样本一个中文日志：data/<库>/log/<样本名>.log，一行一个事件。
 
-digit 和 choice 用这里；检测框（m1-m4）用 events.py。
+digit 和 choice 用这里；检测框（m1-m3）用 events.py。
 日志是唯一事实源，审核状态每次从事件重算。
 """
 import json
@@ -69,16 +69,20 @@ def choice_state(events):
 def digit_state(events):
     """一个数字样本的状态：标签、是否人工确认、旧记录依据。"""
     st = {'label': None, 'pred_label': None, 'reviewed': False, 'special': False,
-          'basis': '', 'split': '', 'note': '', 'review_count': 0, 'reviewed_at': ''}
+          'basis': '', 'split': '', 'note': '', 'review_count': 0, 'reviewed_at': '',
+          'model': '', 'uncertain': False, 'crop_issue': False}
     for e in events:
         t = event_name(e)
         if t in ('预标注', 'pred'):
             st['pred_label'] = e.get('标签', e.get('label'))
             st['label'] = st['pred_label']
             st['reviewed'] = False
+            st['model'] = e.get('模型', '')
+            st['uncertain'] = bool(e.get('疑难', False))
+            st['crop_issue'] = bool(e.get('裁图异常', False))
         elif t in ('审核', 'review'):
             st['label'] = int(e.get('标签', e.get('label', st['label'])))
-            st.update(reviewed=True, special=False)
+            st.update(reviewed=True, special=False, note='')
             st['review_count'] = int(e.get('第几轮', e.get('n', st['review_count'] + 1)))
             st['reviewed_at'] = e.get('时间', '')
         elif t in ('旧记录', 'legacy'):
@@ -89,7 +93,7 @@ def digit_state(events):
             st['reviewed_at'] = e.get('时间', '')
         elif t in ('特殊', 'special'):
             st['label'] = int(e.get('标签', st['label']))
-            st.update(special=True, note=e.get('类型') or e.get('note') or '特殊')
+            st.update(reviewed=True, special=True, note=e.get('类型') or e.get('note') or '特殊')
         elif t in ('撤销审核', 'unreview'):
-            st['reviewed'] = False
+            st.update(reviewed=False, special=False, note='')
     return st

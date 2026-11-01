@@ -2,7 +2,7 @@
 """Digit CNN 训练。
 
 数据：data/digit + data/digit_legacy + data/digit_extra（审核/推断后的 labels.csv）
-类别：0=非数字，1~34=题号（35 类；19 类当前无样本，留空位）
+类别：0=非数字，1~60=题号（61 类；旧35类输出层保留旧行并扩展）
 预处理：等比缩放到长边 56 + 居中补白到 64×64 + /255 + 反色（白底黑字 -> 黑底白字）
 负样本：宽条（选项框）训练时随机裁成方形，避免模型学「宽=非数字」
 增强：±5° 旋转、0.9~1.12 缩放、±6% 平移、亮度对比度、模糊、闭运算、Otsu、灰底/噪点
@@ -35,7 +35,8 @@ from common.cnn_data import load_frozen
 from common.records import write_json
 from common.cnn_training import initialize, guard, metrics
 cv2.setNumThreads(0)
-NC = 35
+from common.digit_classes import DIGIT_NC
+NC = DIGIT_NC
 SIZE = 64
 INNER = 56
 
@@ -179,7 +180,7 @@ def main():
     log("class weights: " + " ".join("%d:%.2f" % (i, w[i]) for i in range(NC) if cnt[i] or i == 0))
 
     net = Net(NC).to(device)
-    initialize(net, args.initial, args.scratch)
+    initialize(net, args.initial, args.scratch, expand_digit=True)
     guard(out_dir, net)
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
@@ -276,7 +277,7 @@ def main():
     with open(os.path.join(out_dir, 'inference.pt'), 'wb') as f:
         f.write(buffer.getvalue())
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
-        json.dump({"nc": NC, "size": SIZE, "inner": INNER, "classes": "0=non-digit, 1..34=number",
+        json.dump({"nc": NC, "size": SIZE, "inner": INNER, "classes": "0=non-digit, 1..60=number",
                    "best_epoch": best_epoch, "best_val_acc": best_acc,
                    "train": len(tr), "val": len(va), "args": vars(args)},
                   f, ensure_ascii=False, indent=1)

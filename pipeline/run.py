@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""流水线入口（框架）：整页图 -> 方向转正 -> m1 三大区域。
+"""整页入口：默认方向与M1；--recognize进入完整识别与拼图并发。
 
-当前实现方向 + m1，输出每张图的框 JSON 和转正图。
-m2 / m3 / m4 / digit / 判分 后续接进 stages/。
+默认模式输出M1框与转正图。完整识别含M2/M3、Paddle题号、涂黑和豆包；不评分。
+已有转正工作图在完整识别时须指定--working-images，固定20页入口自动保留工作像素。
 
 用法：
     python pipeline/run.py --input <图片目录> --out <输出目录>
@@ -30,6 +30,10 @@ def rotate_by_angle(im, deg):
 
 
 def main():
+    if '--recognize' in sys.argv:
+        sys.argv.remove('--recognize')
+        from recognize import main as recognize_main
+        return recognize_main()
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--out", required=True)
