@@ -161,6 +161,33 @@ h2{font-size:17px;margin:0;letter-spacing:-0.01em}
 .tech-body{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
 .tech-line{font-size:12.5px;color:var(--muted);line-height:1.7}
 
+/* ================= Apple 风格单张标框修改 Sheet（260ms 短促弹性动效） ================= */
+.edit-sheet-backdrop{
+  position:fixed;inset:0;z-index:60;
+  background:rgba(15,23,42,.36);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  display:flex;align-items:center;justify-content:center;padding:18px;
+  opacity:0;pointer-events:none;
+  transition:opacity 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.edit-sheet-backdrop.open{opacity:1;pointer-events:auto}
+.edit-sheet{
+  width:min(1440px,96vw);height:min(900px,92vh);
+  background:#fff;border-radius:20px;overflow:hidden;
+  box-shadow:0 28px 80px rgba(15,23,42,.28), 0 0 0 1px rgba(255,255,255,.5);
+  display:flex;flex-direction:column;
+  transform:translateY(22px) scale(.965);
+  transition:transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.edit-sheet-backdrop.open .edit-sheet{transform:translateY(0) scale(1)}
+.edit-sheet-head{
+  flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 18px;background:#faf8f3;border-bottom:1px solid var(--line);
+}
+.edit-sheet-head .meta{font-size:13px;color:var(--muted)}
+.edit-sheet-frame{flex:1;width:100%;border:0;background:#111}
+.zoom-hint{font-size:12px;color:var(--muted);background:var(--surface-soft);padding:4px 10px;border-radius:999px;border:1px solid var(--line)}
+
 /* ================= 详情核对工作区 ================= */
 #detail{display:none}
 html.review-mode{overflow:hidden;height:100%}
@@ -378,10 +405,13 @@ dialog img{max-width:100%;display:block;margin:12px auto;border-radius:8px}
     <div id="notice" class="notice"></div>
 
     <div class="section-bar">
-      <h2 id="batchTitle">本批试卷</h2>
+      <div class="bar" style="gap:10px">
+        <h2 id="batchTitle">本批试卷</h2>
+        <span class="zoom-hint" id="gridZoomHint" title="在试卷列表上按住 Ctrl 键滚动鼠标滚轮即可缩放卡片大小">按住 Ctrl + 滚轮 缩放卡片</span>
+      </div>
       <select id="pageFilter" aria-label="筛选试卷">
         <option value="all">全部试卷</option>
-        <option value="issues">仅看有待核对项</option>
+        <option value="issues">仅看低置信度卷</option>
         <option value="unchecked">仅看未检查完</option>
       </select>
     </div>
@@ -410,6 +440,7 @@ dialog img{max-width:100%;display:block;margin:12px auto;border-radius:8px}
         <span id="pagePosition" class="pos-pill"></span>
       </div>
       <div class="bar">
+        <button id="editPageBoxBtn" title="如果这张卷子的框画歪了或漏框了，点这里直接进入单张标框修改">✎ 修改这张卷的标框</button>
         <button id="nextClaimPage" class="primary">下一张未检查 ▶</button>
       </div>
     </div>
@@ -483,6 +514,19 @@ dialog img{max-width:100%;display:block;margin:12px auto;border-radius:8px}
   <div id="imageMeta" class="muted"></div>
   <img id="bigImage" alt="验收原图">
 </dialog>
+<div id="editSheetBackdrop" class="edit-sheet-backdrop" aria-hidden="true">
+  <div class="edit-sheet" role="dialog" aria-label="单张标框修改">
+    <div class="edit-sheet-head">
+      <div class="bar" style="gap:10px">
+        <button id="closeEditSheet" class="primary" style="padding:6px 14px;font-size:13px">← 完成并返回本张试卷</button>
+        <strong id="editSheetTitle" style="font-size:14.5px">正在修改标框</strong>
+        <span class="meta">拖动画框、按 A/D 保存；改完点左侧绿按钮返回</span>
+      </div>
+      <a id="editSheetNewTab" href="#" target="_blank" style="font-size:12.5px;color:var(--muted)">新窗口打开 ↗</a>
+    </div>
+    <iframe id="editSheetFrame" class="edit-sheet-frame" src="about:blank"></iframe>
+  </div>
+</div>
 <div id="toast" role="status"></div>
 
 <script>
@@ -783,12 +827,68 @@ function openImage(path,title,meta=''){if(!path){toast('本页没有可用图像
 function stopDrag(){if(drag&&paper.hasPointerCapture?.(drag.pointerId))paper.releasePointerCapture(drag.pointerId);drag=null;paper.classList.remove('dragging')}
 function showOverview(){stopDrag();if(lockedPageId){const pid=lockedPageId;lockedPageId=null;fetch('/api/release',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':TOKEN},body:JSON.stringify({client_id:CLIENT_ID,page_id:pid})}).catch(()=>{})}document.documentElement.classList.remove('review-mode');document.body.classList.remove('review-mode');$('detail').style.display='none';$('overview').style.display='block';renderOverview();window.scrollTo(0,overviewScroll)}
 function goBack(){
+ if($('editSheetBackdrop')?.classList.contains('open')){closeEditSheet();return}
  if($('imageDialog').open){$('imageDialog').close();return}
  if(!document.body.classList.contains('review-mode'))return;
  stopDrag();const full=fullView();
  if(view&&['x','y','w','h'].some(k=>Math.abs(view[k]-full[k])>.01)){resetPaper();return}
  showOverview();
 }
+// 整批缩略图墙：按住 Ctrl + 滚轮缩放卡片宽度
+let gridCardWidth = +(localStorage.getItem('reviewGridCardW') || 240);
+function applyGridZoom(){
+ gridCardWidth = Math.max(140, Math.min(440, Math.round(gridCardWidth)));
+ $('pages').style.gridTemplateColumns = `repeat(auto-fill, minmax(${gridCardWidth}px, 1fr))`;
+ try{localStorage.setItem('reviewGridCardW', String(gridCardWidth))}catch(_){}
+ const h=$('gridZoomHint');if(h)h.textContent=`按住 Ctrl + 滚轮 缩放卡片（当前 ${gridCardWidth}px）`;
+}
+applyGridZoom();
+window.addEventListener('wheel', e => {
+ if(!e.ctrlKey || document.body.classList.contains('review-mode')) return;
+ e.preventDefault();
+ gridCardWidth += e.deltaY < 0 ? 24 : -24;
+ applyGridZoom();
+}, {passive:false});
+
+// Apple 风格单张标框修改 Sheet
+async function openEditSheet(){
+ const p = DATA?.pages?.[pi];
+ if(!p) return;
+ const btn = $('editPageBoxBtn');
+ if(btn){btn.disabled=true;btn.textContent='正在准备标框修改...';}
+ try{
+  const host = window.location.hostname || '127.0.0.1';
+  const hub = `http://${host}:8888`;
+  const r = await fetch(`${hub}/api/open-edit`, {
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({page_name: p.name})
+  });
+  const d = await r.json();
+  if(!r.ok || !d.ok) throw new Error(d.error || '无法启动标框修改服务');
+  const who = reviewerName();
+  const qs = new URLSearchParams({stem: d.stem});
+  if(who) qs.set('reviewer', who);
+  const url = `http://${host}:${d.port}/?${qs.toString()}`;
+  $('editSheetTitle').textContent = `单张标框修改：${p.name}`;
+  $('editSheetNewTab').href = url;
+  $('editSheetFrame').src = url;
+  $('editSheetBackdrop').classList.add('open');
+  $('editSheetBackdrop').setAttribute('aria-hidden', 'false');
+ }catch(err){
+  toast('打开标框修改失败（请确认工作台正在运行）：' + (err.message || err));
+ }finally{
+  if(btn){btn.disabled=false;btn.textContent='✎ 修改这张卷的标框';}
+ }
+}
+function closeEditSheet(){
+ const bd=$('editSheetBackdrop');if(!bd)return;
+ bd.classList.remove('open');bd.setAttribute('aria-hidden','true');
+ setTimeout(()=>{if(!bd.classList.contains('open'))$('editSheetFrame').src='about:blank';}, 260);
+}
+$('editPageBoxBtn')?.addEventListener('click', openEditSheet);
+$('closeEditSheet')?.addEventListener('click', closeEditSheet);
+$('editSheetBackdrop')?.addEventListener('click', e => { if(e.target === $('editSheetBackdrop')) closeEditSheet(); });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.isComposing){e.preventDefault();goBack()}},true);
 $('closeImage').onclick=()=>$('imageDialog').close();
 $('pageFilter').onchange=renderPages;$('itemFilter').onchange=()=>{drawItems();drawMap()};

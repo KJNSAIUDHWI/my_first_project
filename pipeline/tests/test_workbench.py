@@ -101,7 +101,8 @@ class WorkbenchTests(unittest.TestCase):
             with urllib.request.urlopen(f"{base}/api/overview", timeout=3) as r:
                 ov = json.loads(r.read().decode("utf-8"))
             self.assertTrue(ov["is_host"])
-            self.assertEqual(len(ov["tasks"]), 4)
+            self.assertEqual(len(ov["tasks"]), 3)
+            self.assertEqual([t["id"] for t in ov["tasks"] if t["tier"] == "primary"], ["review", "choice"])
             self.assertTrue(any(u["name"] == "妈妈" for u in ov["online_users"]))
 
             # 4. CLI emit_event 推送到总线

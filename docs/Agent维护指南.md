@@ -13,20 +13,26 @@
 
 ## 常用命令
 
-以下在项目根目录执行，`python` 指已核实的项目解释器。示例中的目录和本轮名单由Agent准备，不能让使用者猜参数。
+以下在项目根目录执行，`python` 指已核实的项目解释器。优先使用统一工作台 CLI `tools/工作台.py`（与网页控制中心 1-to-1 等价，执行时自动通过 SSE 高亮联动开着的工作台页面）：
 
 ```powershell
+# 统一工作台（GUI/CLI 等价入口；桌面端可直接双击根目录 自动改卷工作台.exe）
+python -B tools/工作台.py check --json
+python -B tools/工作台.py repair-pip
+python -B tools/工作台.py ingest --source "D:/papers" --subject 物理
+python -B tools/工作台.py run
+python -B tools/工作台.py status --json
+python -B tools/工作台.py serve --open
+python -B tools/工作台.py open review    # 或 choice / annotate
+
+# 底层单步入口（需要自定义参数或回归测试时使用）：
 # 新扫描：完整识别；会调用豆包，使用已有配置的ARK_API_KEY
 python -B pipeline/run.py --recognize --input "D:/papers" --out "D:/grading-results/run-001" --concurrency 4
 # 仅本地检测与拼图：在上条命令后增加 --detect-only
-python -B tools/识别验收.py --dir "D:/grading-results/run-001" --port 8903
-# 多人局域网协作（同一路由器下另一台电脑用浏览器打开主机打印的 192.168.x.x 地址）：
-python -B tools/识别验收.py --dir "D:/grading-results/run-001" --port 8903 --lan
+python -B tools/识别验收.py --dir "D:/grading-results/run-001" --port 8904 --lan
 
 # M3审核：本轮CSV需包含new_name列，且对应已经准备好的M3数据
-python -B tools/标注工具/serve.py --data data/m3 --subset "D:/review/m3-batch.csv" --port 8910 --no-browser
-# 多人局域网协作画框（支持动态领图与单图租约锁，避免两人重复审核同一张）：
-python -B tools/标注工具/serve.py --data data/m3 --subset "D:/review/m3-batch.csv" --port 8910 --lan --no-browser
+python -B tools/标注工具/serve.py --data data/m3 --subset "D:/review/m3-batch.csv" --port 8900 --lan --no-open
 
 # 查询真实支持的快照、训练参数
 python -B tools/迭代.py snapshot --help

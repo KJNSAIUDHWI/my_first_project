@@ -514,7 +514,17 @@ async function loadList() {
   syncProgress();
   renderWork(null);
   renderClassBtns();
-  if (state.list.length) await loadImage(0);
+  if (state.list.length) {
+    let startIdx = 0;
+    try {
+      const targetStem = (typeof location !== 'undefined' && location.search) ? new URLSearchParams(location.search).get('stem') : '';
+      if (targetStem && !state._stemApplied) {
+        const hit = state.list.findIndex(x => x.stem === targetStem);
+        if (hit >= 0) { startIdx = hit; state._stemApplied = true; }
+      }
+    } catch (_) {}
+    await loadImage(startIdx);
+  }
   else {
     state.idx = 0; state.img = null; state.boxes = []; state.original = '[]'; state.selected = -1;
     document.getElementById('pos').textContent = '0/0';

@@ -44,23 +44,39 @@ flowchart LR
 
 ## 快速开始
 
-1. 克隆 [my_first_project](https://github.com/KJNSAIUDHWI/my_first_project)，按 [使用说明](docs/使用说明.md) 安装 Python 依赖。
-2. 下载 [weights/](weights/) 中的全部加密分卷，按 [weights/说明.txt](weights/说明.txt) 解压到项目根目录（密码由仓库持有人提供）。
-3. 在项目根目录 `.env` 中配置 `ARK_API_KEY`（或设置同名系统环境变量）。
-4. 准备扫描图片目录，在项目根目录运行：
+### 方式一：一键桌面工作台（推荐父母与日常使用）
+
+1. 下载或克隆 [my_first_project](https://github.com/KJNSAIUDHWI/my_first_project) 后，直接双击根目录的 **`自动改卷工作台.exe`**（首次如弹出 Windows SmartScreen 提示，点「更多信息 → 仍要运行」；也可运行 `tools\工作台\创建桌面快捷方式.ps1` 本机编译并生成桌面快捷方式）。
+2. 启动后自动进入**环境自检**：
+   - 缺 Python 依赖 → 一键自动测速对比 PyPI 官方源与清华/阿里云镜像并安装；
+   - 缺模型权重 → 直接在页面输入密码解压 [weights/](weights/) 中的加密分卷；
+   - 缺豆包密钥 → 直接在页面填写 `ARK_API_KEY` 写入本地 `.env`；
+   - 遇到疑难问题 → 一键复制结构化诊断提示词并唤起本机 `opencode` 等 AI 助手。
+3. 随后按页面引导完成 **录入新试卷（非破坏性复制、SHA256 去重、`日期_学科_序号.jpg` 统一命名）→ 控制总览 & 局域网多人协作**（右上角内置 `? 新手引导` 交互式试卷解剖图与聚光灯导览）：
+   - **人工复审（整页核对）**：整批缩略图墙支持 **按住 `Ctrl + 滚轮` 缩放**；点进具体试卷可核对答案、可选开关查看具体置信度数值，发现框画歪可直接点 **「✎ 修改这张卷的标框」** 弹出单张标框子界面修改；
+   - **涂黑答案审核**：整批平铺刷选择题填涂；
+   - **局域网多人协作**：家里另一台电脑/平板直接用浏览器打开主机显示的 `http://192.168.x.x:8888` 即可加入，自动区分主机与协作者权限并统计不同人的审阅工作量。
+
+### 方式二：等价命令行（推荐开发者与 AI Agent）
+
+工作台所有界面操作均映射到统一 CLI `tools/工作台.py`，执行时会自动通过 SSE 实时高亮联动已打开的工作台页面：
 
 ```powershell
-# 1. 运行识别（已转正工作图可加 --working-images 保留原像素）
-python -B pipeline/run.py --recognize --input "../papers" --out "../grading-results/run-001"
+# 启动控制中心（本机主控 + 局域网协作）
+python tools/工作台.py serve --open
 
-# 2. 启动本机验收界面（浏览器访问 http://127.0.0.1:8903/）
-python -B tools/识别验收.py --dir "../grading-results/run-001" --port 8903
+# 环境自检 / 测速补包 / 生成 AI 诊断提示词
+python tools/工作台.py check
+python tools/工作台.py repair-pip
+python tools/工作台.py agent-prompt --launch
 
-# 同一路由器下多人同时核对，加 --lan 即可：
-python -B tools/识别验收.py --dir "../grading-results/run-001" --port 8903 --lan
+# 标准化入库（不改原图、去重、统一命名）→ 自动识别 → 查看总览进度
+python tools/工作台.py ingest --source "D:/papers" --subject 物理
+python tools/工作台.py run
+python tools/工作台.py status
 ```
 
-> 公开仓库不包含真实试卷、训练数据或 API 密钥；首次运行请用 `--input` 指定自己的图片目录。
+> 公开仓库不包含真实试卷、训练数据或 API 密钥；首次运行请导入自己的图片目录。
 
 ---
 

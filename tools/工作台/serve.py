@@ -293,8 +293,18 @@ def make_handler(state: WorkbenchState):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.end_headers()
             self.wfile.write(raw)
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.end_headers()
 
         def _read_json(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
@@ -413,6 +423,32 @@ def make_handler(state: WorkbenchState):
                 try:
                     res = state.start_service(str(body.get("task_id") or ""), extra=body)
                     self._send_json(200, res)
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            if path == "/api/open-edit":
+                # 从人工复审（整页核对）单张试卷一键进入三合一标框修改子界面
+                try:
+                    page_name = str(body.get("page_name") or "").strip()
+                    stem = Path(page_name).stem if page_name else ""
+                    if not stem:
+                        raise ValueError("缺少试卷文件名")
+                    m1_imgs = state.root / "data" / "m1" / "images"
+                    m1_imgs.mkdir(parents=True, exist_ok=True)
+                    target = m1_imgs / f"{stem}.jpg"
+                    if not target.is_file():
+                        # 按需从当前活跃批次复制一份（非破坏性），确保单张一定可编辑
+                        active = core.get_active_batch(state.batches_root)
+                        if active:
+                            src_dir = Path(active["images_dir"])
+                            for cand in (src_dir / page_name, src_dir / f"{stem}.jpg"):
+                                if cand.is_file():
+                                    import shutil
+                                    shutil.copy2(cand, target)
+                                    break
+                    res = state.start_service("annotate", extra={"m": "m1"})
+                    self._send_json(200, {"ok": True, "port": res["port"], "stem": stem, "synced": target.is_file()})
                 except Exception as exc:
                     self._send_json(400, {"ok": False, "error": str(exc)})
                 return
