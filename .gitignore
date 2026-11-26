@@ -1,5 +1,6 @@
 # 数据、训练产物、权重不上传
 data/
+batches/
 train/
 models/
 raw/

@@ -382,7 +382,9 @@ function isCoopAuto() {
   return !!(el && el.checked);
 }
 try {
-  const savedName = localStorage.getItem('annotationReviewerName') || '';
+  const urlReviewer = (typeof location !== 'undefined' && location.search) ? new URLSearchParams(location.search).get('reviewer') : '';
+  if (urlReviewer && urlReviewer.trim()) localStorage.setItem('annotationReviewerName', urlReviewer.trim());
+  const savedName = localStorage.getItem('annotationReviewerName') || localStorage.getItem('reviewUserName') || '';
   const nameEl = document.getElementById('reviewerName');
   if (nameEl) {
     if (savedName) nameEl.value = savedName;

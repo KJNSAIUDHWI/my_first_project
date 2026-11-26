@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动改卷工作台</title>
+<style>
+  :root{
+    --bg:#f6f4ef; --card:#ffffff; --line:#e6e1d6; --line-strong:#d4ccb9;
+    --text:#1f2421; --muted:#6b726d; --soft:#f0ede5;
+    --primary:#1f7a53; --primary-hover:#176242; --primary-soft:#e6f4ed;
+    --warn:#b45309; --warn-soft:#fef3c7;
+    --err:#b91c1c; --err-soft:#fee2e2;
+    --blue:#1d4ed8; --blue-soft:#eff6ff;
+    --shadow:0 4px 18px rgba(31,36,33,.06);
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;line-height:1.55}
+  .wrap{max-width:1120px;margin:0 auto;padding:20px 22px 92px}
+
+  /* 顶栏 */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 20px;box-shadow:var(--shadow);margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#1f7a53,#2ea371);color:#fff;display:grid;place-items:center;font-weight:800;font-size:19px}
+  .brand h1{margin:0;font-size:19px;font-weight:700}
+  .brand .sub{font-size:12.5px;color:var(--muted)}
+  .role-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:13px;font-weight:600}
+  .role-pill.host{background:var(--primary-soft);color:var(--primary)}
+  .role-pill.collab{background:var(--blue-soft);color:var(--blue)}
+  .dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+  .user-box{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
+  .user-btn{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:6px 12px;cursor:pointer;font-size:13px;color:var(--text);font-weight:600}
+  .user-btn:hover{border-color:var(--primary)}
+
+  /* 主机步骤导航 */
+  .stepper{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+  .step-tab{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:.2s;text-align:left}
+  .step-tab:hover{border-color:var(--line-strong)}
+  .step-tab.active{border-color:var(--primary);background:var(--primary-soft)}
+  .step-num{width:30px;height:30px;border-radius:50%;background:var(--soft);color:var(--muted);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
+  .step-tab.active .step-num{background:var(--primary);color:#fff}
+  .step-tab.ok .step-num{background:#16a34a;color:#fff}
+  .step-tab.err .step-num{background:var(--err);color:#fff}
+  .step-title{font-weight:700;font-size:14.5px}
+  .step-desc{font-size:12px;color:var(--muted)}
+
+  /* 游戏教程式高亮动效（Agent / CLI 驱动时） */
+  @keyframes spotlightPulse{
+    0%{box-shadow:0 0 0 0 rgba(31,122,83,.45), 0 0 0 2px var(--primary)}
+    70%{box-shadow:0 0 0 12px rgba(31,122,83,0), 0 0 0 2px var(--primary)}
+    100%{box-shadow:0 0 0 0 rgba(31,122,83,0), 0 0 0 2px var(--primary)}
+  }
+  .spotlight{animation:spotlightPulse 1.5s infinite;border-color:var(--primary) !important}
+
+  /* 卡片与按钮 */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);margin-bottom:16px}
+  .card h2{margin:0 0 6px;font-size:17px}
+  .card .lead{margin:0 0 16px;color:var(--muted);font-size:13.5px}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .btn{border:1px solid var(--line-strong);background:#fff;color:var(--text);padding:9px 16px;border-radius:11px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+  .btn:hover:not(:disabled){background:var(--soft)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn.primary:hover:not(:disabled){background:var(--primary-hover);color:#fff}
+  .btn.warn{background:var(--warn-soft);border-color:#f59e0b;color:var(--warn)}
+  .btn.danger{background:var(--err-soft);border-color:#f87171;color:var(--err)}
+  .btn.sm{padding:6px 12px;font-size:13px;border-radius:9px}
+
+  /* 环境检查列表 */
+  .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px;margin:14px 0}
+  .check-item{border:1px solid var(--line);border-radius:12px;padding:11px 14px;display:flex;align-items:flex-start;gap:10px;background:#fcfbf8}
+  .check-item.err{border-color:#fca5a5;background:#fff5f5}
+  .check-item.warn{border-color:#fcd34d;background:#fffbeb}
+  .badge{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;flex:none;margin-top:2px}
+  .badge.ok{background:var(--primary-soft);color:var(--primary)}
+  .badge.err{background:var(--err-soft);color:var(--err)}
+  .badge.warn{background:var(--warn-soft);color:var(--warn)}
+  .check-name{font-weight:600;font-size:14px}
+  .check-detail{font-size:12.5px;color:var(--muted);word-break:break-all}
+
+  /* 数据录入表单 */
+  .field{margin-bottom:16px}
+  .field label{display:block;font-weight:600;font-size:14px;margin-bottom:7px}
+  .input{width:100%;padding:10px 13px;border:1.5px solid var(--line-strong);border-radius:11px;font-size:14px;background:#fff;color:var(--text)}
+  .input:focus{outline:none;border-color:var(--primary)}
+  .subject-pills{display:flex;flex-wrap:wrap;gap:8px}
+  .subj{padding:8px 15px;border-radius:999px;border:1.5px solid var(--line-strong);background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:var(--text)}
+  .subj.active{background:var(--primary);border-color:var(--primary);color:#fff}
+
+  /* 协作邀请条 */
+  .invite-bar{background:linear-gradient(90deg,#edf7f2,#f3f8ff);border:1.5px solid #bfe3d1;border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .lan-url{font-family:Consolas,"Cascadia Mono",monospace;font-size:16px;font-weight:700;color:var(--primary);background:#fff;padding:5px 12px;border-radius:9px;border:1px solid #cce6d8}
+
+  /* 总览布局 */
+  .overview-grid{display:grid;grid-template-columns:1.65fr 1fr;gap:16px}
+  @media(max-width:860px){.overview-grid{grid-template-columns:1fr}.stepper{grid-template-columns:1fr}}
+  .task-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:12px}
+  .task-card{border:1.5px solid var(--line);border-radius:14px;padding:16px;background:#fcfbf8;display:flex;flex-direction:column;gap:10px;transition:.2s}
+  .task-card.running{border-color:#86efac;background:#f7fdf9}
+  .task-card h3{margin:0;font-size:15.5px}
+  .task-desc{font-size:12.5px;color:var(--muted)}
+  .prog-bar{height:8px;background:#e8e4da;border-radius:999px;overflow:hidden}
+  .prog-bar i{display:block;height:100%;background:linear-gradient(90deg,#1f7a53,#34b37c);border-radius:999px;transition:width .3s}
+  .prog-nums{display:flex;justify-content:space-between;font-size:13px;font-weight:600}
+
+  /* 人员榜 */
+  .person-row{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:10px;background:#faf8f3;border:1px solid var(--line);margin-bottom:8px;font-size:14px}
+  .online-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;margin:0 6px 6px 0}
+
+  /* 日志与实时播报条 */
+  .log-box{background:#1c211e;color:#d6e3dc;font-family:Consolas,monospace;font-size:12.5px;padding:12px 14px;border-radius:12px;max-height:190px;overflow:auto;white-space:pre-wrap;margin-top:12px}
+  .live-banner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#1f2421;color:#fff;padding:10px 18px;border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.22);display:none;align-items:center;gap:10px;font-size:13.5px;max-width:92vw;z-index:50}
+  .live-banner.show{display:flex}
+  .pulse-dot{width:9px;height:9px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 4px rgba(74,222,128,.25);flex:none}
+  .live-src{background:rgba(255,255,255,.15);padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:700}
+
+  /* 弹窗 */
+  dialog{border:none;border-radius:18px;padding:22px;max-width:440px;width:92vw;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+  dialog::backdrop{background:rgba(20,25,22,.48)}
+  .hidden{display:none !important}
+  .muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">改</div>
+      <div>
+        <h1>自动改卷工作台</h1>
+        <div class="sub" id="topSub">正在连接工作台...</div>
+      </div>
+    </div>
+    <div class="row">
+      <span id="rolePill" class="role-pill host"><i class="dot"></i><span>主机模式</span></span>
+      <div class="user-box">
+        <span>当前操作人：</span>
+        <button id="btnUser" class="user-btn" type="button">未填写</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 仅主机可见：三步主轴 -->
+  <nav id="hostStepper" class="stepper hidden">
+    <button class="step-tab" data-view="check" id="tabCheck" type="button">
+      <span class="step-num">1</span>
+      <div><div class="step-title">环境自检</div><div class="step-desc" id="tabCheckDesc">检查 Python 与模型权重</div></div>
+    </button>
+    <button class="step-tab" data-view="ingest" id="tabIngest" type="button">
+      <span class="step-num">2</span>
+      <div><div class="step-title">录入新数据</div><div class="step-desc" id="tabIngestDesc">统一命名入库与自动识别</div></div>
+    </button>
+    <button class="step-tab" data-view="overview" id="tabOverview" type="button">
+      <span class="step-num">3</span>
+      <div><div class="step-title">控制总览 &amp; 协作</div><div class="step-desc" id="tabOverviewDesc">看进度、拉家人一起审</div></div>
+    </button>
+  </nav>
+
+  <!-- 视图 1：环境自检（仅主机） -->
+  <section id="viewCheck" class="card hidden">
+    <div class="between">
+      <div>
+        <h2>第一步：运行环境与模型自检</h2>
+        <p class="lead" id="checkSummary">每次启动快速检查一次，全绿即可安心干活；缺啥都可以一键修或交给 AI 助手。</p>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnRecheck" type="button">重新检查</button>
+        <button class="btn primary hidden" id="btnToIngest" type="button">环境就绪，下一步 →</button>
+      </div>
+    </div>
+
+    <div id="repairBar" class="row hidden" style="padding:12px 14px;background:#fff8eb;border:1px solid #fcd34d;border-radius:12px;margin-bottom:12px">
+      <strong style="color:var(--warn)">发现缺失项，选一种方式修复：</strong>
+      <button class="btn primary sm hidden" id="btnRepairPip" type="button">① 自动测速并安装缺失依赖</button>
+      <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">① 输入密码解压加密权重</button>
+      <button class="btn sm hidden" id="btnSetArkKey" type="button">填写豆包 API Key</button>
+      <button class="btn sm" id="btnAskAgent" type="button">② 复制诊断信息并唤起 AI 助手 (opencode)</button>
+    </div>
+
+    <div id="checkGrid" class="check-grid"></div>
+
+    <details style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer">高级设置：手动指定 opencode 路径（可选）</summary>
+      <div class="row" style="margin-top:8px">
+        <input id="inputOpencode" class="input" style="max-width:460px" placeholder="例如 C:\Users\...\opencode.exe（留空则自动查找）">
+        <button class="btn sm" id="btnSaveOpencode" type="button">保存路径</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- 视图 2：录入新数据（仅主机） -->
+  <section id="viewIngest" class="card hidden">
+    <div class="between">
+      <div>
+        <h2>第二步：录入新一批试卷（仅主机操作）</h2>
+        <p class="lead">只复制不改原图，自动去重并统一重命名为 <code>日期_学科_序号.jpg</code>，方便后续每道题 100% 溯源。</p>
+      </div>
+      <button class="btn" id="btnSkipIngest" type="button">跳过，直接进控制总览 →</button>
+    </div>
+
+    <div class="field">
+      <label>1. 选择存放新试卷照片的文件夹</label>
+      <div class="row">
+        <input id="inputSourceDir" class="input" style="flex:1;min-width:260px" placeholder="点击右侧按钮选择文件夹，或直接粘贴路径">
+        <button class="btn" id="btnPickFolder" type="button">选择文件夹...</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>2. 选择本批试卷学科</label>
+      <div id="subjectPills" class="subject-pills"></div>
+    </div>
+
+    <div class="field">
+      <label>3. 批次备注名（可选，留空自动按时间+学科生成）</label>
+      <input id="inputBatchName" class="input" style="max-width:420px" placeholder="例如：高三期中物理">
+    </div>
+
+    <div class="row">
+      <button class="btn primary" id="btnDoIngest" type="button">整理并入库</button>
+      <button class="btn" id="btnRunRecognizeAfter" type="button">对当前批次开始自动识别</button>
+      <span id="ingestMsg" class="muted"></span>
+    </div>
+    <div id="ingestLog" class="log-box hidden"></div>
+  </section>
+
+  <!-- 视图 3：控制总览 & 多人协作（主机 + 协作者共用） -->
+  <section id="viewOverview" class="hidden">
+    <!-- 主机专属：邀请协作者 -->
+    <div id="inviteBar" class="invite-bar hidden">
+      <div>
+        <div style="font-weight:700;font-size:15px">邀请家里人一起审（另一台电脑/平板直接用浏览器打开即可，不用装软件）</div>
+        <div class="muted" style="margin-top:2px">打开后输入称呼就能看到实时进度，点任务自动领下一张图，不会撞车</div>
+      </div>
+      <div class="row">
+        <span id="lanUrlText" class="lan-url">http://192.168.x.x:8888</span>
+        <button class="btn primary sm" id="btnCopyLan" type="button">复制网址</button>
+      </div>
+    </div>
+
+    <!-- 当前批次状态卡 -->
+    <div class="card" id="batchCard">
+      <div class="between">
+        <div>
+          <h2 id="activeBatchTitle">当前批次：尚未导入</h2>
+          <div class="muted" id="activeBatchMeta">请主机先在「录入新数据」中导入一批试卷</div>
+        </div>
+        <div class="row" id="hostBatchActions">
+          <select id="batchSelect" class="input" style="width:auto;min-width:190px;padding:7px 10px"></select>
+          <button class="btn primary sm" id="btnStartRecognize" type="button">开始自动识别</button>
+          <button class="btn sm" id="btnGoIngestNew" type="button">+ 导入新一批</button>
+        </div>
+      </div>
+      <div id="pipelineLogBox" class="log-box hidden"></div>
+    </div>
+
+    <div class="overview-grid">
+      <!-- 左侧：4 个审核任务卡片 -->
+      <div class="card">
+        <div class="between" style="margin-bottom:12px">
+          <div>
+            <h2>当前审核任务</h2>
+            <div class="muted">点「进去审」自动拉起对应审核页并带入你的称呼</div>
+          </div>
+          <button class="btn sm" id="btnRefreshOverview" type="button">刷新进度</button>
+        </div>
+        <div id="taskGrid" class="task-grid"></div>
+      </div>
+
+      <!-- 右侧：在线成员 + 人员审阅榜 -->
+      <div class="card">
+        <h2>协作动态与工作量</h2>
+        <div class="muted" style="margin-bottom:10px">实时显示在线成员与每个人的累计审阅量</div>
+
+        <div style="margin-bottom:14px">
+          <div style="font-weight:600;font-size:13.5px;margin-bottom:6px">当前在线</div>
+          <div id="onlineList"><span class="muted">暂无其他成员在线</span></div>
+        </div>
+
+        <div>
+          <div style="font-weight:600;font-size:13.5px;margin-bottom:6px">不同人做了多少（累计审阅）</div>
+          <div id="leaderboard"><div class="muted">还没有人提交审阅记录</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- 底部实时播报条（SSE：Agent CLI 或后台任务驱动时亮起） -->
+<div id="liveBanner" class="live-banner">
+  <span class="pulse-dot"></span>
+  <span id="liveSource" class="live-src">实时</span>
+  <span id="liveText">就绪</span>
+</div>
+
+<!-- 称呼弹窗 -->
+<dialog id="nameDialog">
+  <h3 style="margin:0 0 8px">怎么称呼你？</h3>
+  <p class="muted" style="margin:0 0 14px">填个名字（比如“妈妈”“爸爸”），这样控制总览能统计每个人审了多少张，进入审核页也不用重复填写。</p>
+  <input id="nameInput" class="input" placeholder="输入你的称呼" maxlength="20">
+  <div class="row" style="justify-content:flex-end;margin-top:16px">
+    <button class="btn primary" id="btnSaveName" type="button">确定</button>
+  </div>
+</dialog>
+
+<!-- 解压权重密码弹窗 -->
+<dialog id="pwdDialog">
+  <h3 style="margin:0 0 8px">解压加密模型权重</h3>
+  <p class="muted" style="margin:0 0 14px">输入压缩包密码，系统会自动用 7-Zip 解压到 <code>models/</code> 目录。</p>
+  <input id="pwdInput" type="password" class="input" placeholder="请输入权重压缩包密码">
+  <div id="pwdErr" style="color:var(--err);font-size:13px;margin-top:8px"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:16px">
+    <button class="btn" id="btnCancelPwd" type="button">取消</button>
+    <button class="btn primary" id="btnConfirmPwd" type="button">开始解压</button>
+  </div>
+</dialog>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const CLIENT_ID = (() => {
+  let id = sessionStorage.getItem('wbClientId');
+  if (!id) { id = 'u_' + Math.random().toString(36).slice(2, 10); sessionStorage.setItem('wbClientId', id); }
+  return id;
+})();
+
+let OVERVIEW = null;
+let CHECK = null;
+let CURRENT_VIEW = 'overview';
+let SELECTED_SUBJECT = localStorage.getItem('wbLastSubject') || '物理';
+let INITIALIZED = false;
+
+function getUserName() { return (localStorage.getItem('reviewUserName') || '').trim(); }
+function setUserName(name) {
+  localStorage.setItem('reviewUserName', name.trim());
+  $('btnUser').textContent = name.trim() || '点击填写称呼';
+  pingPresence('总览');
+}
+
+function showBanner(source, text, durationMs = 4500) {
+  $('liveSource').textContent = source === 'cli' ? 'AI / 命令行联动' : '实时进度';
+  $('liveText').textContent = text;
+  $('liveBanner').classList.add('show');
+  clearTimeout(showBanner._t);
+  if (durationMs > 0) showBanner._t = setTimeout(() => $('liveBanner').classList.remove('show'), durationMs);
+}
+
+function highlightElement(id, durationMs = 3200) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.add('spotlight');
+  clearTimeout(el._st);
+  el._st = setTimeout(() => el.classList.remove('spotlight'), durationMs);
+}
+
+function setView(view) {
+  if (!OVERVIEW?.is_host && view !== 'overview') view = 'overview';
+  CURRENT_VIEW = view;
+  $('viewCheck').classList.toggle('hidden', view !== 'check');
+  $('viewIngest').classList.toggle('hidden', view !== 'ingest');
+  $('viewOverview').classList.toggle('hidden', view !== 'overview');
+  document.querySelectorAll('.step-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
+}
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    ...opts,
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || `请求失败 (${r.status})`);
+  return data;
+}
+
+function renderCheck(rep) {
+  CHECK = rep;
+  const tab = $('tabCheck');
+  tab.classList.toggle('ok', rep.ok);
+  tab.classList.toggle('err', !rep.ok);
+  $('tabCheckDesc').textContent = rep.ok ? `全部通过 (${rep.elapsed_ms}ms)` : `${rep.error_count} 项需要修复`;
+  $('checkSummary').textContent = rep.ok
+    ? `全部必需环境与模型权重均已就绪（耗时 ${rep.elapsed_ms}ms）。`
+    : `发现 ${rep.error_count} 项缺失或异常，请使用下方一键修复或交给 AI 助手处理。`;
+  $('btnToIngest').classList.toggle('hidden', !rep.ok);
+
+  const needRepair = !rep.ok || rep.warning_count > 0;
+  $('repairBar').classList.toggle('hidden', !needRepair);
+  $('btnRepairPip').classList.toggle('hidden', !(rep.missing_packages && rep.missing_packages.length));
+  $('btnUnpackWeights').classList.toggle('hidden', !(rep.missing_weights && rep.missing_weights.length && rep.has_encrypted_weights));
+  const arkItem = (rep.items || []).find(x => x.id === 'ark_key');
+  $('btnSetArkKey').classList.toggle('hidden', !arkItem || arkItem.ok);
+
+  $('checkGrid').innerHTML = rep.items.map(it => `
+    <div class="check-item ${it.severity}">
+      <span class="badge ${it.severity}">${it.severity === 'ok' ? '正常' : it.severity === 'warn' ? '提醒' : '缺失'}</span>
+      <div>
+        <div class="check-name">${esc(it.name)}</div>
+        <div class="check-detail">${esc(it.detail)}</div>
+      </div>
+    </div>
+  `).join('');
+  if (rep.opencode_path && !$('inputOpencode').value) {
+    $('inputOpencode').placeholder = '已自动检测到：' + rep.opencode_path;
+  }
+}
+
+function renderSubjects(list) {
+  const subjects = list && list.length ? list : ['物理','数学','化学','生物','地理','其他'];
+  if (!subjects.includes(SELECTED_SUBJECT)) SELECTED_SUBJECT = subjects[0];
+  $('subjectPills').innerHTML = subjects.map(s => `
+    <button type="button" class="subj ${s === SELECTED_SUBJECT ? 'active' : ''}" data-subj="${esc(s)}">${esc(s)}</button>
+  `).join('');
+  $('subjectPills').querySelectorAll('.subj').forEach(btn => {
+    btn.onclick = () => {
+      SELECTED_SUBJECT = btn.dataset.subj;
+      localStorage.setItem('wbLastSubject', SELECTED_SUBJECT);
+      renderSubjects(subjects);
+    };
+  });
+}
+
+function renderOverview(data) {
+  OVERVIEW = data;
+  const isHost = !!data.is_host;
+
+  $('rolePill').className = 'role-pill ' + (isHost ? 'host' : 'collab');
+  $('rolePill').innerHTML = isHost
+    ? '<i class="dot"></i><span>本机是主机（服务端）</span>'
+    : '<i class="dot"></i><span>协作者模式（只参与审阅）</span>';
+  $('topSub').textContent = isHost
+    ? `主控服务运行中 · 局域网地址 ${data.lan_url}`
+    : `已连接到主机 ${window.location.host} · 选一个任务直接帮忙审`;
+
+  $('hostStepper').classList.toggle('hidden', !isHost);
+  $('inviteBar').classList.toggle('hidden', !isHost);
+  $('hostBatchActions').classList.toggle('hidden', !isHost);
+  $('lanUrlText').textContent = data.lan_url;
+
+  if (isHost && data.config?.opencode_path) {
+    $('inputOpencode').value = data.config.opencode_path;
+  }
+
+  // 当前批次
+  const ab = data.active_batch;
+  if (ab) {
+    $('activeBatchTitle').textContent = `当前批次：${ab.batch_id}（${ab.subject} · 共 ${ab.total_images} 张）`;
+    $('activeBatchMeta').textContent = `入库时间 ${ab.created_at} · ${ab.has_recognition ? '已完成自动识别，可进入识别验收' : '尚未运行自动识别'}`;
+  } else {
+    $('activeBatchTitle').textContent = '当前批次：尚未导入新试卷';
+    $('activeBatchMeta').textContent = isHost ? '点击右上角「+ 导入新一批」或切到「录入新数据」开始' : '等待主机导入新试卷，也可以直接参与下方已有的审核任务';
+  }
+
+  // 批次切换下拉框
+  const sel = $('batchSelect');
+  sel.innerHTML = (data.batches || []).map(b =>
+    `<option value="${esc(b.batch_id)}" ${ab && b.batch_id === ab.batch_id ? 'selected' : ''}>${esc(b.batch_id)} (${b.total_images}张)</option>`
+  ).join('') || '<option value="">暂无已导入批次</option>';
+
+  // 流水线日志
+  const job = data.pipeline_job || {};
+  $('btnStartRecognize').disabled = !!job.running || !ab;
+  $('btnStartRecognize').textContent = job.running ? '自动识别运行中...' : (ab?.has_recognition ? '重新自动识别' : '开始自动识别');
+  if (job.logs && job.logs.length) {
+    $('pipelineLogBox').classList.remove('hidden');
+    $('pipelineLogBox').textContent = job.logs.slice(-30).join('\n');
+    $('pipelineLogBox').scrollTop = $('pipelineLogBox').scrollHeight;
+  }
+
+  // 4 个任务卡片
+  const hostForLinks = window.location.hostname || '127.0.0.1';
+  $('taskGrid').innerHTML = (data.tasks || []).map(t => {
+    const pct = t.total > 0 ? Math.round((t.done / t.total) * 100) : 0;
+    const statusTag = t.running ? '<span class="badge ok">服务运行中</span>' : '<span class="badge warn">点击自动启动</span>';
+    return `
+      <div class="task-card ${t.running ? 'running' : ''}" id="task_${esc(t.id)}">
+        <div class="between">
+          <h3>${esc(t.name)}</h3>
+          ${statusTag}
+        </div>
+        <div class="task-desc">${esc(t.desc)}</div>
+        <div class="prog-nums">
+          <span>进度：${t.done} / ${t.total} ${esc(t.unit)} (${pct}%)</span>
+          <span class="muted">剩 ${t.remaining}</span>
+        </div>
+        <div class="prog-bar"><i style="width:${pct}%"></i></div>
+        <div class="muted" style="font-size:12px">${esc(t.extra)}</div>
+        <div class="row" style="margin-top:auto;padding-top:4px">
+          <button class="btn primary sm" data-open-task="${esc(t.id)}" ${t.available ? '' : 'disabled'} type="button">进去审 →</button>
+          ${isHost && t.running ? `<button class="btn sm" data-stop-task="${esc(t.id)}" type="button">停止服务</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  $('taskGrid').querySelectorAll('[data-open-task]').forEach(btn => {
+    btn.onclick = () => openTask(btn.dataset.openTask, hostForLinks);
+  });
+  $('taskGrid').querySelectorAll('[data-stop-task]').forEach(btn => {
+    btn.onclick = async () => {
+      await api('/api/service/stop', { method: 'POST', body: JSON.stringify({ task_id: btn.dataset.stopTask }) });
+      await refreshOverview();
+    };
+  });
+
+  // 在线成员
+  const online = data.online_users || [];
+  $('onlineList').innerHTML = online.length
+    ? online.map(u => `<span class="online-chip"><i class="dot"></i>${esc(u.name)} · ${u.role === 'host' ? '主机' : '协作者'}</span>`).join('')
+    : '<span class="muted">当前只有你在线</span>';
+
+  // 人员贡献榜
+  const lb = data.leaderboard || [];
+  $('leaderboard').innerHTML = lb.length
+    ? lb.map((p, idx) => `
+        <div class="person-row">
+          <span><strong>${idx + 1}. ${esc(p.name)}</strong></span>
+          <span style="color:var(--primary);font-weight:700">${p.count} 项</span>
+        </div>
+      `).join('')
+    : '<div class="muted">还没有人提交审阅记录，审完第一题就会显示在这里</div>';
+
+  renderSubjects(data.subjects);
+
+  // 首次打开自动决定落位页
+  if (!INITIALIZED) {
+    INITIALIZED = true;
+    if (!isHost) {
+      setView('overview');
+    } else if (data.last_check && !data.last_check.ok) {
+      renderCheck(data.last_check);
+      setView('check');
+    } else {
+      if (data.last_check) renderCheck(data.last_check);
+      setView(ab ? 'overview' : 'ingest');
+    }
+    if (!getUserName()) {
+      $('nameInput').value = isHost ? '主机' : '';
+      $('nameDialog').showModal();
+    }
+  }
+}
+
+async function openTask(taskId, hostForLinks) {
+  showBanner('gui', '正在准备审核页面，请稍候...', 6000);
+  try {
+    const res = await api('/api/service/ensure', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
+    const who = getUserName();
+    const qs = who ? ('?reviewer=' + encodeURIComponent(who)) : '';
+    const url = `http://${hostForLinks}:${res.port}/${qs}`;
+    pingPresence(taskId);
+    window.open(url, '_blank');
+    await refreshOverview();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function refreshOverview() {
+  try {
+    const data = await api('/api/overview');
+    renderOverview(data);
+  } catch (err) {
+    $('topSub').textContent = '连接工作台失败：' + err.message;
+  }
+}
+
+async function pingPresence(task = '总览') {
+  try {
+    await fetch('/api/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: CLIENT_ID, name: getUserName() || '成员', task }),
+    });
+  } catch (_) {}
+}
+
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = e => {
+    try {
+      const ev = JSON.parse(e.data);
+      showBanner(ev.source || 'gui', ev.message || ev.step, 5000);
+      if (ev.step === 'check') highlightElement('tabCheck');
+      else if (ev.step === 'ingest') highlightElement('tabIngest');
+      else if (ev.step === 'recognize') { highlightElement('batchCard'); refreshOverview(); }
+      else if (ev.step?.startsWith('service_')) {
+        highlightElement('task_' + ev.step.replace('service_', ''));
+        refreshOverview();
+      } else if (ev.step === 'overview') {
+        highlightElement('tabOverview');
+        refreshOverview();
+      }
+    } catch (_) {}
+  };
+}
+
+// 绑定事件
+$('btnUser').textContent = getUserName() || '点击填写称呼';
+$('btnUser').onclick = () => { $('nameInput').value = getUserName(); $('nameDialog').showModal(); };
+$('btnSaveName').onclick = () => {
+  const v = $('nameInput').value.trim();
+  if (!v) return;
+  setUserName(v);
+  $('nameDialog').close();
+};
+$('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnSaveName').click(); });
+
+document.querySelectorAll('.step-tab').forEach(btn => {
+  btn.onclick = async () => {
+    setView(btn.dataset.view);
+    if (btn.dataset.view === 'check' && !CHECK) {
+      const rep = await api('/api/check');
+      renderCheck(rep);
+    }
+  };
+});
+
+$('btnRecheck').onclick = async () => {
+  $('btnRecheck').disabled = true;
+  try { renderCheck(await api('/api/check')); } finally { $('btnRecheck').disabled = false; }
+};
+$('btnToIngest').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+$('btnSkipIngest').onclick = () => setView('overview');
+$('btnGoIngestNew').onclick = () => setView('ingest');
+$('btnRefreshOverview').onclick = refreshOverview;
+
+$('btnRepairPip').onclick = async () => {
+  $('btnRepairPip').disabled = true;
+  showBanner('gui', '正在测速官方源与国内镜像并安装缺失依赖...', 15000);
+  try {
+    const res = await api('/api/repair/pip', { method: 'POST', body: '{}' });
+    alert(res.ok ? `安装完成！（使用源：${res.mirror?.name || ''}）` : '自动安装失败，建议点「求助 AI 助手」查看详情。');
+    renderCheck(await api('/api/check'));
+  } catch (err) { alert(err.message); }
+  finally { $('btnRepairPip').disabled = false; }
+};
+
+$('btnUnpackWeights').onclick = () => { $('pwdErr').textContent = ''; $('pwdInput').value = ''; $('pwdDialog').showModal(); };
+$('btnCancelPwd').onclick = () => $('pwdDialog').close();
+$('btnConfirmPwd').onclick = async () => {
+  $('btnConfirmPwd').disabled = true;
+  $('pwdErr').textContent = '';
+  try {
+    const res = await api('/api/repair/weights', { method: 'POST', body: JSON.stringify({ password: $('pwdInput').value }) });
+    $('pwdDialog').close();
+    alert(res.message || '解压完成');
+    renderCheck(await api('/api/check'));
+  } catch (err) { $('pwdErr').textContent = err.message; }
+  finally { $('btnConfirmPwd').disabled = false; }
+};
+
+$('btnAskAgent').onclick = async () => {
+  try {
+    const res = await api('/api/repair/agent', { method: 'POST', body: '{}' });
+    alert(res.message);
+  } catch (err) { alert(err.message); }
+};
+
+$('btnSetArkKey').onclick = async () => {
+  const val = prompt('请粘贴豆包 API Key（将自动保存到本地 .env，不会上传）：', '');
+  if (!val || !val.trim()) return;
+  try {
+    const res = await api('/api/repair/env', { method: 'POST', body: JSON.stringify({ key: 'ARK_API_KEY', value: val.trim() }) });
+    showBanner('gui', res.message || 'API Key 已保存');
+    renderCheck(await api('/api/check'));
+  } catch (err) { alert(err.message); }
+};
+
+$('btnSaveOpencode').onclick = async () => {
+  await api('/api/config', { method: 'POST', body: JSON.stringify({ opencode_path: $('inputOpencode').value.trim() }) });
+  showBanner('gui', '已保存 opencode 路径');
+};
+
+$('btnPickFolder').onclick = async () => {
+  $('btnPickFolder').disabled = true;
+  try {
+    const res = await api('/api/pick-folder', { method: 'POST', body: '{}' });
+    if (res.path) $('inputSourceDir').value = res.path;
+  } catch (err) { alert(err.message); }
+  finally { $('btnPickFolder').disabled = false; }
+};
+
+$('btnDoIngest').onclick = async () => {
+  const source_dir = $('inputSourceDir').value.trim();
+  if (!source_dir) { alert('请先选择或填写试卷照片文件夹'); return; }
+  $('btnDoIngest').disabled = true;
+  $('ingestMsg').textContent = '正在整理复制与去重...';
+  try {
+    const res = await api('/api/ingest', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_dir,
+        subject: SELECTED_SUBJECT,
+        batch_name: $('inputBatchName').value.trim(),
+      }),
+    });
+    $('ingestMsg').textContent = res.message;
+    await refreshOverview();
+  } catch (err) {
+    $('ingestMsg').textContent = '失败：' + err.message;
+    alert(err.message);
+  } finally {
+    $('btnDoIngest').disabled = false;
+  }
+};
+
+async function triggerRecognize() {
+  try {
+    await api('/api/pipeline/run', { method: 'POST', body: '{}' });
+    setView('overview');
+    await refreshOverview();
+  } catch (err) { alert(err.message); }
+}
+$('btnStartRecognize').onclick = triggerRecognize;
+$('btnRunRecognizeAfter').onclick = triggerRecognize;
+
+$('batchSelect').onchange = async () => {
+  if (!$('batchSelect').value) return;
+  await api('/api/batch/select', { method: 'POST', body: JSON.stringify({ batch_id: $('batchSelect').value }) });
+  await refreshOverview();
+};
+
+$('btnCopyLan').onclick = async () => {
+  const txt = $('lanUrlText').textContent;
+  try { await navigator.clipboard.writeText(txt); showBanner('gui', '已复制局域网网址：' + txt); }
+  catch (_) { prompt('请手动复制此网址发给家里另一台电脑：', txt); }
+};
+
+// 初始化
+refreshOverview().then(() => {
+  pingPresence('总览');
+  connectSSE();
+  setInterval(refreshOverview, 5000);
+  setInterval(() => pingPresence('总览'), 25000);
+});
+</script>
+</body>
+</html>

@@ -456,13 +456,16 @@ dialog img{max-width:100%;display:block;margin:12px auto;border-radius:8px}
             </div>
             <span id="itemPosition" class="pos-pill"></span>
           </div>
-          <select id="itemFilter" style="padding:5px 10px;font-size:13px">
-            <option value="all">全部题目</option>
-            <option value="issues">仅看需要核对</option>
-            <option value="unchecked">仅看未检查</option>
-            <option value="fill">只看填空大题</option>
-            <option value="choice">只看选择题</option>
-          </select>
+          <div class="bar" style="gap:10px">
+            <label class="map-toggle" title="勾选后在每道题下方直接显示识别置信度数值"><input id="showConf" type="checkbox">显示置信度</label>
+            <select id="itemFilter" style="padding:5px 10px;font-size:13px">
+              <option value="all">全部题目</option>
+              <option value="issues">仅看低置信度题</option>
+              <option value="unchecked">仅看未检查</option>
+              <option value="fill">只看填空大题</option>
+              <option value="choice">只看选择题</option>
+            </select>
+          </div>
         </div>
         <div id="items" class="item-list"></div>
       </section>
@@ -490,7 +493,8 @@ const labels=['正确','识别错误','漏题／漏空','对应错误','看不�
 let DATA,FEEDBACK,LOCKS={},pi=0,selected=null,focused=false,dirty=new Set(),view=null,drag=null,overviewScroll=0,lockedPageId=null;
 const CLIENT_ID=(()=>{try{let id=sessionStorage.getItem('reviewClientId');if(!id){id='r_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);sessionStorage.setItem('reviewClientId',id)}return id}catch(_){return 'r_local'}})();
 function reviewerName(){const el=$('reviewerName');return (el&&el.value?el.value:'').trim()}
-try{const el=$('reviewerName');if(el){el.value=localStorage.getItem('reviewUserName')||'';el.onchange=()=>{try{localStorage.setItem('reviewUserName',reviewerName())}catch(_){}}}}catch(_){}
+try{const el=$('reviewerName');const urlReviewer=new URLSearchParams(location.search).get('reviewer');if(urlReviewer&&urlReviewer.trim()){localStorage.setItem('reviewUserName',urlReviewer.trim())}if(el){el.value=localStorage.getItem('reviewUserName')||'';el.onchange=()=>{try{localStorage.setItem('reviewUserName',reviewerName())}catch(_){}}}}catch(_){}
+try{const cb=$('showConf');if(cb){cb.checked=localStorage.getItem('reviewShowConf')==='1';cb.onchange=()=>{try{localStorage.setItem('reviewShowConf',cb.checked?'1':'0')}catch(_){}if($('detail').style.display==='block')drawItems();}}}catch(_){}
 function releasePageBeacon(){if(!lockedPageId)return;const payload=JSON.stringify({token:TOKEN,client_id:CLIENT_ID,page_id:lockedPageId});lockedPageId=null;try{if(typeof navigator!=='undefined'&&navigator.sendBeacon)navigator.sendBeacon('/api/release',new Blob([payload],{type:'application/json'}))}catch(_){}}
 async function claimNextPage(){const r=await fetch('/api/claim',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':TOKEN},body:JSON.stringify({client_id:CLIENT_ID,user:reviewerName()||'成员'})});const d=await r.json();if(!r.ok)throw Error(d.error||'领卷失败');if(d.locks)LOCKS=d.locks;if(!d.key){toast(d.reason==='all_locked'?'剩余试卷正在被另一位核对中，请稍候再试':'太棒了，本批试卷已全部检查完！');renderPages();return}lockedPageId=d.key;const idx=DATA.pages.findIndex(p=>p.id===d.key);if(idx>=0){showPage(idx);toast('已为你锁定试卷：'+DATA.pages[idx].name)}}
 if(typeof setInterval==='function'){setInterval(()=>{if(!lockedPageId)return;fetch('/api/heartbeat',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':TOKEN},body:JSON.stringify({client_id:CLIENT_ID,user:reviewerName()||'成员',page_id:lockedPageId})}).then(r=>r.json()).then(d=>{if(d.locks)LOCKS=d.locks}).catch(()=>{})},30000)}
@@ -510,15 +514,17 @@ function reportError(stage,error,location=''){
 window.addEventListener('error',e=>{if(e.target!==window&&e.target?.tagName){reportError('资源加载失败',e.target.currentSrc||e.target.src||e.target.href||e.target.tagName);return}reportError('页面脚本错误',`${e.message||'未知错误'}${e.filename?' · '+e.filename+':'+e.lineno:''}`)},true);
 window.addEventListener('unhandledrejection',e=>{e.preventDefault();reportError('异步操作失败',e.reason||'未知错误')});
 function choiceDiagnostic(item){
+ if(!$('showConf')?.checked)return '';
  const r=item.recognition;
- if(!r)return `<div class="notice diagnostic">缺少识别详情，请对照原卷。</div>`;
- const number=r.number_conf??r.digit_conf,choice=r.choice_conf,pct=v=>typeof v==='number'&&Number.isFinite(v)?(v*100).toFixed(1)+'%':'未记录';
- const reasons=[];
- if(!item.answer)reasons.push('涂黑识别：未检出选中项。');
- if(!(r.no>0))reasons.push('题号识别：没有可靠题号。');
- else if(typeof number==='number'&&number<.3)reasons.push('题号识别：分数不足，需核对题号。');
- if(item.answer&&r.valid===false)reasons.push('结果校验：未通过，需结合题号、涂黑及配对提示核对。');
- return `<details class="diagnostic"><summary>为什么需要核对？</summary><div>${reasons.map(esc).join('<br>')}</div><div>题号置信度 ${pct(number)} · ${item.answer?'所选项最低涂黑分':'最高涂黑分'} ${pct(choice)}</div></details>`;
+ if(!r)return `<div class="muted" style="font-size:12px;margin-top:6px">置信度：未记录</div>`;
+ const number=r.number_conf??r.digit_conf,choice=r.choice_conf;
+ const fmt=v=>typeof v==='number'&&Number.isFinite(v)?(v*100).toFixed(1)+'%':'未记录';
+ const lowNum=typeof number==='number'&&number<.5;
+ const lowChoice=typeof choice==='number'&&choice<.5;
+ const numHtml=`<span style="${lowNum?'color:var(--amber);font-weight:700':''}">题号置信度 ${fmt(number)}</span>`;
+ const choiceLabel=item.answer?'涂黑置信度':'最高涂黑分';
+ const choiceHtml=`<span style="${lowChoice?'color:var(--amber);font-weight:700':''}">${choiceLabel} ${fmt(choice)}</span>`;
+ return `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#f7f5f0;border:1px solid var(--line);font-size:12.5px;color:var(--muted)">${numHtml} · ${choiceHtml}${!item.answer?' · 未检出涂黑':''}</div>`;
 }
 function toast(s){$('toast').textContent=s;$('toast').style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>$('toast').style.display='none',3000)}
 async function load(){if(dirty.size&&!confirm('还有未保存的反馈，刷新会保留在草稿中，是否继续？'))return;const r=await fetch('/api/state',{cache:'no-store'});const x=await r.json();if(!r.ok)throw Error(x.error);DATA=x.result;FEEDBACK=x.feedback;LOCKS=x.locks||{};renderOverview();if($('detail').style.display==='block')showPage(pi);}
@@ -543,9 +549,9 @@ function renderOverview(){
     <div class="stat-bar"><i style="width:${pct}%"></i></div>
   </div>
   <div class="stat ${issuesCount?'warn':'accent'}">
-    <span class="label">建议重点核对</span>
-    <b>${issuesCount} <span style="font-size:15px;font-weight:600;color:var(--muted)">项</span></b>
-    <span class="sub">${issuesCount?'系统把握不足的题，优先看这些':'系统把握良好，快速抽查即可'}</span>
+    <span class="label">低置信度题</span>
+    <b>${issuesCount} <span style="font-size:15px;font-weight:600;color:var(--muted)">道</span></b>
+    <span class="sub">${issuesCount?'题号或涂黑置信度偏低（页内可开关查看具体数值）':'全部题目置信度正常'}</span>
   </div>
   <div class="stat">
     <span class="label">已核完试卷</span>
@@ -687,7 +693,7 @@ function updateCardReviewUI(id){
 }
 function answerHTML(item){
  const t=item.transcription;
- if(item.kind==='choice')return `<div class="answer"><small>第 ${esc(item.number||'?')} 题 · 识别选项</small><div class="choice-val">${item.answer?esc(item.answer):'<span class="unclear" style="font-size:15px">未检出选中项 · 请对照原卷</span>'}</div></div>${!item.answer||item.recognition?.valid===false||item.issues.length?choiceDiagnostic(item):''}`;
+ if(item.kind==='choice')return `<div class="answer"><small>第 ${esc(item.number||'?')} 题 · 识别选项</small><div class="choice-val">${item.answer?esc(item.answer):'<span class="unclear" style="font-size:15px">未检出选中项 · 请对照原卷</span>'}</div></div>${choiceDiagnostic(item)}`;
  if(!t)return `<div class="notice" style="margin:0">${esc(item.status)}：暂无转录。</div>`;
  if(item.kind==='identity')return ['name','sid'].map((k,i)=>`<div class="answer" style="margin-bottom:6px"><small>${i?'学号':'姓名'}</small><div class="text" style="font-weight:700">${esc(t[k]||'（空白）')}</div></div>`).join('');
  return Object.entries(t.answers).map(([sub,blanks])=>blanks['舍弃']==='舍弃'?`<div class="answer-row"><span class="sub-label">${sub==='无小题号'?'填空':`(${esc(sub)})`}</span><strong style="color:var(--amber)">含图，整小题舍弃</strong></div>`:`<div class="answer-row"><span class="sub-label">${sub==='无小题号'?'填空':`(${esc(sub)})`}</span><div class="blank-list">${Object.entries(blanks).map(([n,v])=>`<span class="blank-chip"><small title="空位原编号 ${esc(n)}">${/^[1-9]\d*$/.test(n)&&+n<=20?String.fromCodePoint(9311+(+n)):esc(n)}</small>${v===''?'<span class="blank">空白</span>':v==='看不清'?'<strong class="unclear">看不清</strong>':`<span class="text mathtext" data-value="${esc(v)}"></span>`}</span>`).join('')}</div></div>`).join('');
