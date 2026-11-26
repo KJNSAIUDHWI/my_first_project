@@ -24,6 +24,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "pipeline"))
 from common import row_log  # noqa: E402
+from common.lan_collab import resolve_host, print_access_urls  # noqa: E402
 
 DATA = os.path.join(ROOT, "data", "choice")
 IMAGES = os.path.join(DATA, "images")
@@ -580,6 +581,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", action="append", help="可重复指定多个库，审核写回各自日志")
     ap.add_argument("--port", type=int, default=8905)
+    ap.add_argument("--host", default=None, help="监听地址，默认 127.0.0.1；多人局域网协作传 --lan 或 --host 0.0.0.0")
+    ap.add_argument("--lan", action="store_true", help="开启局域网监听（等价于 --host 0.0.0.0）")
     ap.add_argument("--subset", help="只审核清单里的 stem,row")
     ap.add_argument("--unreviewed", action="store_true", help="只显示未审")
     args = ap.parse_args()
@@ -606,10 +609,13 @@ def main():
     ROWS = combined
     INDEX = {r["name"]: r for r in ROWS}
     rebuild()
+    host = resolve_host(args.host, args.lan)
     print("  共 %d 行；已审 %d；特殊 %d" % (
         len(ROWS), sum(1 for r in ROWS if r["reviewed"]), sum(1 for r in ROWS if r["special"])), flush=True)
-    print("  打开: http://127.0.0.1:%d/" % args.port, flush=True)
-    Server(("127.0.0.1", args.port), H).serve_forever()
+    print_access_urls(host, args.port, label="涂黑审核")
+    srv = Server((host, args.port), H)
+    srv.daemon_threads = True
+    srv.serve_forever()
     return 0
 
 

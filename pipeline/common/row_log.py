@@ -5,9 +5,12 @@ digit 和 choice 用这里；检测框（m1-m3）用 events.py。
 日志是唯一事实源，审核状态每次从事件重算。
 """
 import json
+import threading
 from pathlib import Path
 
 from .records import read_events, now
+
+LOCK = threading.RLock()
 
 
 def log_path(base, name):
@@ -22,11 +25,12 @@ def read(base, name):
 def append(base, name, event):
     ev = {'时间': event.get('时间') or now()}
     ev.update({k: v for k, v in event.items() if k != '时间'})
-    p = log_path(base, name)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    new = not p.exists() or p.stat().st_size == 0
-    with p.open('a', encoding='utf-8-sig' if new else 'utf-8', newline='\n') as f:
-        f.write(json.dumps(ev, ensure_ascii=False) + '\n')
+    with LOCK:
+        p = log_path(base, name)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        new = not p.exists() or p.stat().st_size == 0
+        with p.open('a', encoding='utf-8-sig' if new else 'utf-8', newline='\n') as f:
+            f.write(json.dumps(ev, ensure_ascii=False) + '\n')
     return ev
 
 

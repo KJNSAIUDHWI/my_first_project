@@ -23,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(ROOT, "pipeline"))
 from common import row_log  # noqa: E402
 from common.digit_classes import MAX_DIGIT
+from common.lan_collab import resolve_host, print_access_urls
 
 LOCK = threading.Lock()
 ROWS = []
@@ -329,6 +330,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.join(ROOT, "data", "digit"))
     ap.add_argument("--port", type=int, default=8903)
+    ap.add_argument("--host", default=None, help="监听地址，默认 127.0.0.1；多人局域网协作传 --lan 或 --host 0.0.0.0")
+    ap.add_argument("--lan", action="store_true", help="开启局域网监听（等价于 --host 0.0.0.0）")
     args = ap.parse_args()
     DATA = args.data
     CSV_PATH = os.path.join(DATA, "labels.csv")
@@ -340,8 +343,9 @@ def main():
     print("  标注文件: %s" % CSV_PATH)
     print("  共 %d 框（标签0~60均可审核，当前0标签 %d 框）"
           % (len(ROWS), len(GROUPS.get(0, []))))
-    print("  打开: http://127.0.0.1:%d/" % args.port)
-    srv = Server(("127.0.0.1", args.port), H)
+    host = resolve_host(args.host, args.lan)
+    print_access_urls(host, args.port, label="数字审核")
+    srv = Server((host, args.port), H)
     srv.daemon_threads = True
     try:
         srv.serve_forever()

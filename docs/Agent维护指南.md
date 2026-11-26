@@ -20,9 +20,13 @@
 python -B pipeline/run.py --recognize --input "D:/papers" --out "D:/grading-results/run-001" --concurrency 4
 # 仅本地检测与拼图：在上条命令后增加 --detect-only
 python -B tools/识别验收.py --dir "D:/grading-results/run-001" --port 8903
+# 多人局域网协作（同一路由器下另一台电脑用浏览器打开主机打印的 192.168.x.x 地址）：
+python -B tools/识别验收.py --dir "D:/grading-results/run-001" --port 8903 --lan
 
 # M3审核：本轮CSV需包含new_name列，且对应已经准备好的M3数据
 python -B tools/标注工具/serve.py --data data/m3 --subset "D:/review/m3-batch.csv" --port 8910 --no-browser
+# 多人局域网协作画框（支持动态领图与单图租约锁，避免两人重复审核同一张）：
+python -B tools/标注工具/serve.py --data data/m3 --subset "D:/review/m3-batch.csv" --port 8910 --lan --no-browser
 
 # 查询真实支持的快照、训练参数
 python -B tools/迭代.py snapshot --help

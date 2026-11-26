@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'pipeline'))
 from common.recognition_api import save_json
+from common.lan_collab import ClaimManager, resolve_host, print_access_urls
 
 LABELS = ('正确', '识别错误', '漏题／漏空', '对应错误', '看不清')
 
@@ -66,18 +67,34 @@ class ReviewStore:
             raise ValueError('修正文字不合法或过长')
         with self.lock:
             state = self.read()
-            if request.get('revision') != state['revision']:
-                raise ValueError('反馈已被另一页面更新，请刷新后重试；当前草稿保留')
-            state['items'][ident] = {'label': label, 'correction': correction, 'updated': datetime.now().isoformat(timespec='seconds')}
+            req_rev = request.get('revision')
+            existing = state['items'].get(ident)
+            # 细粒度并发控制：若两人同时改不同题目则自动合并；改同一题且版本过期则拦截。
+            if req_rev != state['revision']:
+                if not isinstance(req_rev, int) or req_rev < 0 or req_rev > state['revision']:
+                    raise ValueError('反馈已被另一页面更新，请刷新后重试；当前草稿保留')
+                if existing is not None and int(existing.get('revision', state['revision'])) > req_rev:
+                    raise ValueError('反馈已被另一页面更新，请刷新后重试；当前草稿保留')
             state['revision'] += 1
+            reviewer = str(request.get('reviewer') or '').strip()[:32]
+            item_record = {
+                'label': label,
+                'correction': correction,
+                'updated': datetime.now().isoformat(timespec='seconds'),
+                'revision': state['revision'],
+            }
+            if reviewer:
+                item_record['reviewer'] = reviewer
+            state['items'][ident] = item_record
             save_json(self.path, state)
             with (self.folder/'feedback_history.jsonl').open('a', encoding='utf-8') as file:
-                file.write(json.dumps({'id': ident, 'revision': state['revision'], **state['items'][ident]}, ensure_ascii=False) + '\n')
+                file.write(json.dumps({'id': ident, **item_record}, ensure_ascii=False) + '\n')
             return state
 
 
-def make_server(folder, port=8903):
+def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300):
     store = ReviewStore(folder)
+    claims = ClaimManager(ttl_seconds=lock_ttl)
     token = secrets.token_urlsafe(24)
     template_path = Path(__file__).with_suffix('.html')
     class Handler(BaseHTTPRequestHandler):
@@ -105,9 +122,11 @@ def make_server(folder, port=8903):
                     live = store.folder/'benchmark_live.json'
                     if live.is_file() and not result.get('benchmark'):
                         result['benchmark'] = json.loads(live.read_text(encoding='utf-8'))
-                    return self.reply({'result': result, 'feedback': store.read()})
+                    return self.reply({'result': result, 'feedback': store.read(), 'locks': claims.snapshot()})
                 except (OSError, ValueError) as exc:
                     return self.reply({'error': str(exc)}, 409)
+            if name == '/api/locks':
+                return self.reply({'ok': True, 'locks': claims.snapshot()})
             if name.startswith('/asset/'):
                 path = (store.folder/name.removeprefix('/asset/')).resolve()
                 if not path.is_relative_to(store.folder) or path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.svg', '.js', '.css', '.woff', '.woff2', '.ttf') or not path.is_file():
@@ -116,30 +135,79 @@ def make_server(folder, port=8903):
             self.reply({'error': '接口不存在'}, 404)
 
         def do_POST(self):
-            if self.path != '/api/feedback' or self.headers.get('X-Review-Token') != token:
-                return self.reply({'error': '请求无效'}, 403)
+            path = unquote(urlparse(self.path).path)
             origin = self.headers.get('Origin')
             if origin and origin != 'http://' + self.headers.get('Host', ''):
                 return self.reply({'error': '禁止跨站修改'}, 403)
+            # release 允许 sendBeacon 携带 body 内 token
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= 100000:
                     raise ValueError('请求过长或为空')
                 value = json.loads(self.rfile.read(size))
+            except (ValueError, KeyError, TypeError) as exc:
+                return self.reply({'error': str(exc)}, 400)
+            req_token = self.headers.get('X-Review-Token') or (value.get('token') if isinstance(value, dict) else None)
+            if req_token != token:
+                return self.reply({'error': '请求无效'}, 403)
+            if path == '/api/claim':
+                client_id = str(value.get('client_id') or '').strip()
+                user = str(value.get('user') or '成员').strip() or '成员'
+                exclude = value.get('exclude') or []
+                result = json.loads((store.folder/'results.json').read_text(encoding='utf-8'))
+                fb = store.read().get('items', {})
+                pages = result.get('pages', [])
+                page_map = {p['id']: p for p in pages}
+                def page_done(pid):
+                    p = page_map[pid]
+                    if not fb.get(p['id'], {}).get('label'):
+                        return False
+                    return all(bool(fb.get(i['id'], {}).get('label')) for i in p.get('items', []))
+                res = claims.claim_next(client_id, user, [p['id'] for p in pages], page_done, exclude=exclude)
+                res['locks'] = claims.snapshot()
+                return self.reply(res)
+            if path == '/api/acquire':
+                pid = str(value.get('page_id') or '').strip()
+                client_id = str(value.get('client_id') or '').strip()
+                user = str(value.get('user') or '成员').strip() or '成员'
+                res = claims.acquire(pid, client_id, user, force=bool(value.get('force', False)))
+                res['locks'] = claims.snapshot()
+                return self.reply(res, 200 if res.get('ok') else 409)
+            if path == '/api/heartbeat':
+                pid = str(value.get('page_id') or '').strip()
+                client_id = str(value.get('client_id') or '').strip()
+                user = str(value.get('user') or '成员').strip() or '成员'
+                res = claims.heartbeat(pid, client_id, user)
+                res['locks'] = claims.snapshot()
+                return self.reply(res)
+            if path == '/api/release':
+                client_id = str(value.get('client_id') or '').strip()
+                pid = value.get('page_id')
+                return self.reply(claims.release(client_id, pid if pid else None))
+            if path != '/api/feedback':
+                return self.reply({'error': '请求无效'}, 403)
+            try:
                 self.reply(store.update(value))
             except (ValueError, KeyError, TypeError) as exc:
                 self.reply({'error': str(exc)}, 409)
             except OSError:
                 self.reply({'error': '保存失败，草稿保留，请重试'}, 500)
-    return ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    srv = ThreadingHTTPServer((host, port), Handler)
+    srv.daemon_threads = True
+    return srv
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dir', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8903)
+    parser.add_argument('--host', default=None, help='监听地址，默认 127.0.0.1；多人局域网协作传 --lan 或 --host 0.0.0.0')
+    parser.add_argument('--lan', action='store_true', help='开启局域网监听（等价于 --host 0.0.0.0）')
+    parser.add_argument('--lock-ttl', type=int, default=300, help='多人协作单页锁定超时秒数，默认 300 秒')
     args = parser.parse_args()
     prepare_math_assets(args.dir)
-    server = make_server(args.dir, args.port)
-    print(f'识别验收 http://127.0.0.1:{server.server_port}/', flush=True)
+    host = resolve_host(args.host, args.lan)
+    server = make_server(args.dir, args.port, host=host, lock_ttl=args.lock_ttl)
+    print('识别验收服务已启动', flush=True)
+    print_access_urls(host, server.server_port, label='识别验收')
     server.serve_forever()

@@ -333,12 +333,18 @@ def append_event(m, stem, event):
             final = _change_detail(m, _last_pred_boxes(events), boxes)
             ev["第几轮"] = n
             ev["结果"] = "人工修正" if final else "预标注正确"
+            reviewer = str(event.get("reviewer") or event.get("审核人") or "").strip()[:32]
+            if reviewer:
+                ev["审核人"] = reviewer
             ev["变化"] = changes
             ev["框"] = boxes_to_cn(m, boxes)
             ev["说明"] = "第%d次审核：%s" % (n, _review_summary(changes, not final))
         elif kind == 'special':
             ev["类型"] = event.get("type") or event.get("note") or event.get("备注") or "其他"
             ev["备注"] = event.get("note") or event.get("备注") or ""
+            reviewer = str(event.get("reviewer") or event.get("审核人") or "").strip()[:32]
+            if reviewer:
+                ev["审核人"] = reviewer
             if "boxes" in event:
                 ev["框"] = boxes_to_cn(m, event["boxes"])
             ev["说明"] = _describe(m, ev)
@@ -376,7 +382,8 @@ def _same_boxes(a, b, eps=0.001):
 
 def project(events, m=None):
     st = {"boxes": [], "reviewed": False, "review_count": 0, "kind": "",
-          "special": False, "note": "", "rotation": 0, "last": "", "reviewed_at": ""}
+          "special": False, "note": "", "rotation": 0, "last": "", "reviewed_at": "",
+          "reviewer": ""}
     for e in events:
         t = _event_of(e)
         st["last"] = _time_of(e) or st["last"]
@@ -397,17 +404,21 @@ def project(events, m=None):
             st["special"] = False
             st["note"] = ""
             st["reviewed_at"] = _time_of(e)
+            st["reviewer"] = e.get("审核人") or e.get("reviewer") or st["reviewer"]
         elif t == "special":
             if "框" in e or "boxes" in e:
                 st["boxes"] = _boxes_of(m, e)
             st["special"] = True
             st["note"] = e.get("note") or e.get("备注") or e.get("类型") or ""
+            if e.get("审核人") or e.get("reviewer"):
+                st["reviewer"] = e.get("审核人") or e.get("reviewer")
         elif t == "unreview":
             st["reviewed"] = False
             st["special"] = False
             st["note"] = ""
             st["kind"] = ""
             st["reviewed_at"] = ""
+            st["reviewer"] = ""
         elif t == "rotate":
             st["rotation"] = int(e.get("角度", e.get("deg", 0))) % 360
     return st
@@ -470,7 +481,7 @@ def _progress_row(stem, st):
     return {"new_name": stem, "status": status_of(st, len(st["boxes"])),
             "review_count": str(st["review_count"]),
             "last_review": st["reviewed_at"] if st["reviewed"] else "",
-            "reviewer": "", "boxes": str(len(st["boxes"])), "note": st["note"]}
+            "reviewer": st.get("reviewer", ""), "boxes": str(len(st["boxes"])), "note": st["note"]}
 
 
 def rebuild_progress(m):
