@@ -16,7 +16,7 @@
 
 ## 一、CMD 命令行一键拉取与配置
 
-环境要求：Windows x64 + Python 3.10+（推荐 Python 3.13）；本地推理默认 CPU 即可运行，微调训练会自动启用本机 CUDA GPU。打开 **CMD** 依次执行：
+环境要求：Windows x64 + Python 3.10+（推荐 Python 3.13）；本地推理与训练均**自动优先检测并使用本机 CUDA GPU**（无可用显卡时自动回退 CPU），可在工作台第 1 步一键本机测速选出最优并发与批大小。打开 **CMD** 依次执行：
 
 ```bat
 :: 1. 克隆纯代码仓库（约 2 MB）
@@ -45,9 +45,9 @@ copy .env.example .env
 
 直接双击根目录 `自动改卷工作台.exe`，或命令行执行 `python tools\工作台.py serve --open`（默认端口 `8888`），网页内置 4 步主轴与交互式 `? 新手引导`：
 
-1. **运行环境**：毫秒级自检 Python 依赖、6 个自训模型、官方 `PP-OCRv6` 与 API 密钥；支持自动测速选源补包、输密码解压权重，以及右上角 **「⚙ 大模型 API」** 可视化配置（内置豆包 / 小米 MiMo / DeepSeek / 通义千问 / 智谱 / 自定义 OpenAI 兼容中转站，带一键连通性测试）。
-2. **导入试卷**：选择本地扫描照片文件夹与学科，非破坏性复制 + SHA256 去重重命名，并一键启动自动识别流水线。
-3. **审阅与协作**：一键打开 **合一审阅台（`8904`）** 与 **涂卡批量审核（`8905`）**；同局域网下的其他电脑/平板直接打开主机提示的网址即可免安装加入领卷，内置 **页级动态领卷 + 5 分钟租约锁 + 3 秒实时同步**，多人同时核对不撞车。
+1. **运行环境**：自检 Python 依赖（支持真实导入校验与 `paddleocr`/`numpy`/`opencv` 版本冲突检查）、6 个自训模型、官方 `PP-OCRv6` 与 API 密钥；支持自动测速选源补包、输密码解压权重、右上角 **「⚙ 大模型 API」** 可视化配置（含带图视觉连通性测试），以及**推理设备切换与一键本机 Batch/并发性能压测（零 API 费用）**。
+2. **导入试卷**：选择本地扫描照片文件夹与学科，非破坏性复制 + SHA256 去重重命名，并一键启动流式并发自动识别流水线（边检测边拼图边调用 API、实时增量合并结果）。
+3. **审阅与协作**：实时展示**中文 5 模块可视化进度面板**（页面纠偏 / M1 / M2 / M3 / 大模型拼图转录）与**中文错误/退出码诊断卡**，支持**一键补跑失败图块**（不重复扣费）；一键打开 **合一审阅台（`8904`）** 与 **涂卡批量审核（`8905`）**；填空题默认**鼠标悬停就近显示答案**（顶栏可切「右侧列表」），学生未填写的空位明确标示「**未作答**」胶囊；同局域网下的其他电脑/平板打开主机网址即可免安装加入领卷，内置 **页级动态领卷 + 5 分钟租约锁 + 3 秒实时同步**。
 4. **模型训练**：支持一键将当前批次已确认审阅页的 **M1 / M2 / M3** 标框同步入库（或直接切换 M1 / M2 / M3 打开 `8900` 批量标框），选择模块与轮数启动**带防 NaN 数值保护的微调训练**，实时查看日志与 `8901` 训练监控；训练完成后需人工核对指标并手动点击 **「启用此权重」**（切换前自动备份上一版，随时一键回退）。
 
 #### 合一审阅台（`8904`）常用快捷键
@@ -64,10 +64,15 @@ copy .env.example .env
 ### 方式 B：纯命令行跑批
 
 ```bat
-:: 完整识别（支持重复运行断点续跑，已成功缓存的 API 图块不重复扣费）
-python -B pipeline\run.py --recognize --input "D:\papers" --out "D:\grading-results\run-001" --concurrency 4
+:: 完整识别（默认 --device auto 优先用 GPU；支持断点续跑，已成功缓存的 API 图块不重复扣费）
+python -B pipeline\run.py --recognize --input "D:\papers" --out "D:\grading-results\run-001" --device auto --concurrency 4
 
-:: 仅本地检测与拼图（不调大模型 API，加 --detect-only）
+:: 仅补跑失败/结构异常图块（已成功项绝不重复扣费）
+python -B tools\补跑失败图块.py --dir "D:\grading-results\run-001"
+
+:: 本机推理 Batch 与并发压测（零 API 费用，自动推荐最优参数）
+python -B tools\性能压测.py --samples 4
+
 :: 启动合一审阅与局域网协同服务
 python -B tools\识别验收.py --dir "D:\grading-results\run-001" --port 8904 --lan
 ```
@@ -109,11 +114,11 @@ flowchart LR
 | 层次 | 关键文件 | 职责 |
 |---|---|---|
 | **权重管理** | `tools/下载权重.py`、`pipeline/common/model_registry.py`、`weights/` | 官方 `PP-OCRv6` + Release 加密推理权重拉取、SHA256 校验、当前部署解析与发布 |
-| **流水线总控** | `pipeline/run.py`、`pipeline/recognize.py` | 端到端识别入口、批次清单绑定、断点续跑与结果汇总 |
+| **流水线总控** | `pipeline/run.py`、`pipeline/recognize.py`、`pipeline/common/runtime_diag.py` | GPU 优先批量流式并发识别、实时增量合并、中文错误诊断与语义化退出码 |
 | **本地视觉检测** | `pipeline/orient/deskew.py`、`pipeline/m1/`、`m2/`、`m3/` | 方向与小角度校正、三级 YOLO 检测与防 NaN 训练脚本 |
-| **选择题与配对** | `pipeline/stages/match.py`、`choice.py`、`pipeline/cnn/printed_number.py`、`choice.py` | 匈牙利配对、序列题号补全、`PP-OCRv6` ONNX 题号读取、多选涂卡 CNN |
-| **拼图与大模型** | `pipeline/common/recognition_api.py` | `1500²` 紧凑拼图、Prompt 规则、多运营商 OpenAI 兼容调用与严格 JSON 校验 |
-| **合一审阅与协同** | `tools/识别验收.py`、`tools/识别验收.html`、`pipeline/common/lan_collab.py` | `8904` 零遮挡审阅、原地调框（`E`）、低置信度归因（`L`）与局域网 5 分钟租约锁 |
+| **选择题与配对** | `pipeline/stages/match.py`、`choice.py`、`pipeline/cnn/printed_number.py`、`choice.py` | 匈牙利配对、序列题号补全、批量 `PP-OCRv6` ONNX 题号读取与批量多选涂卡 CNN |
+| **拼图与补跑/压测** | `pipeline/common/recognition_api.py`、`tools/补跑失败图块.py`、`tools/性能压测.py` | `1500²` 紧凑拼图、多运营商视觉调用、失败图块无重复扣费补跑与本机压测 |
+| **合一审阅与协同** | `tools/识别验收.py`、`tools/识别验收.html`、`pipeline/common/lan_collab.py` | `8904` 悬停/列表双模式审阅、未作答胶囊、原地调框（`E`）、低置信度定位（`L`）与局域网租约锁 |
 | **桌面工作台与训练** | `自动改卷工作台.exe`、`tools/工作台/`（`serve.py`、`core.py`、`train_bridge.py`、`index.html`） | `8888` 四步控制中心、标框回流同步、一键微调训练、权重切换与一键回退 |
 
 ### 常见问题与基础回归测试

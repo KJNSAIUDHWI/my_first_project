@@ -81,3 +81,29 @@ class ChoiceReader:
             return "", float(p.max())
         ans = "".join(ch for ch, _ in picked)
         return ans, min(c for _, c in picked)
+
+    def read_batch(self, imgs):
+        """批量读取多行选项涂卡（v3 模型单次前向批推理，显著减少小图逐张开销）。"""
+        if not imgs:
+            return []
+        if self.legacy:
+            return [self.read(im) for im in imgs]
+        valid_idx = []
+        tensors = []
+        for idx, im in enumerate(imgs):
+            if im is not None and getattr(im, "size", 0) > 0:
+                valid_idx.append(idx)
+                tensors.append(prep_row(im))
+        out = [("", 0.0)] * len(imgs)
+        if not tensors:
+            return out
+        x = torch.cat(tensors, dim=0).to(self.device)
+        with torch.no_grad():
+            probs = torch.sigmoid(self.model(x)).cpu().numpy()
+        for idx, p in zip(valid_idx, probs):
+            picked = [(LETTERS[i], float(p[i])) for i in range(6) if p[i] >= self.min_conf]
+            if not picked:
+                out[idx] = ("", float(p.max()))
+            else:
+                out[idx] = ("".join(ch for ch, _ in picked), min(c for _, c in picked))
+        return out

@@ -118,7 +118,37 @@
   .online-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;margin:0 6px 6px 0}
 
   /* 日志与实时播报条 */
-  .log-box{background:#1c211e;color:#d6e3dc;font-family:Consolas,monospace;font-size:12.5px;padding:12px 14px;border-radius:12px;max-height:190px;overflow:auto;white-space:pre-wrap;margin-top:12px}
+  .log-box{background:#1c211e;color:#d6e3dc;font-family:Consolas,monospace;font-size:12.5px;padding:12px 14px;border-radius:12px;max-height:190px;overflow:auto;white-space:pre-wrap;margin-top:10px}
+  /* 中文分阶段识别进度面板 */
+  .pipe-dash{margin-top:14px;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;background:#faf8f3}
+  .pipe-dash.running{border-color:#86efac;background:#f4fbf7}
+  .pipe-dash.warn{border-color:#f59e0b;background:#fffbf0}
+  .pipe-dash.error{border-color:#fca5a5;background:#fff5f5}
+  .pipe-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .pipe-meta{font-size:12.5px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .stage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin-top:12px}
+  .stage-card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+  .stage-card .st-title{font-size:12px;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .stage-card .st-num{font-size:18px;font-weight:800;color:var(--text);line-height:1.25}
+  .stage-card .st-sub{font-size:11.5px;color:var(--muted)}
+  /* 中文错误与退出码诊断卡片 */
+  .diag-box{margin-top:12px;border:1.5px solid #f87171;background:#fff5f5;border-radius:12px;padding:13px 15px}
+  .diag-box.warn{border-color:#f59e0b;background:#fffbeb}
+  .diag-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .diag-title{font-weight:800;font-size:14.5px;color:var(--err)}
+  .diag-box.warn .diag-title{color:var(--warn)}
+  .diag-code{font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:#fee2e2;color:#991b1b}
+  .diag-box.warn .diag-code{background:#fef3c7;color:#92400e}
+  .diag-row{font-size:13px;margin:4px 0;line-height:1.55}
+  .diag-row b{color:var(--text)}
+  .fix-hint{margin-top:5px;padding:5px 8px;border-radius:7px;background:#fff8eb;border:1px solid #fde68a;font-size:12px;color:#92400e;line-height:1.45}
+  /* 加速与压测面板 */
+  .perf-box{margin-top:14px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:#faf8f3}
+  .perf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 12px}
+  .bench-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;background:#fff;border-radius:10px;overflow:hidden}
+  .bench-table th,.bench-table td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left}
+  .bench-table th{background:#f3f0e8;color:var(--muted);font-weight:600}
+  .bench-table tr.best{background:#ecfdf5;font-weight:700}
   .live-banner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#1f2421;color:#fff;padding:10px 18px;border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.22);display:none;align-items:center;gap:10px;font-size:13.5px;max-width:92vw;z-index:50}
   .live-banner.show{display:flex}
   .pulse-dot{width:9px;height:9px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 4px rgba(74,222,128,.25);flex:none}
@@ -214,6 +244,70 @@
 
     <div id="checkGrid" class="check-grid"></div>
 
+    <!-- 推理加速设备与本机 Batch/并发压测卡片 -->
+    <div class="perf-box" id="perfBox">
+      <div class="between">
+        <div>
+          <strong style="font-size:15px">⚡ 推理加速与并发配置（GPU 优先 + 本机性能压测）</strong>
+          <div class="muted" id="perfHwSummary" style="margin-top:2px">默认自动检测显卡（有 CUDA 显卡优先用 GPU，无显卡自动回退 CPU）。</div>
+        </div>
+        <div class="row">
+          <button class="btn sm" id="btnRunBenchmark" type="button">🚀 一键本机测速（零 API 费用）</button>
+          <button class="btn primary sm" id="btnSavePerf" type="button">保存加速配置</button>
+        </div>
+      </div>
+
+      <div class="perf-grid">
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">推理设备策略</label>
+          <select id="selInferDevice" class="input" style="padding:7px 10px">
+            <option value="auto">自动（优先 GPU，无显卡用 CPU）</option>
+            <option value="cuda:0">强制 CUDA GPU (cuda:0)</option>
+            <option value="cpu">仅使用 CPU</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">YOLO 批大小 (Batch)</label>
+          <select id="selYoloBatch" class="input" style="padding:7px 10px">
+            <option value="0">自动推荐</option>
+            <option value="1">1（最省显存）</option>
+            <option value="2">2</option>
+            <option value="4">4（GPU 推荐）</option>
+            <option value="6">6（大显存）</option>
+            <option value="8">8</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">CPU 读图/纠偏线程</label>
+          <select id="selCpuWorkers" class="input" style="padding:7px 10px">
+            <option value="0">自动推荐</option>
+            <option value="1">1 线程</option>
+            <option value="2">2 线程</option>
+            <option value="4">4 线程</option>
+            <option value="6">6 线程</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">视觉 API 并发数</label>
+          <select id="selApiConc" class="input" style="padding:7px 10px">
+            <option value="2">2（防限流保守）</option>
+            <option value="3">3</option>
+            <option value="4" selected>4（标准推荐）</option>
+            <option value="6">6（高速）</option>
+            <option value="8">8（极速）</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="benchResultWrap" class="hidden">
+        <div class="between" style="margin-top:6px">
+          <span id="benchSummaryText" style="font-size:13px;font-weight:600;color:var(--primary)"></span>
+          <button class="btn primary sm hidden" id="btnApplyBench" type="button">✓ 一键应用最优参数</button>
+        </div>
+        <div id="benchTableWrap"></div>
+      </div>
+    </div>
+
     <details style="margin-top:10px">
       <summary class="muted" style="cursor:pointer">高级设置：手动指定 opencode 路径（可选）</summary>
       <div class="row" style="margin-top:8px">
@@ -283,10 +377,63 @@
         <div class="row" id="hostBatchActions">
           <select id="batchSelect" class="input" style="width:auto;min-width:190px;padding:7px 10px"></select>
           <button class="btn primary sm" id="btnStartRecognize" type="button">开始自动识别</button>
+          <button class="btn warn sm hidden" id="btnRetryFailed" type="button" title="仅重跑失败或结构异常的题块，已成功的不重复扣费">🔁 补跑失败图块</button>
           <button class="btn sm" id="btnGoIngestNew" type="button">+ 导入新一批</button>
         </div>
       </div>
-      <div id="pipelineLogBox" class="log-box hidden"></div>
+
+      <!-- 中文分阶段实时进度仪表盘 -->
+      <div id="pipelineDashboard" class="pipe-dash hidden">
+        <div class="pipe-head">
+          <div>
+            <strong id="pipeStageTitle" style="font-size:15px">识别流水线</strong>
+            <span id="pipeStageBadge" class="badge ok" style="margin-left:6px">就绪</span>
+          </div>
+          <div class="pipe-meta" id="pipeMetaRow"></div>
+        </div>
+        <div class="prog-nums" style="margin-bottom:5px">
+          <span id="pipeMainDesc">准备中...</span>
+          <span id="pipeSpeedEta" class="muted"></span>
+        </div>
+        <div class="prog-bar"><i id="pipeMainBar" style="width:0%"></i></div>
+
+        <div class="stage-grid">
+          <div class="stage-card">
+            <div class="st-title"><span>① 页面纠偏与准备</span><span id="stPageTag">0%</span></div>
+            <div class="st-num" id="stPageNum">0 / 0 页</div>
+            <div class="st-sub" id="stPageSub">等待开始</div>
+          </div>
+          <div class="stage-card">
+            <div class="st-title"><span>② M1 版面分区</span><span>YOLO</span></div>
+            <div class="st-num" id="stM1Num">0 框</div>
+            <div class="st-sub">姓名 / 选择区 / 填空区</div>
+          </div>
+          <div class="stage-card">
+            <div class="st-title"><span>③ M2 选择题与涂卡</span><span>YOLO+CNN</span></div>
+            <div class="st-num" id="stM2Num">0 题</div>
+            <div class="st-sub" id="stM2Sub">检出 0 框</div>
+          </div>
+          <div class="stage-card">
+            <div class="st-title"><span>④ M3 填空大题与OCR</span><span>YOLO+OCR</span></div>
+            <div class="st-num" id="stM3Num">0 题</div>
+            <div class="st-sub" id="stM3Sub">题号 OCR 0 处 · 0 框</div>
+          </div>
+          <div class="stage-card">
+            <div class="st-title"><span>⑤ 大模型拼图转录</span><span id="stApiTag">并发</span></div>
+            <div class="st-num" id="stApiNum">0 / 0 块</div>
+            <div class="st-sub" id="stApiSub">已转录 0 处 · 失败 0</div>
+          </div>
+        </div>
+
+        <!-- 醒目中文错误与退出码诊断卡片（无错隐藏，有错必暴露） -->
+        <div id="pipelineDiagBox" class="diag-box hidden"></div>
+
+        <!-- 原始技术日志折叠区（不再英文刷屏） -->
+        <details id="pipelineRawDetails" style="margin-top:10px">
+          <summary class="muted" style="cursor:pointer;font-size:12px">查看详细中文运行记录 / 原始日志（供排障使用）</summary>
+          <div id="pipelineLogBox" class="log-box"></div>
+        </details>
+      </div>
     </div>
 
     <div class="overview-grid">
@@ -675,14 +822,233 @@ function renderCheck(rep) {
   $('checkGrid').innerHTML = rep.items.map(it => `
     <div class="check-item ${it.severity}">
       <span class="badge ${it.severity}">${it.severity === 'ok' ? '正常' : it.severity === 'warn' ? '提醒' : '缺失'}</span>
-      <div>
+      <div style="flex:1;min-width:0">
         <div class="check-name">${esc(it.name)}</div>
         <div class="check-detail">${esc(it.detail)}</div>
+        ${it.fix ? `<div class="fix-hint"><b>修复方向：</b>${esc(it.fix)}</div>` : ''}
       </div>
     </div>
   `).join('');
   if (rep.opencode_path && !$('inputOpencode').value) {
     $('inputOpencode').placeholder = '已自动检测到：' + rep.opencode_path;
+  }
+  syncPerfPanel(rep.hardware, rep.infer_settings);
+}
+
+let LAST_BENCH_REC = null;
+function syncPerfPanel(hw, infer) {
+  if (hw) {
+    $('perfHwSummary').textContent = hw.cuda
+      ? `检测到 NVIDIA GPU：${hw.gpu_name}（${hw.vram_gb} GB 显存） · CPU ${hw.cpu_count} 线程 — 默认自动优先使用 GPU 加速。`
+      : `未检测到可用 CUDA GPU（CPU ${hw.cpu_count || '?'} 线程）— 自动使用 CPU 模式；点击「一键本机测速」可找最优线程数。`;
+  }
+  if (infer) {
+    if ($('selInferDevice')) $('selInferDevice').value = infer.infer_device || 'auto';
+    if ($('selYoloBatch')) $('selYoloBatch').value = String(infer.yolo_batch || 0);
+    if ($('selCpuWorkers')) $('selCpuWorkers').value = String(infer.cpu_workers || 0);
+    if ($('selApiConc')) $('selApiConc').value = String(infer.api_concurrency || 4);
+    if (infer.last_benchmark && !LAST_BENCH_REC) {
+      const lb = infer.last_benchmark;
+      $('benchResultWrap').classList.remove('hidden');
+      $('benchSummaryText').textContent = `上次测速推荐（${lb.tested_at || ''}）：${lb.label || ''} · 约 ${lb.sec_per_page} 秒/页（${lb.pages_per_min} 页/分钟）`;
+    }
+  }
+}
+
+function renderBenchmarkJob(bjob) {
+  if (!bjob) return;
+  const running = !!bjob.running;
+  $('btnRunBenchmark').disabled = running;
+  $('btnRunBenchmark').textContent = running ? '正在本机测速中...' : '🚀 一键本机测速（零 API 费用）';
+  if (running) {
+    $('benchResultWrap').classList.remove('hidden');
+    $('btnApplyBench').classList.add('hidden');
+    const lastLog = (bjob.logs || []).slice(-1)[0] || '正在测试本机推理吞吐...';
+    $('benchSummaryText').textContent = lastLog;
+    $('benchTableWrap').innerHTML = '';
+    return;
+  }
+  if (bjob.status === 'error' && bjob.error) {
+    $('benchResultWrap').classList.remove('hidden');
+    $('btnApplyBench').classList.add('hidden');
+    $('benchSummaryText').innerHTML = `<span style="color:var(--err)">测速失败：${esc(bjob.error)}</span>`;
+    return;
+  }
+  if (bjob.status === 'done' && bjob.result) {
+    const res = bjob.result;
+    LAST_BENCH_REC = res.recommended || null;
+    $('benchResultWrap').classList.remove('hidden');
+    $('benchSummaryText').textContent = res.summary || '测速完成';
+    $('btnApplyBench').classList.toggle('hidden', !LAST_BENCH_REC);
+    const rows = res.rows || [];
+    const bestLabel = LAST_BENCH_REC?.label || '';
+    $('benchTableWrap').innerHTML = `
+      <table class="bench-table">
+        <thead><tr><th>组合方案</th><th>设备</th><th>Batch</th><th>线程</th><th>耗时(秒/页)</th><th>速度(页/分)</th><th>峰值显存</th><th>状态</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="${r.label === bestLabel ? 'best' : ''}">
+              <td>${esc(r.label)}${r.label === bestLabel ? ' ★ 最优' : ''}</td>
+              <td>${esc(r.device)}</td>
+              <td>${r.yolo_batch}</td>
+              <td>${r.cpu_workers}</td>
+              <td>${r.ok ? r.sec_per_page + ' s' : '-'}</td>
+              <td>${r.ok ? r.pages_per_min : '-'}</td>
+              <td>${r.peak_vram_mb ? r.peak_vram_mb + ' MB' : '-'}</td>
+              <td>${r.ok ? '<span class="badge ok">稳定</span>' : `<span class="badge err">${esc(r.error || '失败')}</span>`}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+}
+
+function fmtSec(sec) {
+  if (sec === null || sec === undefined || isNaN(sec)) return '计算中';
+  const s = Math.max(0, Math.round(Number(sec)));
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return `${m} 分 ${r} 秒`;
+}
+
+function renderPipelineDashboard(data) {
+  const ab = data.active_batch;
+  const job = data.pipeline_job || {};
+  const rs = data.recognition_summary || job.result_summary || null;
+  const running = !!job.running;
+  const hasFailed = Boolean(
+    rs && ((rs.failed_items || 0) > 0 || ((rs.stats || {}).api_failures || 0) > 0)
+  );
+  $('btnRetryFailed').classList.toggle('hidden', !ab || !hasFailed || running);
+
+  const showDash = running || (job.status && job.status !== 'idle') || (rs && rs.stats);
+  $('pipelineDashboard').classList.toggle('hidden', !showDash);
+  if (!showDash) return;
+
+  const dash = $('pipelineDashboard');
+  dash.className = 'pipe-dash' + (
+    running ? ' running'
+    : (job.status === 'error' || (rs && String(rs.status || '').includes('识别失败'))) ? ' error'
+    : (job.status === 'warn' || hasFailed) ? ' warn'
+    : ''
+  );
+
+  const prog = job.progress || {};
+  const st = (rs && rs.stats) || {};
+  const pagesTotal = Number(prog.pages_total || st.pages || ab?.total_images || 0);
+  const pagesDone = Number(running ? (prog.pages_done || 0) : (st.pages || prog.pages_done || 0));
+  const pageFail = Number(running ? (prog.page_failures || 0) : (st.page_failures || prog.page_failures || 0));
+  const gridsTotal = Number(running ? (prog.grids_total || 0) : (st.grids || prog.grids_total || 0));
+  const apiSuccess = Number(running ? (prog.api_success || 0) : (st.api_success || prog.api_success || 0));
+  const apiFail = Number(running ? (prog.api_failures || 0) : (st.api_failures || prog.api_failures || 0));
+  const apiInflight = Number(running ? (prog.api_inflight || 0) : 0);
+  const transCnt = Number(running ? (prog.items_with_transcription || 0) : (st.items_with_transcription || prog.items_with_transcription || 0));
+
+  // 计算总进度百分比（本地检测占 65%，大模型拼图转录占 35%）
+  let pct = 0;
+  if (!running && job.status === 'done') pct = 100;
+  else if (pagesTotal > 0) {
+    const detFrac = Math.min(1, pagesDone / pagesTotal);
+    const apiFrac = gridsTotal > 0 ? Math.min(1, (apiSuccess + apiFail) / gridsTotal) : (detFrac >= 1 ? 1 : 0);
+    pct = Math.round((detFrac * 0.65 + apiFrac * 0.35) * 100);
+    if (running && pct < 3) pct = 3;
+  }
+  $('pipeMainBar').style.width = pct + '%';
+
+  // 顶栏状态与设备/模型元信息
+  const stageText = running
+    ? (prog.stage || (job.kind === 'retry' ? '补跑失败图块中' : '识别流水线运行中'))
+    : (rs?.status || (job.status === 'error' ? '识别失败' : job.status === 'warn' ? '部分待补跑' : '识别完成'));
+  $('pipeStageTitle').textContent = stageText;
+  const badgeEl = $('pipeStageBadge');
+  if (running) { badgeEl.className = 'badge ok'; badgeEl.textContent = `运行中 ${pct}%`; }
+  else if (job.status === 'error' || String(rs?.status || '').includes('识别失败')) { badgeEl.className = 'badge err'; badgeEl.textContent = '存在错误'; }
+  else if (job.status === 'warn' || hasFailed) { badgeEl.className = 'badge warn'; badgeEl.textContent = '待补跑'; }
+  else { badgeEl.className = 'badge ok'; badgeEl.textContent = '全部就绪'; }
+
+  const metaParts = [];
+  const devTxt = prog.device_label || (rs?.settings?.device ? `设备: ${rs.settings.device}` : '');
+  if (devTxt) metaParts.push(`<span>🖥 ${esc(devTxt)}</span>`);
+  const modTxt = prog.model || rs?.model || '';
+  if (modTxt) metaParts.push(`<span>🤖 模型: ${esc(modTxt)}</span>`);
+  if (rs?.returned_model && rs.returned_model !== rs.model) {
+    metaParts.push(`<span style="color:var(--warn)">⚠ 实际返回: ${esc(String(rs.returned_model))}</span>`);
+  }
+  $('pipeMetaRow').innerHTML = metaParts.join('');
+
+  $('pipeMainDesc').textContent = running
+    ? (prog.message || `已处理 ${pagesDone}/${pagesTotal} 页，拼图转录完成 ${apiSuccess}/${gridsTotal}`)
+    : `共 ${pagesDone}/${pagesTotal} 页，已转录手写 ${transCnt} 处` + (pageFail > 0 ? `，本地失败 ${pageFail} 页` : '') + (hasFailed ? `，待补跑 ${rs?.failed_items || apiFail} 项` : '');
+  const spdParts = [];
+  if (prog.pages_per_min > 0) spdParts.push(`速度 ${prog.pages_per_min} 页/分`);
+  if (running && prog.eta_seconds !== null && prog.eta_seconds !== undefined) spdParts.push(`预计剩余 ${fmtSec(prog.eta_seconds)}`);
+  else if (st.wall_seconds) spdParts.push(`总耗时 ${fmtSec(st.wall_seconds)}`);
+  $('pipeSpeedEta').textContent = spdParts.join(' · ');
+
+  // 5 个中文模块实时卡片
+  const pagePct = pagesTotal > 0 ? Math.round((pagesDone / pagesTotal) * 100) : 0;
+  $('stPageTag').textContent = pagePct + '%';
+  $('stPageNum').textContent = `${pagesDone} / ${pagesTotal} 页`;
+  $('stPageSub').textContent = pageFail > 0 ? `失败 ${pageFail} 页（请查看下方诊断）` : (running ? '并行读图与方向纠偏中' : '本地页面就绪');
+
+  $('stM1Num').textContent = `${prog.m1_boxes || 0} 框`;
+  $('stM2Num').textContent = `${prog.choice_items || 0} 题`;
+  $('stM2Sub').textContent = `M2 检出 ${prog.m2_boxes || 0} 框`;
+  $('stM3Num').textContent = `${prog.fill_items || 0} 题`;
+  $('stM3Sub').textContent = `题号 OCR ${prog.ocr_numbers || 0} 处 · M3 ${prog.m3_boxes || 0} 框`;
+
+  $('stApiTag').textContent = running && apiInflight > 0 ? `${apiInflight} 并发中` : `${prog.concurrency || st.concurrency || 4} 并发`;
+  $('stApiNum').textContent = `${apiSuccess} / ${gridsTotal} 块`;
+  $('stApiSub').textContent = `已转录 ${transCnt} 处 · 失败 ${apiFail}`;
+
+  // 中文错误与退出码诊断卡片
+  const diagBox = $('pipelineDiagBox');
+  const errRep = job.error_report || null;
+  const exitInfo = job.exit_info || null;
+  const showDiag = Boolean(errRep || (job.returncode !== null && job.returncode !== undefined && job.returncode !== 0) || job.status === 'error' || (job.status === 'warn' && hasFailed));
+  diagBox.classList.toggle('hidden', !showDiag);
+  if (showDiag) {
+    const isWarnOnly = job.status === 'warn' && !errRep && (job.returncode === 0 || job.returncode == null);
+    diagBox.className = 'diag-box' + (isWarnOnly ? ' warn' : '');
+    const codeTag = (job.returncode !== null && job.returncode !== undefined)
+      ? `退出码 ${job.returncode} · ${exitInfo?.title || '状态说明'}`
+      : (isWarnOnly ? '部分待补跑提醒' : '错误诊断');
+    const modName = errRep?.module || (isWarnOnly ? '视觉大模型拼图转录' : '自动识别流水线');
+    const title = errRep?.title || exitInfo?.title || (isWarnOnly ? '部分图块未完成转录' : '运行出现异常');
+    const reason = errRep?.reason || exitInfo?.reason || (isWarnOnly ? `当前批次还有 ${rs?.failed_items || apiFail} 个手写题块尚未拿到有效转录结果（其余成功项已保留）。` : '请查看详细日志了解原因。');
+    const fix = errRep?.fix || exitInfo?.fix || (isWarnOnly ? '可直接点击上方「🔁 补跑失败图块」按钮，仅重试失败项，绝不重复扣费。' : '请前往「第 1 步：运行环境」重新检查或点击「求助 AI」。');
+    diagBox.innerHTML = `
+      <div class="diag-head">
+        <span class="diag-title">⚠ ${esc(title)}</span>
+        <span class="diag-code">${esc(codeTag)}</span>
+      </div>
+      <div class="diag-row"><b>出错模块：</b>${esc(modName)}</div>
+      <div class="diag-row"><b>中文原因：</b>${esc(reason)}</div>
+      <div class="diag-row"><b>建议修复方向：</b>${esc(fix)}</div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn sm" type="button" id="btnDiagGoCheck">前往环境自检</button>
+        <button class="btn sm" type="button" id="btnDiagOpenVlm">配置大模型 API</button>
+        ${rs?.has_error_log ? '<button class="btn sm" type="button" id="btnDiagViewLog">查看错误日志文件</button>' : ''}
+      </div>
+    `;
+    const gBtn = $('btnDiagGoCheck');
+    if (gBtn) gBtn.onclick = () => { setView('check'); $('btnRecheck').click(); };
+    const vBtn = $('btnDiagOpenVlm');
+    if (vBtn) vBtn.onclick = () => openVlmDialog();
+    const lBtn = $('btnDiagViewLog');
+    if (lBtn) lBtn.onclick = async () => {
+      try {
+        const res = await api('/api/pipeline/errors');
+        $('pipelineRawDetails').open = true;
+        $('pipelineLogBox').textContent = res.content || '错误日志为空';
+      } catch (e) { alert(e.message); }
+    };
+  }
+
+  if (job.logs && job.logs.length) {
+    $('pipelineLogBox').textContent = job.logs.slice(-60).join('\n');
+    $('pipelineLogBox').scrollTop = $('pipelineLogBox').scrollHeight;
   }
 }
 
@@ -725,9 +1091,13 @@ function renderOverview(data) {
 
   // 当前批次
   const ab = data.active_batch;
+  const rs = data.recognition_summary;
   if (ab) {
     $('activeBatchTitle').textContent = `当前批次：${ab.batch_id}（${ab.subject} · 共 ${ab.total_images} 张）`;
-    $('activeBatchMeta').textContent = `导入时间 ${ab.created_at} · ${ab.has_recognition ? '已识别完成，可以开始人工核对' : '尚未开始自动识别'}`;
+    const recText = rs?.status
+      ? `状态：${rs.status}`
+      : (ab.has_recognition ? '已识别完成，可以开始人工核对' : '尚未开始自动识别');
+    $('activeBatchMeta').textContent = `导入时间 ${ab.created_at} · ${recText}`;
   } else {
     $('activeBatchTitle').textContent = '当前批次：尚未导入试卷';
     $('activeBatchMeta').textContent = isHost ? '点击右上角「+ 导入新一批」或切到「导入试卷」开始' : '等待主机导入新试卷，也可以直接参与下方已有的审核任务';
@@ -739,14 +1109,14 @@ function renderOverview(data) {
     `<option value="${esc(b.batch_id)}" ${ab && b.batch_id === ab.batch_id ? 'selected' : ''}>${esc(b.batch_id)} (${b.total_images}张)</option>`
   ).join('') || '<option value="">暂无已导入批次</option>';
 
-  // 流水线日志
+  // 流水线中文分阶段进度面板与诊断
   const job = data.pipeline_job || {};
   $('btnStartRecognize').disabled = !!job.running || !ab;
   $('btnStartRecognize').textContent = job.running ? '自动识别运行中...' : (ab?.has_recognition ? '重新自动识别' : '开始自动识别');
-  if (job.logs && job.logs.length) {
-    $('pipelineLogBox').classList.remove('hidden');
-    $('pipelineLogBox').textContent = job.logs.slice(-30).join('\n');
-    $('pipelineLogBox').scrollTop = $('pipelineLogBox').scrollHeight;
+  renderPipelineDashboard(data);
+  if (isHost) {
+    syncPerfPanel(data.hardware, data.infer_settings);
+    if (data.benchmark_job) renderBenchmarkJob(data.benchmark_job);
   }
 
   // 双主任务卡片 + 折叠的高级维护卡
@@ -927,7 +1297,73 @@ $('btnOpenChoiceFromTrain').onclick = () => openTask('choice', window.location.h
 
 $('btnRecheck').onclick = async () => {
   $('btnRecheck').disabled = true;
-  try { renderCheck(await api('/api/check')); } finally { $('btnRecheck').disabled = false; }
+  showBanner('gui', '正在执行深度依赖导入与权重校验...', 8000);
+  try { renderCheck(await api('/api/check?deep=1')); } finally { $('btnRecheck').disabled = false; }
+};
+
+$('btnSavePerf').onclick = async () => {
+  $('btnSavePerf').disabled = true;
+  try {
+    const res = await api('/api/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        infer_device: $('selInferDevice').value,
+        yolo_batch: Number($('selYoloBatch').value) || 0,
+        cpu_workers: Number($('selCpuWorkers').value) || 0,
+        api_concurrency: Number($('selApiConc').value) || 4,
+      }),
+    });
+    showBanner('gui', '已保存推理加速与并发配置', 3500);
+    if (CHECK) renderCheck(await api('/api/check'));
+  } catch (err) { alert('保存失败：' + err.message); }
+  finally { $('btnSavePerf').disabled = false; }
+};
+
+let BENCH_TIMER = null;
+async function pollBenchmarkStatus() {
+  try {
+    const res = await api('/api/benchmark/status');
+    renderBenchmarkJob(res.benchmark_job);
+    if (!res.benchmark_job?.running && BENCH_TIMER) {
+      clearInterval(BENCH_TIMER);
+      BENCH_TIMER = null;
+    }
+  } catch (_) {}
+}
+
+$('btnRunBenchmark').onclick = async () => {
+  $('btnRunBenchmark').disabled = true;
+  try {
+    await api('/api/benchmark/start', { method: 'POST', body: JSON.stringify({ samples: 4 }) });
+    await pollBenchmarkStatus();
+    if (BENCH_TIMER) clearInterval(BENCH_TIMER);
+    BENCH_TIMER = setInterval(pollBenchmarkStatus, 2000);
+  } catch (err) {
+    alert(err.message);
+    $('btnRunBenchmark').disabled = false;
+  }
+};
+
+$('btnApplyBench').onclick = async () => {
+  if (!LAST_BENCH_REC) return;
+  try {
+    await api('/api/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        infer_device: LAST_BENCH_REC.infer_device || 'auto',
+        yolo_batch: Number(LAST_BENCH_REC.yolo_batch) || 0,
+        cpu_workers: Number(LAST_BENCH_REC.cpu_workers) || 0,
+        api_concurrency: Number(LAST_BENCH_REC.api_concurrency) || 4,
+        last_benchmark: LAST_BENCH_REC,
+      }),
+    });
+    $('selInferDevice').value = LAST_BENCH_REC.infer_device || 'auto';
+    $('selYoloBatch').value = String(LAST_BENCH_REC.yolo_batch || 0);
+    $('selCpuWorkers').value = String(LAST_BENCH_REC.cpu_workers || 0);
+    $('selApiConc').value = String(LAST_BENCH_REC.api_concurrency || 4);
+    showBanner('gui', `已应用本机最优配置：${LAST_BENCH_REC.label}，API 并发 ${LAST_BENCH_REC.api_concurrency}`, 4500);
+    if (CHECK) renderCheck(await api('/api/check'));
+  } catch (err) { alert('应用配置失败：' + err.message); }
 };
 $('btnToIngest').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
 $('btnSkipIngest').onclick = () => setView('overview');
@@ -1011,10 +1447,26 @@ async function triggerRecognize() {
     await api('/api/pipeline/run', { method: 'POST', body: '{}' });
     setView('overview');
     await refreshOverview();
-  } catch (err) { alert(err.message); }
+  } catch (err) {
+    setView('overview');
+    await refreshOverview();
+    alert('无法启动自动识别：\n' + err.message);
+  }
 }
 $('btnStartRecognize').onclick = triggerRecognize;
 $('btnRunRecognizeAfter').onclick = triggerRecognize;
+$('btnRetryFailed').onclick = async () => {
+  if (!confirm('确认仅补跑当前批次失败或未转录的题块吗？（已成功的题块不会重复扣费）')) return;
+  $('btnRetryFailed').disabled = true;
+  try {
+    await api('/api/pipeline/retry-failed', { method: 'POST', body: '{}' });
+    await refreshOverview();
+  } catch (err) {
+    alert('补跑失败：' + err.message);
+  } finally {
+    $('btnRetryFailed').disabled = false;
+  }
+};
 
 $('batchSelect').onchange = async () => {
   if (!$('batchSelect').value) return;
@@ -1153,8 +1605,10 @@ $('btnTestVlm').onclick = async () => {
         api_key: $('vlmApiKey').value.trim(),
       }),
     });
-    $('vlmStatus').style.color = 'var(--ok)';
-    $('vlmStatus').textContent = `✓ 连通成功！（耗时 ${res.latency_ms} ms，返回模型：${res.returned_model || ''}）`;
+    $('vlmStatus').style.color = 'var(--primary)';
+    const vTag = res.vision_verified ? '（已验证支持看图）' : '';
+    const warnTxt = res.warning ? ` · ${res.warning}` : '';
+    $('vlmStatus').textContent = `✓ 连通成功${vTag}！（耗时 ${res.latency_ms} ms，返回模型：${res.returned_model || ''}）${warnTxt}`;
   } catch (err) {
     $('vlmStatus').style.color = 'var(--err)';
     $('vlmStatus').textContent = '✗ 连接失败：' + err.message;

@@ -1,23 +1,27 @@
 # 自动改卷项目核心运行依赖（已验证环境：Windows x64 / Python 3.13）
 #
-# 安装建议（推荐在虚拟环境 .venv 中执行）：
+# 安装建议（推荐在虚拟环境 .venv 中执行，避免全局 C:\Program Files 权限冲突）：
 #   1) 先安装 PyTorch（仅 CPU 推理可直接安装官方 CPU 版，无需显卡）：
 #        pip install torch torchvision
-#      如需 GPU 训练（CUDA 12.4 示例）：
+#      如需 GPU 加速推理/训练（CUDA 12.4 示例，自动改卷会自动优先使用 GPU）：
 #        pip install --extra-index-url https://download.pytorch.org/whl/cu124 torch==2.6.0+cu124 torchvision==0.21.0+cu124
 #   2) 安装其余核心依赖（国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple）：
 #        pip install -r requirements.txt
+#
+# 注意：PaddleOCR (paddlex) 强依赖 opencv-contrib-python==4.10.0.84 与 numpy<2.4；
+#       切勿同时安装 opencv-python 与 opencv-contrib-python，否则两者同名 cv2 会互相覆盖。
 
-# --- 核心检测、图像与推理 ---
+# --- 核心检测、图像、OCR 与推理 ---
 torch>=2.6.0
 torchvision>=0.21.0
 ultralytics==8.4.96
-opencv-python==4.11.0.86
+opencv-contrib-python==4.10.0.84
 Pillow>=10.0.0,<13.0.0
-numpy>=2.0.0,<3.0.0
+numpy>=2.0.0,<2.4
 scipy>=1.14.0
 PyYAML>=6.0.2
-onnxruntime>=1.20.0
+onnxruntime>=1.20.0               # PaddleOCR ONNX 推理后端
+paddleocr>=3.7.0,<3.8.0           # 印刷题号识别硬依赖（缺失会导致每页本地识别失败）
 requests>=2.32.0
 
 # --- 训练分析与辅助工具（仅训练 / 评测脚本使用，可一并安装） ---

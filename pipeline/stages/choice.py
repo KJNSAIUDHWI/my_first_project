@@ -68,14 +68,38 @@ def read_choice_zone(img, boxes, digit_reader=None, choice_reader=None,
     opts_px = [(x * w, y * h, bw * w, bh * h) for x, y, bw, bh in opts]
     pairs = match_nums_to_options(nums_px, opts_px)
 
-    rows = []
+    num_crops = []
+    opt_crops = []
+    pair_meta = []
     for i, j, dist in pairs:
         ncx, ncy, nbw, nbh = nums[i]
         ocx, ocy, obw, obh = opts[j]
-        no, nconf = dr.read(_crop(img, ncx, ncy, nbw, nbh))
+        num_crops.append(_crop(img, ncx, ncy, nbw, nbh))
         ox1, oy1, ox2, oy2 = _box_px(ocx, ocy, obw, obh, w, h)
-        cc = crop_option_row(img, nums_px, ox1, oy1, ox2, oy2, paired=nums_px[i], w=w)
-        ans, aconf = cr.read(cc)
+        opt_crops.append(crop_option_row(img, nums_px, ox1, oy1, ox2, oy2, paired=nums_px[i], w=w))
+        pair_meta.append((nums[i], opts[j], dist))
+
+    # 批量 OCR 题号（PaddleNumberReader 支持 batch_size 批推理；DigitReader 自动回退逐张）
+    if num_crops and hasattr(dr, "read_details"):
+        valid_pos = [k for k, c in enumerate(num_crops) if c is not None and getattr(c, "size", 0) > 0]
+        num_results = [(0, 0.0)] * len(num_crops)
+        if valid_pos:
+            details = dr.read_details([num_crops[k] for k in valid_pos])
+            for k, d in zip(valid_pos, details):
+                num_results[k] = (d["number"], d["confidence"])
+    else:
+        num_results = [dr.read(c) for c in num_crops]
+
+    # 批量涂卡 CNN 推理
+    if opt_crops and hasattr(cr, "read_batch"):
+        opt_results = cr.read_batch(opt_crops)
+    else:
+        opt_results = [cr.read(c) for c in opt_crops]
+
+    rows = []
+    for (num_box, opt_box, dist), (no, nconf), (ans, aconf) in zip(pair_meta, num_results, opt_results):
+        ncx, ncy, nbw, nbh = num_box
+        ocx, ocy, obw, obh = opt_box
         rows.append({
             "no": no,
             "no_raw": no,

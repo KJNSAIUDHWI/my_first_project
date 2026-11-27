@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -38,15 +39,16 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DEFAULT_SUBJECTS = ["物理", "数学", "化学", "生物", "地理", "英语", "语文", "政治", "历史", "其他"]
 
 REQUIRED_PACKAGES = [
-    {"import": "torch", "pip": "torch", "label": "PyTorch 深度学习框架"},
-    {"import": "ultralytics", "pip": "ultralytics", "label": "YOLO 检测框架"},
-    {"import": "cv2", "pip": "opencv-python", "label": "OpenCV 图像处理"},
-    {"import": "PIL", "pip": "Pillow", "label": "Pillow 图像库"},
-    {"import": "numpy", "pip": "numpy", "label": "NumPy 数值计算"},
-    {"import": "scipy", "pip": "scipy", "label": "SciPy 匈牙利匹配算法"},
-    {"import": "yaml", "pip": "PyYAML", "label": "PyYAML 配置文件解析"},
-    {"import": "onnxruntime", "pip": "onnxruntime", "label": "ONNX Runtime (PaddleOCR 题号)"},
-    {"import": "requests", "pip": "requests", "label": "Requests 网络请求"},
+    {"import": "torch", "pip": "torch", "dist": "torch", "label": "PyTorch 深度学习框架"},
+    {"import": "ultralytics", "pip": "ultralytics==8.4.96", "dist": "ultralytics", "label": "YOLO 检测框架"},
+    {"import": "cv2", "pip": "opencv-contrib-python==4.10.0.84", "dist": "opencv-contrib-python", "label": "OpenCV 图像处理"},
+    {"import": "PIL", "pip": "Pillow", "dist": "Pillow", "label": "Pillow 图像库"},
+    {"import": "numpy", "pip": "numpy>=2.0.0,<2.4", "dist": "numpy", "label": "NumPy 数值计算"},
+    {"import": "scipy", "pip": "scipy", "dist": "scipy", "label": "SciPy 匈牙利匹配算法"},
+    {"import": "yaml", "pip": "PyYAML", "dist": "PyYAML", "label": "PyYAML 配置文件解析"},
+    {"import": "onnxruntime", "pip": "onnxruntime", "dist": "onnxruntime", "label": "ONNX Runtime (PaddleOCR 后端)"},
+    {"import": "paddleocr", "pip": "paddleocr>=3.7.0,<3.8.0", "dist": "paddleocr", "label": "PaddleOCR 印刷题号识别"},
+    {"import": "requests", "pip": "requests", "dist": "requests", "label": "Requests 网络请求"},
 ]
 
 PIP_MIRRORS = [
@@ -167,10 +169,122 @@ def _read_env_key(root: Path, key: str) -> str:
     return ""
 
 
-def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict:
-    """快速环境自检（毫秒~百毫秒级，不做重型 import）。"""
+def _load_diag_module(root: Path = ROOT):
+    pipe_dir = str(root / "pipeline")
+    if pipe_dir not in sys.path:
+        sys.path.insert(0, pipe_dir)
+    from common import runtime_diag as diag_mod  # noqa: E402
+    return diag_mod
+
+
+def get_infer_settings(batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict:
+    """读取推理设备与并发配置（默认 auto 优先 GPU，其余 0 表示自动）。"""
+    cfg = load_config(batches_root)
+    device = str(cfg.get("infer_device") or "auto").strip() or "auto"
+    try:
+        yolo_batch = max(0, min(16, int(cfg.get("yolo_batch", 0) or 0)))
+    except (TypeError, ValueError):
+        yolo_batch = 0
+    try:
+        cpu_workers = max(0, min(16, int(cfg.get("cpu_workers", 0) or 0)))
+    except (TypeError, ValueError):
+        cpu_workers = 0
+    try:
+        api_concurrency = max(1, min(12, int(cfg.get("api_concurrency", 4) or 4)))
+    except (TypeError, ValueError):
+        api_concurrency = 4
+    return {
+        "infer_device": device,
+        "yolo_batch": yolo_batch,
+        "cpu_workers": cpu_workers,
+        "api_concurrency": api_concurrency,
+        "last_benchmark": cfg.get("last_benchmark") or None,
+    }
+
+
+def _pkg_version(dist_name: str) -> str:
+    try:
+        return importlib.metadata.version(dist_name)
+    except Exception:
+        return ""
+
+
+_IMPORT_PROBE_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def verify_runtime_imports(force: bool = False, timeout: float = 45.0) -> dict:
+    """在独立子进程中执行真实 import 校验（抓出 DLL/依赖树缺失与版本冲突），带 120 秒缓存。"""
+    key = sys.executable
+    now_ts = time.time()
+    cached = _IMPORT_PROBE_CACHE.get(key)
+    if cached and not force and (now_ts - cached[0]) < 120.0:
+        return dict(cached[1])
+    code = (
+        "import json, os, sys\n"
+        "os.environ.setdefault('PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK', 'True')\n"
+        "mods = ['torch', 'ultralytics', 'cv2', 'PIL', 'numpy', 'scipy', 'yaml', 'onnxruntime', 'paddleocr', 'requests']\n"
+        "out = {'ok': True, 'modules': {}, 'gpu': {'cuda': False, 'gpu_name': '', 'vram_gb': 0.0}}\n"
+        "for m in mods:\n"
+        "    try:\n"
+        "        mod = __import__(m)\n"
+        "        ver = getattr(mod, '__version__', '')\n"
+        "        out['modules'][m] = {'ok': True, 'version': str(ver)}\n"
+        "    except Exception as exc:\n"
+        "        out['ok'] = False\n"
+        "        out['modules'][m] = {'ok': False, 'error': type(exc).__name__ + ': ' + str(exc)[:220]}\n"
+        "if out['modules'].get('torch', {}).get('ok'):\n"
+        "    try:\n"
+        "        import torch\n"
+        "        if torch.cuda.is_available() and torch.cuda.device_count() > 0:\n"
+        "            p = torch.cuda.get_device_properties(0)\n"
+        "            out['gpu'] = {'cuda': True, 'gpu_name': torch.cuda.get_device_name(0), 'vram_gb': round(p.total_memory / (1024**3), 1)}\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "print('__PROBE_JSON__' + json.dumps(out, ensure_ascii=False), flush=True)\n"
+    )
+    env = dict(
+        os.environ,
+        PYTHONUTF8="1",
+        PYTHONIOENCODING="utf-8",
+        PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True",
+    )
+    creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=env,
+            creationflags=creation,
+        )
+        prefix = "__PROBE_JSON__"
+        matched = [ln.strip()[len(prefix):] for ln in (proc.stdout or "").splitlines() if ln.strip().startswith(prefix)]
+        if proc.returncode == 0 and matched:
+            data = json.loads(matched[-1])
+            data["probed"] = True
+            _IMPORT_PROBE_CACHE[key] = (now_ts, data)
+            return dict(data)
+        return {"ok": False, "probed": False, "modules": {}, "error": (proc.stderr or proc.stdout)[-400:]}
+    except Exception as exc:
+        return {"ok": False, "probed": False, "modules": {}, "error": str(exc)}
+
+
+def _parse_ver_tuple(v: str) -> tuple[int, ...]:
+    nums = re.findall(r"\d+", v or "")
+    return tuple(int(x) for x in nums[:3])
+
+
+def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_ROOT, deep: bool = False) -> dict:
+    """运行环境、依赖版本冲突、硬件 GPU、模型权重与视觉 API 自检。
+
+    deep=True 时会在子进程执行真实 import 校验；默认使用 find_spec + metadata 并在缓存命中时合并真实导入结果。
+    """
     t0 = time.perf_counter()
     cfg = load_config(batches_root)
+    infer_cfg = get_infer_settings(batches_root)
     items = []
 
     # 1. Python 解释器
@@ -179,42 +293,126 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
     items.append({
         "id": "python",
         "category": "runtime",
+        "module": "Python 运行环境",
         "name": "Python 解释器",
         "ok": py_ok,
-        "severity": "error" if not py_ok else "ok",
+        "severity": "ok" if py_ok else "error",
         "detail": f"Python {py_ver} ({sys.executable})",
-        "fix": None if py_ok else "需要 Python 3.10 及以上版本",
+        "fix": None if py_ok else "请安装 Python 3.10~3.13，并优先在项目根目录建立 .venv 虚拟环境。",
     })
 
-    # 2. 核心依赖库（使用 find_spec，避免加载 torch 等重包拖慢启动）
+    # 2. 核心依赖库（结合真实导入缓存/深度探测 + 发行版版本冲突检查）
+    probe = None
+    if deep:
+        probe = verify_runtime_imports(force=True)
+    else:
+        cached = _IMPORT_PROBE_CACHE.get(sys.executable)
+        if cached and (time.time() - cached[0]) < 120.0:
+            probe = cached[1]
+    probed_mods = (probe or {}).get("modules") or {}
+
     missing_pkgs = []
     for pkg in REQUIRED_PACKAGES:
-        spec = importlib.util.find_spec(pkg["import"])
+        imp_name = pkg["import"]
+        spec = importlib.util.find_spec(imp_name)
         ok = spec is not None
+        ver = _pkg_version(pkg.get("dist") or imp_name)
+        err_msg = ""
+        if imp_name in probed_mods:
+            pm = probed_mods[imp_name]
+            if not pm.get("ok"):
+                ok = False
+                err_msg = pm.get("error") or "导入失败"
+            elif pm.get("version"):
+                ver = pm["version"]
         if not ok:
             missing_pkgs.append(pkg["pip"])
+        fix_tip = None
+        if not ok:
+            fix_tip = f"点击上方「自动测速并安装缺失依赖」，或在终端运行：pip install \"{pkg['pip']}\""
+        detail = f"{pkg['pip']} 已就绪" + (f" (v{ver})" if ver else "") if ok else (
+            f"导入失败：{err_msg}" if err_msg else f"缺少必需依赖 {pkg['pip']}"
+        )
         items.append({
-            "id": f"pkg_{pkg['import']}",
+            "id": f"pkg_{imp_name}",
             "category": "packages",
+            "module": pkg["label"],
             "name": f"依赖库：{pkg['label']}",
             "ok": ok,
             "severity": "ok" if ok else "error",
-            "detail": f"{pkg['pip']} 已安装" if ok else f"缺少 {pkg['pip']}",
+            "detail": detail,
+            "fix": fix_tip,
             "pip": pkg["pip"],
         })
 
-    # 3. 开源 OCR 模型权重 (PaddleOCR ONNX)
+    # 2b. 版本兼容性检查（numpy < 2.4 与双 OpenCV 冲突）
+    np_ver = _pkg_version("numpy")
+    if np_ver and _parse_ver_tuple(np_ver) >= (2, 4, 0):
+        items.append({
+            "id": "compat_numpy",
+            "category": "packages",
+            "module": "NumPy 版本兼容",
+            "name": "依赖兼容：NumPy 版本检查",
+            "ok": False,
+            "severity": "warn",
+            "detail": f"当前 numpy=={np_ver}，PaddleOCR (paddlex) 要求 numpy<2.4，可能引发兼容性问题。",
+            "fix": "建议运行：pip install \"numpy>=2.0.0,<2.4\"",
+        })
+    cv_std = _pkg_version("opencv-python")
+    cv_contrib = _pkg_version("opencv-contrib-python")
+    if cv_std and cv_contrib:
+        items.append({
+            "id": "compat_opencv",
+            "category": "packages",
+            "module": "OpenCV 发行版冲突",
+            "name": "依赖兼容：OpenCV 重复安装",
+            "ok": False,
+            "severity": "warn",
+            "detail": f"同时安装了 opencv-python ({cv_std}) 与 opencv-contrib-python ({cv_contrib})，两者同名 cv2 可能互相覆盖。",
+            "fix": "建议运行：pip uninstall -y opencv-python opencv-contrib-python && pip install opencv-contrib-python==4.10.0.84",
+        })
+
+    # 3. 计算设备（GPU / CPU）探测
+    diag_mod = _load_diag_module(root)
+    hw = None
+    if probe and isinstance(probe.get("gpu"), dict):
+        g = probe["gpu"]
+        hw = {
+            "cuda": bool(g.get("cuda")),
+            "gpu_name": g.get("gpu_name") or "",
+            "vram_gb": float(g.get("vram_gb") or 0.0),
+            "cpu_count": os.cpu_count() or 4,
+            "recommended_device": "cuda:0" if g.get("cuda") else "cpu",
+            "recommended_label": f"GPU: {g.get('gpu_name')} ({g.get('vram_gb')} GB)" if g.get("cuda") else f"CPU ({os.cpu_count() or 4} 线程)",
+        }
+    else:
+        hw = diag_mod.probe_compute_hardware()
+    eff_dev, eff_label = diag_mod.resolve_infer_device(infer_cfg["infer_device"])
+    items.append({
+        "id": "compute_device",
+        "category": "hardware",
+        "module": "计算设备与推理加速",
+        "name": "计算设备（GPU 优先）",
+        "ok": True,
+        "severity": "ok",
+        "detail": f"当前生效：{eff_label}（策略：{infer_cfg['infer_device']}）",
+        "fix": None if hw["cuda"] else "当前未检测到 CUDA 显卡，将使用 CPU 模式运行；如有 NVIDIA 显卡可安装 CUDA 版 PyTorch 开启加速。",
+    })
+
+    # 4. 开源 OCR 模型权重 (PaddleOCR ONNX)
     paddle_missing = [rel for rel in PADDLE_FILES if not (root / rel).is_file()]
     items.append({
         "id": "paddle_ocr",
         "category": "weights",
+        "module": "PaddleOCR 题号权重",
         "name": "PaddleOCR 印刷题号权重",
         "ok": len(paddle_missing) == 0,
         "severity": "ok" if not paddle_missing else "error",
         "detail": "PP-OCRv6 ONNX 权重齐全" if not paddle_missing else "缺少: " + ", ".join(paddle_missing),
+        "fix": None if not paddle_missing else "请运行：python tools/下载权重.py --only-paddle，或在工作台重新解压权重自动补齐。",
     })
 
-    # 4. 部署模型权重 (orient / M1 / M2 / M3 / choice / digit)
+    # 5. 部署模型权重 (orient / M1 / M2 / M3 / choice / digit)
     missing_weights = []
     for task, label, fallback_rel in WEIGHT_SPECS:
         wp = _resolve_weight_path(root, task, fallback_rel)
@@ -225,27 +423,41 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
         items.append({
             "id": f"weight_{task}",
             "category": "weights",
+            "module": label,
             "name": label,
             "ok": ok,
             "severity": "ok" if ok else "error",
             "detail": f"就绪 ({size_mb} MB)" if ok else f"未找到 {wp.name}",
+            "fix": None if ok else "请点击上方「输入密码解压加密权重」，或先运行 python tools/下载权重.py 下载权重包。",
             "path": str(wp),
         })
 
-    # 5. 大模型视觉 API 配置（豆包 / 小米 MiMo / DeepSeek / 通义 / 智谱 / 自定义中转站）
+    # 6. 大模型视觉 API 配置（豆包 / 小米 MiMo / DeepSeek / 通义 / 智谱 / 自定义中转站）
     vlm_cfg = get_vlm_settings(root)
     has_key = bool(vlm_cfg.get("has_key"))
+    placeholder_key = bool(vlm_cfg.get("placeholder_detected"))
     masked = vlm_cfg.get("api_key_masked") or ""
+    if has_key:
+        api_detail = f"已配置 {vlm_cfg.get('model')} ({masked})"
+        api_fix = None
+    elif placeholder_key:
+        api_detail = "检测到 .env 中仍是模板占位文字（your_...），未配置真实 API Key"
+        api_fix = "请点击右上角「⚙ 大模型 API」填入真实的视觉模型密钥并测试连通性。"
+    else:
+        api_detail = "尚未配置有效 API Key（未配置前无法启动自动识别）"
+        api_fix = "请点击右上角「⚙ 大模型 API」选择运营商（豆包/MiMo/DeepSeek/通义等）并填入 API Key。"
     items.append({
         "id": "ark_key",
         "category": "config",
+        "module": "视觉大模型 API",
         "name": f"大模型视觉 API ({vlm_cfg.get('provider_label') or vlm_cfg.get('provider')})",
         "ok": has_key,
         "severity": "ok" if has_key else "warn",
-        "detail": f"已配置 {vlm_cfg.get('model')} ({masked})" if has_key else "尚未配置 API Key（点击「大模型 API 设置」配置豆包/MiMo/DeepSeek/中转站）",
+        "detail": api_detail,
+        "fix": api_fix,
     })
 
-    # 6. 加密权重包与 7z / opencode 探测（辅助信息）
+    # 7. 加密权重包与 7z / opencode 探测（辅助信息）
     archive_001 = find_weight_archive(root)
     seven_zip = find_7z()
     opencode_path = find_opencode(cfg)
@@ -256,9 +468,16 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
     return {
         "checked_at": now_str(),
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "deep_verified": bool(probe and probe.get("probed")),
         "ok": len(errors) == 0,
         "error_count": len(errors),
         "warning_count": len(warnings),
+        "has_valid_api_key": has_key,
+        "placeholder_api_key": placeholder_key,
+        "hardware": hw,
+        "infer_settings": infer_cfg,
+        "effective_device": eff_dev,
+        "effective_device_label": eff_label,
         "missing_packages": missing_pkgs,
         "missing_weights": missing_weights + (["PaddleOCR 权重"] if paddle_missing else []),
         "has_encrypted_weights": archive_001 is not None,
@@ -638,6 +857,7 @@ def get_vlm_settings(root: Path = ROOT) -> dict:
         "endpoint": cfg["endpoint"],
         "model": cfg["model"],
         "has_key": bool(key),
+        "placeholder_detected": bool(cfg.get("placeholder_detected")),
         "api_key_masked": masked,
         "presets": list(rec_api.VLM_PRESETS.values()),
     }
@@ -765,7 +985,7 @@ _DIR_STAT_CACHE: dict[str, tuple[float, float, dict]] = {}
 
 
 def _count_choice_or_digit(root: Path, folder: str, csv_name: str) -> dict:
-    """快速统计 choice/digit 审核进度（带目录 mtime + 60 秒内存缓存，避免万级小文件反复扫盘）。"""
+    """极速统计 choice/digit 审核进度（内存+mtime 缓存；万级日志用 scandir 毫秒估算，绝不阻塞 HTTP）。"""
     base = root / "data" / folder
     csv_path = base / csv_name
     if not csv_path.is_file():
@@ -778,18 +998,18 @@ def _count_choice_or_digit(root: Path, folder: str, csv_name: str) -> dict:
     cache_key = str(base)
     now_ts = time.time()
     cached = _DIR_STAT_CACHE.get(cache_key)
-    if cached and cached[0] == dir_mtime and (now_ts - cached[1]) < 60.0:
+    if cached and cached[0] == dir_mtime and (now_ts - cached[1]) < 300.0:
         return dict(cached[2])
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as fh:
-        total = sum(1 for _ in csv.DictReader(fh))
+        total = max(0, sum(1 for _ in fh) - 1)
+
     done = 0
     if log_dir.is_dir():
-        # 快速判定：只读每个日志最后 256 字节即可判断是否存在「审核/确认」记录
-        with os.scandir(log_dir) as it:
-            for entry in it:
-                if not entry.name.endswith(".log"):
-                    continue
+        log_entries = [e for e in os.scandir(log_dir) if e.name.endswith(".log")]
+        # 小目录直接精确读取；超 1500 个小文件时不再同步 open() 万次（避免 Windows Defender 下卡死 190+ 秒）
+        if len(log_entries) <= 1500:
+            for entry in log_entries:
                 try:
                     with open(entry.path, "rb") as fh:
                         fh.seek(0, os.SEEK_END)
@@ -800,6 +1020,23 @@ def _count_choice_or_digit(root: Path, folder: str, csv_name: str) -> dict:
                         done += 1
                 except OSError:
                     pass
+        else:
+            # 抽样 80 个文件估算已审比例，结合文件总数毫秒返回，避免阻塞工作台首屏
+            step = max(1, len(log_entries) // 80)
+            sample = log_entries[::step][:80]
+            hit = 0
+            for entry in sample:
+                try:
+                    with open(entry.path, "rb") as fh:
+                        fh.seek(0, os.SEEK_END)
+                        size = fh.tell()
+                        fh.seek(max(0, size - 512))
+                        tail = fh.read().decode("utf-8", errors="ignore")
+                    if "审核" in tail or "确认" in tail:
+                        hit += 1
+                except OSError:
+                    pass
+            done = round(len(log_entries) * (hit / len(sample))) if sample else 0
     res = {
         "available": total > 0,
         "total": total,
@@ -837,9 +1074,8 @@ def collect_tasks_and_leaderboard(
         m_done += st["done"]
         leaderboard.update(contrib)
 
-    # 3. 涂黑审核 & 数字审核
+    # 3. 涂黑审核（移除未展示的 digit 万级扫盘开销）
     choice_stat = _count_choice_or_digit(root, "choice", "manifest.csv")
-    digit_stat = _count_choice_or_digit(root, "digit", "labels.csv")
 
     tasks = [
         {

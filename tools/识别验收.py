@@ -11,6 +11,7 @@ import secrets
 import shutil
 import sys
 import threading
+import time
 import tarfile
 import urllib.request
 from urllib.parse import unquote, urlparse
@@ -26,6 +27,19 @@ M1_CLS = {0, 1, 4}
 M2_CLS = {2, 3}
 M3_CLS = {5, 6}
 ALL_BOX_CLS = M1_CLS | M2_CLS | M3_CLS
+
+
+def _read_json_safe(path: Path, retries: int = 8, delay: float = 0.04):
+    """带重试读取 JSON，避免后台流水线并发原子替换时偶发读取冲突。"""
+    last_exc = None
+    for idx in range(max(1, retries)):
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as exc:
+            last_exc = exc
+            if idx + 1 < retries:
+                time.sleep(delay)
+    raise last_exc  # type: ignore[misc]
 
 
 def prepare_math_assets(folder):
@@ -285,18 +299,46 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                 return self.reply(template.replace('__TOKEN__', token).encode(), content_type='text/html; charset=utf-8')
             if name == '/api/state':
                 try:
-                    result = json.loads((store.folder/'results.json').read_text(encoding='utf-8'))
+                    results_path = store.folder/'results.json'
+                    result = _read_json_safe(results_path)
                     live = store.folder/'benchmark_live.json'
                     if live.is_file() and not result.get('benchmark'):
-                        result['benchmark'] = json.loads(live.read_text(encoding='utf-8'))
-                    return self.reply({'result': result, 'feedback': store.read(), 'locks': claims.snapshot()})
+                        result['benchmark'] = _read_json_safe(live)
+                    mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
+                    return self.reply({
+                        'result': result,
+                        'feedback': store.read(),
+                        'locks': claims.snapshot(),
+                        'results_mtime': mtime,
+                    })
                 except (OSError, ValueError) as exc:
                     return self.reply({'error': str(exc)}, 409)
             if name == '/api/locks':
                 return self.reply({'ok': True, 'locks': claims.snapshot()})
             if name == '/api/live':
                 try:
-                    return self.reply({'ok': True, 'feedback': store.read(), 'locks': claims.snapshot()})
+                    results_path = store.folder/'results.json'
+                    mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
+                    res_meta = {}
+                    try:
+                        res = _read_json_safe(results_path, retries=3, delay=0.02)
+                        st = res.get('stats') or {}
+                        pages_list = res.get('pages') or []
+                        res_meta = {
+                            'result_status': str(res.get('status') or ''),
+                            'pages_count': len(pages_list),
+                            'items_with_transcription': int(st.get('items_with_transcription') if 'items_with_transcription' in st else sum('transcription' in it for p in pages_list for it in (p.get('items') or []))),
+                            'stats': st,
+                        }
+                    except Exception:
+                        pass
+                    return self.reply({
+                        'ok': True,
+                        'feedback': store.read(),
+                        'locks': claims.snapshot(),
+                        'results_mtime': mtime,
+                        **res_meta,
+                    })
                 except (OSError, ValueError) as exc:
                     return self.reply({'ok': False, 'error': str(exc)}, 409)
             if name.startswith('/asset/'):

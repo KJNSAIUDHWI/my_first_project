@@ -83,7 +83,25 @@ class WorkbenchState:
         self._lock = threading.RLock()
         self.procs: dict[str, dict] = {}  # task_id -> {proc, port, args, started_at}
         self.presence: dict[str, dict] = {}
-        self.pipeline_job: dict = {"running": False, "batch_id": "", "logs": [], "status": "idle", "returncode": None}
+        self.pipeline_job: dict = {
+            "running": False,
+            "kind": "recognize",
+            "batch_id": "",
+            "logs": [],
+            "status": "idle",
+            "returncode": None,
+            "exit_info": None,
+            "progress": None,
+            "error_report": None,
+            "result_summary": None,
+        }
+        self.benchmark_job: dict = {
+            "running": False,
+            "logs": [],
+            "status": "idle",
+            "result": None,
+            "error": "",
+        }
         self.repair_job: dict = {"running": False, "logs": [], "status": "idle", "result": None}
         self.train_job: dict = {
             "running": False,
@@ -99,6 +117,34 @@ class WorkbenchState:
         self._train_proc: subprocess.Popen | None = None
         self.last_check: dict | None = None
 
+    def _utf8_env(self) -> dict:
+        return dict(
+            os.environ,
+            PYTHONUTF8="1",
+            PYTHONIOENCODING="utf-8",
+            PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="True",
+        )
+
+    def pipeline_job_snapshot(self) -> dict:
+        with self._lock:
+            snap = dict(self.pipeline_job)
+            snap["logs"] = list(self.pipeline_job.get("logs") or [])
+            if isinstance(snap.get("progress"), dict):
+                snap["progress"] = dict(snap["progress"])
+            if isinstance(snap.get("error_report"), dict):
+                snap["error_report"] = dict(snap["error_report"])
+            if isinstance(snap.get("exit_info"), dict):
+                snap["exit_info"] = dict(snap["exit_info"])
+            if isinstance(snap.get("result_summary"), dict):
+                snap["result_summary"] = dict(snap["result_summary"])
+        return snap
+
+    def benchmark_job_snapshot(self) -> dict:
+        with self._lock:
+            snap = dict(self.benchmark_job)
+            snap["logs"] = list(self.benchmark_job.get("logs") or [])
+        return snap
+
     def train_job_snapshot(self) -> dict:
         with self._lock:
             snap = dict(self.train_job)
@@ -106,9 +152,9 @@ class WorkbenchState:
             snap["metrics"] = dict(self.train_job.get("metrics") or {})
         return snap
 
-    def run_check(self) -> dict:
-        self.bus.publish({"source": "gui", "step": "check", "status": "running", "message": "正在检查运行环境与模型权重..."})
-        rep = core.check_environment(self.root, self.batches_root)
+    def run_check(self, deep: bool = False) -> dict:
+        self.bus.publish({"source": "gui", "step": "check", "status": "running", "message": "正在执行深度依赖导入与模型权重检查..." if deep else "正在检查运行环境与模型权重..."})
+        rep = core.check_environment(self.root, self.batches_root, deep=deep)
         self.last_check = rep
         msg = "环境自检全部通过" if rep["ok"] else f"发现 {rep['error_count']} 项需要处理的问题"
         self.bus.publish({"source": "gui", "step": "check", "status": "done" if rep["ok"] else "error", "message": msg})
@@ -202,6 +248,7 @@ class WorkbenchState:
                 cwd=str(self.root),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=self._utf8_env(),
                 creationflags=creation,
             )
             self.procs[task_id] = {"proc": proc, "port": port, "cmd": cmd, "extra": extra, "started_at": core.now_str()}
@@ -229,31 +276,160 @@ class WorkbenchState:
         self.bus.publish({"source": "gui", "step": f"service_{task_id}", "status": "stopped", "message": f"已停止 {task_id} 服务"})
         return {"ok": True, "task_id": task_id}
 
+    def _read_run_stats(self, rec_dir: Path) -> dict | None:
+        """读取识别目录的 results.json 摘要（用于结果级健康判定与工作台展示）。"""
+        data = core.read_json(rec_dir / "results.json")
+        if not isinstance(data, dict):
+            return None
+        pages = data.get("pages") or []
+        stats = dict(data.get("stats") or {})
+        if "pages" not in stats:
+            stats["pages"] = len(pages)
+        if "page_failures" not in stats:
+            stats["page_failures"] = sum(bool(p.get("error")) for p in pages)
+        failed_items = sum(
+            1
+            for p in pages
+            for it in (p.get("items") or [])
+            if it.get("kind") in ("fill", "identity")
+            and it.get("status") in ("调用失败", "结构异常", "等待视觉转录", "等待豆包")
+        )
+        return {
+            "status": str(data.get("status") or ""),
+            "model": str(data.get("model") or ""),
+            "returned_model": data.get("returned_model"),
+            "provider_label": str(data.get("provider_label") or ""),
+            "settings": data.get("settings") or {},
+            "stats": stats,
+            "failed_items": failed_items,
+            "has_error_log": (rec_dir / "logs" / "errors.log").is_file(),
+        }
+
     def start_pipeline(self, batch_id: str | None = None) -> dict:
+        diag_mod = core._load_diag_module(self.root)
         with self._lock:
             if self.pipeline_job["running"]:
                 return {"ok": False, "error": "已有自动识别任务正在运行，请等待完成"}
             active = core.set_active_batch(batch_id, self.batches_root) if batch_id else core.get_active_batch(self.batches_root)
             if not active:
                 return {"ok": False, "error": "请先导入一批试卷照片"}
+
+        # 启动前强校验：依赖（含真实 import）、模型权重、有效 API Key
+        rep = core.check_environment(self.root, self.batches_root, deep=True)
+        self.last_check = rep
+        if not rep.get("ok"):
+            first_err = next((x for x in rep.get("items", []) if x.get("severity") == "error"), None)
+            err_mod = (first_err or {}).get("module") or "运行环境"
+            err_reason = (first_err or {}).get("detail") or "存在缺失的依赖库或模型权重"
+            err_fix = (first_err or {}).get("fix") or "请回到「第 1 步：运行环境」一键修复。"
+            err_report = {
+                "module": err_mod,
+                "title": f"环境未就绪：{err_mod}存在缺失",
+                "reason": err_reason,
+                "fix": err_fix,
+                "exit_code": diag_mod.EXIT_WEIGHTS_MISSING if (first_err or {}).get("category") == "weights" else diag_mod.EXIT_ENV_MISSING,
+            }
+            with self._lock:
+                self.pipeline_job.update({
+                    "running": False,
+                    "batch_id": active["batch_id"],
+                    "status": "error",
+                    "returncode": err_report["exit_code"],
+                    "exit_info": diag_mod.describe_exit_code(err_report["exit_code"]),
+                    "error_report": err_report,
+                })
+            return {
+                "ok": False,
+                "error": f"【{err_mod}】{err_reason}。修复建议：{err_fix}",
+                "diagnostic": err_report,
+            }
+        if not rep.get("has_valid_api_key"):
+            reason = (
+                ".env 中的 API Key 仍是模板占位文字（your_...），未配置真实密钥。"
+                if rep.get("placeholder_api_key")
+                else "尚未配置视觉大模型 API Key，无法转录填空题和姓名学号。"
+            )
+            err_report = {
+                "module": "视觉大模型 API 配置",
+                "title": "请先配置有效的视觉大模型 API Key",
+                "reason": reason,
+                "fix": "请点击右上角「⚙ 大模型 API」，选择服务商、填入真实密钥并点击「测试连通性」通过后再启动识别。",
+                "exit_code": diag_mod.EXIT_API_CONFIG_ERROR,
+            }
+            with self._lock:
+                self.pipeline_job.update({
+                    "running": False,
+                    "batch_id": active["batch_id"],
+                    "status": "error",
+                    "returncode": diag_mod.EXIT_API_CONFIG_ERROR,
+                    "exit_info": diag_mod.describe_exit_code(diag_mod.EXIT_API_CONFIG_ERROR),
+                    "error_report": err_report,
+                })
+            return {
+                "ok": False,
+                "error": f"【视觉大模型 API】{reason} 请先点击右上角「⚙ 大模型 API」配置。",
+                "diagnostic": err_report,
+            }
+
+        infer_cfg = core.get_infer_settings(self.batches_root)
+        with self._lock:
             self.pipeline_job = {
                 "running": True,
+                "kind": "recognize",
                 "batch_id": active["batch_id"],
-                "logs": [f"[{core.now_str()}] 启动自动识别流水线：{active['batch_id']}（共 {active['total_images']} 张）"],
+                "logs": [
+                    f"[{core.now_str()}] 启动自动识别流水线：{active['batch_id']}（共 {active['total_images']} 张）",
+                    f"[{core.now_str()}] 设备策略：{rep.get('effective_device_label')} | YOLO Batch：{infer_cfg['yolo_batch'] or '自动'} | 线程：{infer_cfg['cpu_workers'] or '自动'} | API 并发：{infer_cfg['api_concurrency']}",
+                ],
                 "status": "running",
                 "returncode": None,
+                "exit_info": None,
+                "progress": {
+                    "stage": "准备模型与环境",
+                    "message": f"正在初始化检测模型（{rep.get('effective_device_label')}）...",
+                    "pages_done": 0,
+                    "pages_total": int(active.get("total_images") or 0),
+                    "page_failures": 0,
+                    "m1_boxes": 0,
+                    "m2_boxes": 0,
+                    "m3_boxes": 0,
+                    "ocr_numbers": 0,
+                    "choice_items": 0,
+                    "fill_items": 0,
+                    "grids_total": 0,
+                    "api_done": 0,
+                    "api_success": 0,
+                    "api_failures": 0,
+                    "api_inflight": 0,
+                    "items_with_transcription": 0,
+                    "device": rep.get("effective_device") or "auto",
+                    "device_label": rep.get("effective_device_label") or "",
+                    "elapsed_seconds": 0.0,
+                    "pages_per_min": 0.0,
+                    "eta_seconds": None,
+                },
+                "error_report": None,
+                "result_summary": None,
             }
 
         def worker():
             self.bus.publish({"source": "gui", "step": "recognize", "status": "running", "message": f"正在识别批次 {active['batch_id']}（共 {active['total_images']} 张）..."})
             cmd = [
                 sys.executable,
+                "-B",
                 str(self.root / "pipeline" / "run.py"),
                 "--recognize",
                 "--input", active["images_dir"],
                 "--out", active["recognize_dir"],
+                "--device", str(infer_cfg["infer_device"]),
+                "--yolo-batch", str(infer_cfg["yolo_batch"]),
+                "--workers", str(infer_cfg["cpu_workers"]),
+                "--concurrency", str(infer_cfg["api_concurrency"]),
             ]
             creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            last_sse_ts = 0.0
+            last_error_diag = None
+            raw_tail: list[str] = []
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -263,6 +439,7 @@ class WorkbenchState:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    env=self._utf8_env(),
                     creationflags=creation,
                 )
                 assert proc.stdout is not None
@@ -270,27 +447,240 @@ class WorkbenchState:
                     text = line.rstrip()
                     if not text:
                         continue
-                    with self._lock:
-                        self.pipeline_job["logs"].append(text)
-                        if len(self.pipeline_job["logs"]) > 200:
-                            self.pipeline_job["logs"] = self.pipeline_job["logs"][-200:]
-                    self.bus.publish({"source": "gui", "step": "recognize", "status": "running", "message": text})
+                    # 过滤 ultralytics 已知无害提示，避免挤爆技术日志
+                    if "deprecated" in text.lower() and "quantize" in text.lower():
+                        continue
+                    parsed = None
+                    if text.startswith("{") and text.endswith("}"):
+                        try:
+                            parsed = json.loads(text)
+                        except Exception:
+                            parsed = None
+
+                    now_m = time.monotonic()
+                    if isinstance(parsed, dict) and parsed.get("event") == "progress":
+                        stage = str(parsed.get("stage") or "识别中")
+                        msg = str(parsed.get("message") or "")
+                        if parsed.get("recent_error"):
+                            last_error_diag = parsed["recent_error"]
+                        with self._lock:
+                            self.pipeline_job["progress"] = parsed
+                            if last_error_diag:
+                                self.pipeline_job["error_report"] = last_error_diag
+                            if msg:
+                                self.pipeline_job["logs"].append(f"[{stage}] {msg}")
+                                if len(self.pipeline_job["logs"]) > 200:
+                                    self.pipeline_job["logs"] = self.pipeline_job["logs"][-200:]
+                        if now_m - last_sse_ts >= 1.2:
+                            last_sse_ts = now_m
+                            p_done = parsed.get("pages_done", 0)
+                            p_tot = parsed.get("pages_total", 0)
+                            a_ok = parsed.get("api_success", 0)
+                            a_tot = parsed.get("grids_total", 0)
+                            self.bus.publish({
+                                "source": "gui",
+                                "step": "recognize",
+                                "status": "running",
+                                "message": f"{stage} · 已检测 {p_done}/{p_tot} 页 · 拼图转录 {a_ok}/{a_tot}",
+                            })
+                    elif isinstance(parsed, dict) and parsed.get("event") == "error":
+                        diag = parsed.get("diagnostic") or {}
+                        last_error_diag = diag
+                        with self._lock:
+                            self.pipeline_job["error_report"] = diag
+                            self.pipeline_job["logs"].append(
+                                f"[错误·{diag.get('module', '系统')}] {diag.get('title', '')}：{diag.get('reason', '')}（建议：{diag.get('fix', '')}）"
+                            )
+                    elif isinstance(parsed, dict) and parsed.get("event") == "summary":
+                        if parsed.get("recent_error"):
+                            last_error_diag = parsed["recent_error"]
+                        with self._lock:
+                            self.pipeline_job["logs"].append(f"[汇总] 状态：{parsed.get('status', '')}")
+                    else:
+                        raw_tail.append(text)
+                        if len(raw_tail) > 40:
+                            raw_tail = raw_tail[-40:]
+                        with self._lock:
+                            self.pipeline_job["logs"].append(text)
+                            if len(self.pipeline_job["logs"]) > 200:
+                                self.pipeline_job["logs"] = self.pipeline_job["logs"][-200:]
+
                 rc = proc.wait()
+                exit_info = diag_mod.describe_exit_code(rc)
+                run_summary = self._read_run_stats(Path(active["recognize_dir"]))
+                st = (run_summary or {}).get("stats") or {}
+                pages_n = int(st.get("pages") or 0)
+                page_fail = int(st.get("page_failures") or 0)
+                api_fail = int(st.get("api_failures") or 0)
+                failed_items = int((run_summary or {}).get("failed_items") or 0)
+                all_failed = pages_n > 0 and page_fail >= pages_n
+
+                if rc != 0 or all_failed:
+                    final_status = "error"
+                    if last_error_diag is None:
+                        tail_txt = "\n".join(raw_tail[-8:])
+                        if tail_txt:
+                            last_error_diag = diag_mod.diagnose_exception(tail_txt, default_module="自动识别流水线")
+                        else:
+                            last_error_diag = {
+                                "module": "自动识别流水线",
+                                "title": exit_info["title"],
+                                "reason": exit_info["reason"],
+                                "fix": exit_info["fix"],
+                                "exit_code": rc,
+                            }
+                    msg = f"自动识别失败：{last_error_diag.get('title') or exit_info['title']}（退出码 {rc}：{exit_info['title']}）"
+                elif page_fail > 0 or api_fail > 0 or failed_items > 0:
+                    final_status = "warn"
+                    parts = []
+                    if page_fail > 0:
+                        parts.append(f"{page_fail}/{pages_n} 页本地检测失败")
+                    if failed_items > 0:
+                        parts.append(f"{failed_items} 个手写题块尚未完成转录")
+                    elif api_fail > 0:
+                        parts.append(f"{api_fail} 个拼图调用失败")
+                    msg = "自动识别已结束，但存在待补跑项：" + "，".join(parts) + "。可点击「补跑失败图块」仅重试失败项。"
+                else:
+                    final_status = "done"
+                    msg = f"自动识别全部完成（共 {pages_n} 页，转录 {st.get('items_with_transcription', 0)} 处）！现在可以进入「人工复审」核对结果。"
+
                 with self._lock:
                     self.pipeline_job["running"] = False
                     self.pipeline_job["returncode"] = rc
-                    self.pipeline_job["status"] = "done" if rc == 0 else "error"
-                msg = "自动识别已完成！现在可以进入「识别验收」核对结果。" if rc == 0 else f"自动识别退出异常（代码 {rc}），可点击「求助 AI」定位原因。"
-                self.bus.publish({"source": "gui", "step": "recognize", "status": "done" if rc == 0 else "error", "message": msg})
+                    self.pipeline_job["exit_info"] = exit_info
+                    self.pipeline_job["status"] = final_status
+                    self.pipeline_job["result_summary"] = run_summary
+                    if last_error_diag:
+                        self.pipeline_job["error_report"] = last_error_diag
+                    self.pipeline_job["logs"].append(f"[结束] 退出码 {rc}（{exit_info['title']}）· {msg}")
+                self.bus.publish({"source": "gui", "step": "recognize", "status": "done" if final_status == "done" else ("error" if final_status == "error" else "running"), "message": msg})
             except Exception as exc:
+                diag = diag_mod.diagnose_exception(exc, default_module="工作台任务调度")
                 with self._lock:
                     self.pipeline_job["running"] = False
                     self.pipeline_job["status"] = "error"
-                    self.pipeline_job["logs"].append(f"异常：{exc}")
-                self.bus.publish({"source": "gui", "step": "recognize", "status": "error", "message": f"启动识别失败：{exc}"})
+                    self.pipeline_job["returncode"] = diag.get("exit_code", 1)
+                    self.pipeline_job["exit_info"] = diag_mod.describe_exit_code(diag.get("exit_code", 1))
+                    self.pipeline_job["error_report"] = diag
+                    self.pipeline_job["logs"].append(f"[异常·{diag['module']}] {diag['title']}：{diag['reason']}")
+                self.bus.publish({"source": "gui", "step": "recognize", "status": "error", "message": f"启动识别失败：{diag['title']}"})
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "batch_id": active["batch_id"]}
+
+    def start_retry_failed(self, batch_id: str | None = None) -> dict:
+        """在后台仅补跑当前批次失败或结构异常的图块（不重复扣费）。"""
+        diag_mod = core._load_diag_module(self.root)
+        with self._lock:
+            if self.pipeline_job["running"]:
+                return {"ok": False, "error": "当前已有识别或补跑任务正在运行，请稍候"}
+            active = core.set_active_batch(batch_id, self.batches_root) if batch_id else core.get_active_batch(self.batches_root)
+            if not active:
+                return {"ok": False, "error": "还没有导入批次"}
+            rec_dir = Path(active["recognize_dir"])
+            if not (rec_dir / "results.json").is_file():
+                return {"ok": False, "error": "当前批次尚无识别结果，请先运行自动识别"}
+            infer_cfg = core.get_infer_settings(self.batches_root)
+            self.pipeline_job.update({
+                "running": True,
+                "kind": "retry",
+                "batch_id": active["batch_id"],
+                "status": "running",
+                "returncode": None,
+                "exit_info": None,
+                "error_report": None,
+                "logs": [f"[{core.now_str()}] 启动失败图块补跑（仅重跑失败项，不重复扣费）：{active['batch_id']}"],
+            })
+
+        def worker():
+            import importlib.util
+            self.bus.publish({"source": "gui", "step": "recognize", "status": "running", "message": "正在补跑失败图块（不重复扣费）..."})
+            try:
+                spec = importlib.util.spec_from_file_location("_retry_failed", str(self.root / "tools" / "补跑失败图块.py"))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+
+                def cb(msg: str):
+                    with self._lock:
+                        self.pipeline_job["logs"].append(f"[补跑] {msg}")
+                        if len(self.pipeline_job["logs"]) > 200:
+                            self.pipeline_job["logs"] = self.pipeline_job["logs"][-200:]
+                    self.bus.publish({"source": "gui", "step": "recognize", "status": "running", "message": msg})
+
+                res = mod.retry_failed_grids(rec_dir, concurrency=infer_cfg["api_concurrency"], progress_cb=cb)
+                run_summary = self._read_run_stats(rec_dir)
+                ok = bool(res.get("ok"))
+                rem = int(res.get("remaining_failures") or 0)
+                with self._lock:
+                    self.pipeline_job["running"] = False
+                    self.pipeline_job["returncode"] = 0 if ok else int(res.get("exit_code") or 1)
+                    self.pipeline_job["exit_info"] = diag_mod.describe_exit_code(self.pipeline_job["returncode"])
+                    self.pipeline_job["status"] = ("done" if rem == 0 else "warn") if ok else "error"
+                    self.pipeline_job["result_summary"] = run_summary
+                    if not ok:
+                        self.pipeline_job["error_report"] = diag_mod.diagnose_exception(res.get("error") or "补跑失败", default_module="补跑失败图块")
+                    self.pipeline_job["logs"].append(f"[补跑结束] {res.get('message') or res.get('error') or ''}")
+                self.bus.publish({"source": "gui", "step": "recognize", "status": "done" if ok else "error", "message": res.get("message") or res.get("error") or "补跑结束"})
+            except Exception as exc:
+                diag = diag_mod.diagnose_exception(exc, default_module="补跑失败图块")
+                with self._lock:
+                    self.pipeline_job["running"] = False
+                    self.pipeline_job["status"] = "error"
+                    self.pipeline_job["returncode"] = diag.get("exit_code", 1)
+                    self.pipeline_job["exit_info"] = diag_mod.describe_exit_code(diag.get("exit_code", 1))
+                    self.pipeline_job["error_report"] = diag
+                self.bus.publish({"source": "gui", "step": "recognize", "status": "error", "message": f"补跑失败：{diag['title']}"})
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True, "batch_id": active["batch_id"]}
+
+    def start_benchmark(self, samples: int = 4) -> dict:
+        """启动本机 Batch/并发性能压测（零 API 费用，自动选出最优参数）。"""
+        diag_mod = core._load_diag_module(self.root)
+        with self._lock:
+            if self.benchmark_job["running"]:
+                return {"ok": False, "error": "本机性能压测正在进行中，请稍候完成"}
+            if self.pipeline_job["running"] or self.train_job["running"]:
+                return {"ok": False, "error": "当前有识别或训练任务正在占用显卡/CPU，请等结束后再测速"}
+            self.benchmark_job = {
+                "running": True,
+                "logs": [f"[{core.now_str()}] 开始本机性能压测（抽测 {samples} 张样卷，纯本地推理不花 API 费用）..."],
+                "status": "running",
+                "result": None,
+                "error": "",
+            }
+
+        def worker():
+            import importlib.util
+            self.bus.publish({"source": "gui", "step": "check", "status": "running", "message": "正在执行本机 Batch/并发性能压测（零 API 费用）..."})
+            try:
+                spec = importlib.util.spec_from_file_location("_perf_bench", str(self.root / "tools" / "性能压测.py"))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+
+                def cb(msg: str):
+                    with self._lock:
+                        self.benchmark_job["logs"].append(f"[测速] {msg}")
+                    self.bus.publish({"source": "gui", "step": "check", "status": "running", "message": msg})
+
+                res = mod.run_benchmark(self.root, sample_count=max(2, min(8, int(samples))), progress_cb=cb)
+                ok = bool(res.get("ok"))
+                with self._lock:
+                    self.benchmark_job["running"] = False
+                    self.benchmark_job["status"] = "done" if ok else "error"
+                    self.benchmark_job["result"] = res if ok else None
+                    self.benchmark_job["error"] = "" if ok else str(res.get("error") or "压测失败")
+                self.bus.publish({"source": "gui", "step": "check", "status": "done" if ok else "error", "message": res.get("summary") or res.get("error") or "压测完成"})
+            except Exception as exc:
+                diag = diag_mod.diagnose_exception(exc, default_module="本机性能压测")
+                with self._lock:
+                    self.benchmark_job["running"] = False
+                    self.benchmark_job["status"] = "error"
+                    self.benchmark_job["error"] = f"【{diag['module']}】{diag['title']}：{diag['reason']}（建议：{diag['fix']}）"
+                self.bus.publish({"source": "gui", "step": "check", "status": "error", "message": f"性能压测失败：{diag['title']}"})
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True}
 
     def start_training(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
@@ -572,8 +962,30 @@ def make_handler(state: WorkbenchState):
             if path == "/api/check":
                 if not self._require_host():
                     return
-                rep = state.run_check()
+                qs = urllib.parse.parse_qs(parsed.query)
+                deep = qs.get("deep", ["0"])[0] in ("1", "true", "yes")
+                rep = state.run_check(deep=deep)
                 self._send_json(200, rep)
+                return
+
+            if path == "/api/benchmark/status":
+                if not self._require_host():
+                    return
+                self._send_json(200, {"ok": True, "benchmark_job": state.benchmark_job_snapshot()})
+                return
+
+            if path == "/api/pipeline/errors":
+                if not self._require_host():
+                    return
+                active = core.get_active_batch(state.batches_root)
+                log_txt = ""
+                log_path = ""
+                if active:
+                    p = Path(active["recognize_dir"]) / "logs" / "errors.log"
+                    log_path = str(p)
+                    if p.is_file():
+                        log_txt = p.read_text(encoding="utf-8", errors="replace")[-12000:]
+                self._send_json(200, {"ok": True, "path": log_path, "content": log_txt})
                 return
 
             if path == "/api/train/overview":
@@ -599,13 +1011,20 @@ def make_handler(state: WorkbenchState):
                 )
                 lan_ip = core.detect_lan_ip()
                 lan_url = f"http://{lan_ip}:{state.port}"
+                active = data.get("active_batch")
+                rec_summary = state._read_run_stats(Path(active["recognize_dir"])) if active else None
+                diag_mod = core._load_diag_module(state.root)
                 data.update({
                     "is_host": self._is_host(),
                     "lan_ip": lan_ip,
                     "lan_url": lan_url,
                     "port": state.port,
                     "subjects": core.DEFAULT_SUBJECTS,
-                    "pipeline_job": state.pipeline_job,
+                    "pipeline_job": state.pipeline_job_snapshot(),
+                    "recognition_summary": rec_summary,
+                    "benchmark_job": state.benchmark_job_snapshot() if self._is_host() else None,
+                    "infer_settings": core.get_infer_settings(state.batches_root) if self._is_host() else {},
+                    "hardware": diag_mod.probe_compute_hardware() if self._is_host() else {},
                     "last_check": state.last_check if self._is_host() else None,
                     "config": core.load_config(state.batches_root) if self._is_host() else {},
                 })
@@ -709,8 +1128,24 @@ def make_handler(state: WorkbenchState):
                 patch = {}
                 if "opencode_path" in body:
                     patch["opencode_path"] = str(body["opencode_path"] or "").strip()
+                if "infer_device" in body:
+                    dev = str(body["infer_device"] or "auto").strip()
+                    patch["infer_device"] = dev if dev in ("auto", "cpu", "cuda:0", "cuda") else "auto"
+                if "yolo_batch" in body:
+                    patch["yolo_batch"] = max(0, min(16, int(body["yolo_batch"] or 0)))
+                if "cpu_workers" in body:
+                    patch["cpu_workers"] = max(0, min(16, int(body["cpu_workers"] or 0)))
+                if "api_concurrency" in body:
+                    patch["api_concurrency"] = max(1, min(12, int(body["api_concurrency"] or 4)))
+                if "last_benchmark" in body and isinstance(body["last_benchmark"], dict):
+                    patch["last_benchmark"] = body["last_benchmark"]
                 cfg = core.save_config(patch, state.batches_root)
-                self._send_json(200, {"ok": True, "config": cfg})
+                state.last_check = core.check_environment(state.root, state.batches_root, deep=False)
+                self._send_json(200, {
+                    "ok": True,
+                    "config": cfg,
+                    "infer_settings": core.get_infer_settings(state.batches_root),
+                })
                 return
 
             if path == "/api/repair/pip":
@@ -811,6 +1246,16 @@ def make_handler(state: WorkbenchState):
 
             if path == "/api/pipeline/run":
                 res = state.start_pipeline(body.get("batch_id"))
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/pipeline/retry-failed":
+                res = state.start_retry_failed(body.get("batch_id"))
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/benchmark/start":
+                res = state.start_benchmark(samples=int(body.get("samples") or 4))
                 self._send_json(200 if res.get("ok") else 400, res)
                 return
 

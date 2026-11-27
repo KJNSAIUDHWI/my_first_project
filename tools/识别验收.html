@@ -193,12 +193,84 @@
   }
   .margin-ans .blank-pill {
     display: inline-flex; align-items: center; gap: 4px;
-    background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 5px;
+    background: rgba(241, 245, 249, 0.92); border: 1px solid #e2e8f0; border-radius: 5px;
     padding: 0 6px; line-height: 1.5; color: #0f172a; font-weight: 600;
+  }
+  .margin-ans .blank-pill.unanswered {
+    background: rgba(241, 245, 249, 0.62);
+    border: 1px dashed #94a3b8;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .margin-ans .blank-pill.discarded {
+    background: rgba(248, 250, 252, 0.85);
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .margin-ans .blank-pill.pending {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    color: #b45309;
+    font-weight: 600;
+  }
+  .margin-ans .blank-pill.failed {
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    color: #b91c1c;
+    font-weight: 600;
   }
   .margin-ans .blank-idx {
     font-size: 10.5px; font-weight: 700; color: #64748b;
   }
+  /* 填空题悬停模式：框左上角极简微徽章 + 就近弹出答案气泡 */
+  .fill-mini-tag {
+    position: absolute; pointer-events: auto; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(37, 99, 235, 0.88); color: #fff;
+    font-size: 11px; font-weight: 700; line-height: 1;
+    padding: 3px 7px; border-radius: 5px;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+    white-space: nowrap; user-select: none; z-index: 18;
+    transition: transform 0.1s ease, background 0.12s ease;
+  }
+  .fill-mini-tag:hover, .fill-mini-tag.active {
+    background: #1d4ed8; transform: scale(1.04); z-index: 26;
+  }
+  .fill-mini-tag.edited { background: rgba(22, 163, 74, 0.92); }
+  .fill-mini-tag.pending { background: rgba(217, 119, 6, 0.92); }
+  .fill-mini-tag.failed { background: rgba(185, 28, 28, 0.92); }
+  .fill-mini-tag .mini-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #fde68a; display: inline-block;
+  }
+  .fill-hover-pop {
+    position: absolute; z-index: 48; pointer-events: auto;
+    min-width: 220px; max-width: min(460px, 86vw);
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #2563eb;
+    border-radius: 10px;
+    padding: 8px 11px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+    color: #16243a;
+    font-size: 12.5px; line-height: 1.5;
+    cursor: pointer;
+  }
+  .fill-hover-pop.edited { border-color: #16a34a; background: rgba(240, 253, 244, 0.98); }
+  .fill-hover-pop-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px dashed #e2e8f0;
+  }
+  .fill-hover-pop-hint { font-size: 11px; color: #64748b; font-weight: 500; }
+  /* 后台识别进行中运行态横幅 */
+  .live-run-banner {
+    display: none; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 14px; font-size: 12.5px; font-weight: 600;
+    background: #fffbeb; color: #92400e; border-bottom: 1px solid #fcd34d;
+    z-index: 20;
+  }
+  .live-run-banner.show { display: flex; }
+  .live-run-banner.err { background: #fef2f2; color: #991b1b; border-bottom-color: #fca5a5; }
   /* 姓名学号竖框外挂紧凑胶囊：贴在框顶部上方，不侵入正文 */
   .overlay-identity {
     background: rgba(254, 242, 242, 0.94);
@@ -432,9 +504,10 @@
       <label class="chk-label" title="在选择题和调框标签上显示具体置信度百分比">
         <input type="checkbox" id="chkConf"> 置信度
       </label>
-      <label class="chk-label" title="在原卷与右侧批注卡上显示识别出的答案">
+      <label class="chk-label" title="在原卷上显示识别出的答案（填空题支持悬停或右侧列表切换）">
         <input type="checkbox" id="chkOverlay" checked> 显示答案
       </label>
+      <button id="btnFillDisplayMode" title="切换填空题答案展示方式：鼠标滑到题框就近显示（默认） / 右侧常驻列表">💬 填空：悬停</button>
       <button id="btnKeybinds" title="像游戏一样自定义所有主/副快捷键">⌨ 键位</button>
       <button id="btnGuide" title="30 秒看懂看答案、调框、多人协作与低置信度定位">? 教程</button>
       <button id="btnPrev">← 上一张</button>
@@ -455,6 +528,10 @@
 
     <!-- 中栏：绝对主视觉原卷画布 + 框内答案贴条叠层 -->
     <main class="stage-wrap">
+      <div class="live-run-banner" id="liveRunBanner">
+        <span id="liveRunBannerText">后台正在识别中...</span>
+        <button id="btnRefreshNow" style="padding:2px 9px;font-size:11.5px;">立即刷新结果</button>
+      </div>
       <div class="canvas-host" id="canvasHost">
         <canvas id="paperCanvas"></canvas>
         <div class="overlay-layer" id="overlayLayer"></div>
@@ -629,6 +706,7 @@ const state = {
   activeCls: 4,
   showLayers: { m1: true, m2: false, m3: true },
   showOverlay: true,
+  fillDisplayMode: localStorage.getItem("reviewFillDisplayMode") || "hover", // "hover" | "margin"
   showConf: false,
   selectedItemId: null,
   selectedBoxIdx: -1,
@@ -638,6 +716,8 @@ const state = {
   itemEdits: {},
   editingPopItemId: null,
   hoverItemId: null,
+  hoverInPopover: false,
+  resultsMtime: 0,
   lowConfCursor: -1,
   focusedLowConf: null,
   // 本次会话改框工作量统计
@@ -777,16 +857,22 @@ function getChoiceDisplayAnswer(it) {
 }
 function formatFillAnswers(it) {
   if (it.kind === "identity") {
-    return it.transcription ? `姓名：${it.transcription.name || ""}  学号：${it.transcription.sid || ""}` : "";
+    return it.transcription ? `姓名：${it.transcription.name || "未作答"}  学号：${it.transcription.sid || "未作答"}` : "";
   }
   const ans = it.transcription && it.transcription.answers;
-  if (!ans || typeof ans !== "object") return it.error ? "[识别异常] " + it.error : "";
+  if (!ans || typeof ans !== "object") {
+    if (it.status === "等待视觉转录" || it.status === "等待豆包") return "";
+    return it.error ? "[识别异常] " + it.error : "";
+  }
   const lines = [];
   for (const [sub, blanks] of Object.entries(ans)) {
     if (blanks && typeof blanks === "object") {
       if (blanks["舍弃"] === "舍弃") lines.push(`(${sub}) [含图舍弃]`);
       else {
-        const vals = Object.entries(blanks).map(([k, v]) => `${k}:${v || "(空)"}`).join("  ");
+        const vals = Object.entries(blanks).map(([k, v]) => {
+          const text = String(v == null ? "" : v).trim();
+          return `${k}:${text || "未作答"}`;
+        }).join("  ");
         lines.push(sub === "无小题号" ? vals : `(${sub}) ${vals}`);
       }
     } else lines.push(`(${sub}) ${String(blanks)}`);
@@ -837,13 +923,76 @@ function updateWorkloadBar() {
   $("wlDel").textContent = String(state.workload.deleted);
 }
 
+function isResultInProgress(res) {
+  if (!res) return false;
+  const st = String(res.status || "");
+  if (st.includes("处理中") || st.includes("转录中") || st.includes("合并中")) return true;
+  const pages = res.pages || [];
+  return pages.some(p => (p.items || []).some(it => it.status === "等待视觉转录" || it.status === "等待豆包"));
+}
+
+function updateLiveRunBanner() {
+  const banner = $("liveRunBanner");
+  const txt = $("liveRunBannerText");
+  if (!banner || !txt || !state.result) return;
+  const res = state.result;
+  const st = String(res.status || "");
+  const stats = res.stats || {};
+  const pagesN = (res.pages || []).length;
+  const transN = stats.items_with_transcription !== undefined
+    ? stats.items_with_transcription
+    : (res.pages || []).reduce((acc, p) => acc + (p.items || []).filter(i => i.transcription).length, 0);
+
+  if (st.includes("识别失败")) {
+    banner.className = "live-run-banner show err";
+    txt.textContent = `⚠ ${st}（共 ${pagesN} 页，其中 ${stats.page_failures || 0} 页失败）。请返回工作台查看中文错误诊断与修复建议。`;
+  } else if (isResultInProgress(res)) {
+    banner.className = "live-run-banner show";
+    txt.textContent = `⚡ 后台自动识别与实时合并进行中（当前已检出 ${pagesN} 页，已出转录 ${transN} 处）… 新出答案会自动刷新，建议等本页答案完整后再点「确认」。`;
+  } else if (st.includes("待补跑")) {
+    banner.className = "live-run-banner show";
+    txt.textContent = `⚠ 当前批次状态：${st}（可返回工作台点击「补跑失败图块」仅重试失败项，不重复扣费）。`;
+  } else {
+    banner.className = "live-run-banner";
+  }
+}
+
+async function hotReloadResults(showToast = false) {
+  try {
+    const data = await api("/api/state");
+    if (!data || !data.result) return;
+    const prevId = currentPage() ? currentPage().id : null;
+    state.result = data.result;
+    if (data.results_mtime) state.resultsMtime = data.results_mtime;
+    if (data.feedback) state.feedback = data.feedback;
+    if (data.locks) state.locks = data.locks;
+    state.pages = (data.result && data.result.pages) || [];
+    if (prevId) {
+      const idx = state.pages.findIndex(p => p.id === prevId);
+      if (idx >= 0) state.pageIdx = idx;
+    }
+    const cur = currentPage();
+    if (cur && !state.boxesModified) {
+      state.workingBoxes = JSON.parse(JSON.stringify(cur.boxes || []));
+    }
+    updateLiveRunBanner();
+    updateTopbar();
+    renderLeftList();
+    renderRightPanel();
+    draw();
+    if (showToast) toast("已同步最新识别结果", 1400);
+  } catch {}
+}
+
 /* ==================== 页面加载与切换 ==================== */
 async function loadAll() {
   const data = await api("/api/state");
   state.result = data.result;
+  state.resultsMtime = data.results_mtime || 0;
   state.feedback = data.feedback || { revision: 0, items: {} };
   state.locks = data.locks || {};
   state.pages = (data.result && data.result.pages) || [];
+  updateLiveRunBanner();
 
   // 优先找第一张「未审且未被他人锁定」的试卷，避免多人进入时撞车
   let startIdx = state.pages.findIndex(p => {
@@ -928,11 +1077,19 @@ function updateTopbar() {
 
   $("btnModeView").className = "mode-btn" + (state.mode === "view" ? " active" : "");
   $("btnModeEdit").className = "mode-btn" + (state.mode === "edit" ? " edit-active" : "");
+  const fillBtn = $("btnFillDisplayMode");
+  if (fillBtn) {
+    fillBtn.textContent = state.fillDisplayMode === "hover" ? "💬 填空：悬停" : "📋 填空：右侧列表";
+    fillBtn.style.display = state.mode === "view" ? "" : "none";
+  }
   $("canvasHint").textContent = state.mode === "edit"
     ? "中键/右键拖动平移 · 拖四边/四角缩放 · 右键单击删框 · Ctrl+Z 撤销"
-    : `中键/右键/左键拖空白平移 · 点框改字 · 按住 Alt 透视原图 · 按 ${primaryKeyLabel("toggleMode")} 调框`;
+    : (state.fillDisplayMode === "hover"
+        ? `鼠标滑到填空题框看答案 · 点框/气泡改字 · 按住 Alt 透视原图 · 按 ${primaryKeyLabel("toggleMode")} 调框`
+        : `中键/右键/左键拖空白平移 · 点框改字 · 按住 Alt 透视原图 · 按 ${primaryKeyLabel("toggleMode")} 调框`);
   updateWorkloadBar();
   updateLowConfButton();
+  updateLiveRunBanner();
 }
 
 /* ==================== 多低置信度项一键循环定位（精确到具体框） ==================== */
@@ -1020,8 +1177,8 @@ function focusBoxOnCanvas(box) {
   // 按目标框尺寸智能计算特写比例：小框（如选择题）放大到清晰可辨，大框保持完整可见
   const idealScale = Math.min((rect.width * 0.38) / bw, (rect.height * 0.34) / bh);
   state.scale = Math.max(0.55, Math.min(2.2, idealScale));
-  // 看答案模式给右侧批注卡留一点视觉重心偏移，调框模式居中
-  const centerRatioX = state.mode === "view" ? 0.38 : 0.5;
+  // 仅当切换为右侧列表模式时给批注卡留出重心偏移，默认悬停模式与调框模式居中
+  const centerRatioX = (state.mode === "view" && state.fillDisplayMode === "margin") ? 0.38 : 0.5;
   state.tx = rect.width * centerRatioX - cx * state.scale;
   state.ty = rect.height * 0.48 - cy * state.scale;
   $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
@@ -1178,6 +1335,19 @@ function appendLatexText(parent, text) {
   }
 }
 
+function hasUnansweredBlank(it) {
+  const ans = it && it.transcription && it.transcription.answers;
+  if (!ans || typeof ans !== "object") return false;
+  for (const blanks of Object.values(ans)) {
+    if (blanks && typeof blanks === "object" && blanks["舍弃"] !== "舍弃") {
+      for (const v of Object.values(blanks)) {
+        if (!String(v == null ? "" : v).trim()) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function renderFillMarginInto(el, it) {
   el.innerHTML = "";
   const hasManualEdit = Boolean(
@@ -1199,39 +1369,73 @@ function renderFillMarginInto(el, it) {
       if (blanks && typeof blanks === "object") {
         if (blanks["舍弃"] === "舍弃") {
           const pill = document.createElement("span");
-          pill.className = "blank-pill";
+          pill.className = "blank-pill discarded";
           pill.textContent = "含图舍弃";
           seg.appendChild(pill);
         } else {
           Object.entries(blanks).forEach(([k, v]) => {
+            const rawStr = String(v == null ? "" : v).trim();
+            const isBlank = rawStr.length === 0;
             const pill = document.createElement("span");
-            pill.className = "blank-pill";
+            pill.className = "blank-pill" + (isBlank ? " unanswered" : "");
             const idx = document.createElement("span");
             idx.className = "blank-idx";
             idx.textContent = fmtBlankIdx(k);
             pill.appendChild(idx);
             const val = document.createElement("span");
-            appendLatexText(val, v || "(空)");
+            if (isBlank) {
+              val.textContent = "未作答";
+              pill.title = "此空位学生未填写答案";
+            } else {
+              appendLatexText(val, rawStr);
+            }
             pill.appendChild(val);
             seg.appendChild(pill);
           });
         }
       } else {
+        const rawStr = String(blanks == null ? "" : blanks).trim();
         const pill = document.createElement("span");
-        pill.className = "blank-pill";
-        appendLatexText(pill, String(blanks));
+        pill.className = "blank-pill" + (rawStr ? "" : " unanswered");
+        appendLatexText(pill, rawStr || "未作答");
         seg.appendChild(pill);
       }
       el.appendChild(seg);
     });
     return;
   }
+  if (!hasManualEdit && !ans) {
+    if (it.status === "等待视觉转录" || it.status === "等待豆包") {
+      const pill = document.createElement("span");
+      pill.className = "blank-pill pending";
+      pill.textContent = "⏳ 正在识别中…";
+      el.appendChild(pill);
+      return;
+    }
+    if (it.status === "调用失败" || it.status === "结构异常" || it.error) {
+      const pill = document.createElement("span");
+      pill.className = "blank-pill failed";
+      const reason = it.error || (it.issues && it.issues[0]) || it.status || "识别失败";
+      pill.textContent = `⚠ ${reason}`;
+      el.appendChild(pill);
+      return;
+    }
+  }
   const lines = String(getFillDisplayText(it) || "").split("\n").map(s => s.trim()).filter(Boolean);
-  if (!lines.length) { el.textContent = "(空)"; return; }
+  if (!lines.length) {
+    const pill = document.createElement("span");
+    pill.className = "blank-pill unanswered";
+    pill.textContent = "未作答";
+    el.appendChild(pill);
+    return;
+  }
   lines.forEach((line) => {
     const seg = document.createElement("span");
     seg.className = "sub-seg";
-    appendLatexText(seg, line);
+    const pill = document.createElement("span");
+    pill.className = "blank-pill";
+    appendLatexText(pill, line);
+    seg.appendChild(pill);
     el.appendChild(seg);
   });
 }
@@ -1299,6 +1503,85 @@ function renderLowConfFocusOverlay() {
   overlayLayer.appendChild(boxEl);
 }
 
+let hoverHideTimer = null;
+function scheduleHoverClear() {
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = setTimeout(() => {
+    if (!state.hoverInPopover && state.hoverItemId) {
+      state.hoverItemId = null;
+      draw();
+    }
+  }, 160);
+}
+function setHoverFillItem(itemId) {
+  clearTimeout(hoverHideTimer);
+  if (state.hoverItemId !== itemId) {
+    state.hoverItemId = itemId;
+    draw();
+  }
+}
+
+function renderFillHoverPopover(row, rect) {
+  const { it, sx1, sy1, sx2, sy2 } = row;
+  const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+  const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+
+  const pop = document.createElement("div");
+  pop.className = "fill-hover-pop" + (edited ? " edited" : "");
+  const head = document.createElement("div");
+  head.className = "fill-hover-pop-head";
+  const badge = document.createElement("span");
+  badge.className = "margin-qno";
+  badge.textContent = `第 ${qno} 题`;
+  const hint = document.createElement("span");
+  hint.className = "fill-hover-pop-hint";
+  hint.textContent = edited ? "已订正 · 点击修改" : "点击原地修改";
+  head.appendChild(badge);
+  head.appendChild(hint);
+  pop.appendChild(head);
+
+  const ansEl = document.createElement("div");
+  ansEl.className = "margin-ans";
+  renderFillMarginInto(ansEl, it);
+  pop.appendChild(ansEl);
+
+  pop.onmouseenter = () => {
+    clearTimeout(hoverHideTimer);
+    state.hoverInPopover = true;
+  };
+  pop.onmouseleave = () => {
+    state.hoverInPopover = false;
+    scheduleHoverClear();
+  };
+  pop.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+  pop.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+
+  // 先挂载测宽高，再精准贴靠到题框正上方或正下方（不遮挡学生作答区）
+  pop.style.left = "0px";
+  pop.style.top = "-9999px";
+  overlayLayer.appendChild(pop);
+  const pw = pop.offsetWidth || 280;
+  const ph = pop.offsetHeight || 72;
+
+  let left = Math.round(sx1);
+  if (left + pw > rect.width - 10) left = Math.round(rect.width - pw - 10);
+  left = Math.max(10, left);
+
+  let top;
+  if (sy1 - ph - 8 >= 8) {
+    top = Math.round(sy1 - ph - 8);
+  } else if (sy2 + 8 + ph <= rect.height - 46) {
+    top = Math.round(sy2 + 8);
+  } else if (sx2 + 10 + pw <= rect.width - 10) {
+    left = Math.round(sx2 + 10);
+    top = Math.max(8, Math.min(rect.height - ph - 48, Math.round(sy1)));
+  } else {
+    top = Math.max(8, Math.round(sy2 + 6));
+  }
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+}
+
 function renderOverlays() {
   overlayLayer.innerHTML = "";
   const p = currentPage();
@@ -1357,14 +1640,50 @@ function renderOverlays() {
       chip.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
       overlayLayer.appendChild(chip);
     } else if (it.kind === "fill") {
-      // 收集当前视口内可见的填空/实验题，按纵坐标合并同排（如 13~15、16~18）后挂到右侧空白区
       if (sy2 < 4 || sy1 > rect.height - 4) return;
       fillRows.push({ it, sx1, sy1, sx2, sy2, midY: (sy1 + sy2) / 2 });
     }
   });
 
-  // 右侧水平齐平批注卡布局 + SVG 引导线
-  if (fillRows.length) {
+  if (fillRows.length && state.fillDisplayMode === "hover") {
+    // 默认悬停模式：每道填空题左上角放紧凑题号微徽章；鼠标滑到题框或徽章时就近弹出答案气泡
+    let hoveredRow = null;
+    fillRows.forEach(row => {
+      const { it, sx1, sy1 } = row;
+      const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+      const isPending = !edited && !it.transcription && (it.status === "等待视觉转录" || it.status === "等待豆包");
+      const isFailed = !edited && !it.transcription && (it.status === "调用失败" || it.status === "结构异常" || Boolean(it.error));
+      const hasBlank = !edited && hasUnansweredBlank(it);
+      const isActive = it.id === state.hoverItemId || it.id === state.selectedItemId;
+      if (isActive && !state.editingPopItemId) hoveredRow = row;
+
+      const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+      const tag = document.createElement("div");
+      tag.className = "fill-mini-tag"
+        + (edited ? " edited" : (isFailed ? " failed" : (isPending ? " pending" : "")))
+        + (isActive ? " active" : "");
+      const prefix = edited ? "✓ " : (isFailed ? "⚠ " : (isPending ? "⏳ " : ""));
+      tag.textContent = `${prefix}${qno}`;
+      if (hasBlank) {
+        const dot = document.createElement("span");
+        dot.className = "mini-dot";
+        dot.title = "含学生未作答空位";
+        tag.appendChild(dot);
+      }
+      tag.style.left = Math.max(4, Math.round(sx1)) + "px";
+      tag.style.top = Math.max(4, Math.round(sy1 - 19)) + "px";
+      tag.title = `第 ${qno} 题（悬停查看答案，点击原地修改）`;
+      tag.onmouseenter = () => setHoverFillItem(it.id);
+      tag.onmouseleave = () => scheduleHoverClear();
+      tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+      tag.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+      overlayLayer.appendChild(tag);
+    });
+    if (hoveredRow) {
+      renderFillHoverPopover(hoveredRow, rect);
+    }
+  } else if (fillRows.length) {
+    // 可选右侧水平齐平批注卡模式 + SVG 引导线
     fillRows.sort((a, b) => a.midY - b.midY || a.sx1 - b.sx1);
     const groups = [];
     for (const r of fillRows) {
@@ -1386,7 +1705,6 @@ function renderOverlays() {
       cardW = Math.min(390, Math.floor(availRight));
       cardLeft = Math.round(paperRight + 14);
     } else {
-      // 局部放大时自动贴靠画布右边沿，不跑出屏幕
       cardW = Math.min(350, Math.max(220, Math.floor(rect.width * 0.32)));
       cardLeft = Math.round(rect.width - cardW - 10);
     }
@@ -1438,7 +1756,6 @@ function renderOverlays() {
       card.style.top = top + "px";
       prevBottom = top + ch + 7;
 
-      // 从该排最右框中心画细引导线连到右侧批注卡左缘
       const lineX1 = Math.min(cardLeft - 4, Math.round(g.maxSx2));
       const lineY1 = Math.round(g.midY);
       const lineX2 = cardLeft;
@@ -1706,8 +2023,8 @@ function fitCanvas() {
   const pad = 18;
   const p = currentPage();
   const hasFill = p && (p.items || []).some(it => it.kind === "fill");
-  // 看答案且有手写大题时，为右侧水平齐平批注卡预留合理空间，使「原卷 + 批注卡」整体居中
-  const reserveRight = (state.mode === "view" && state.showOverlay && hasFill && rect.width >= 900) ? 340 : 0;
+  // 仅当切换为「右侧列表」模式且有手写大题时预留右侧批注卡空间；默认「悬停」模式原卷 100% 居中铺满
+  const reserveRight = (state.mode === "view" && state.showOverlay && state.fillDisplayMode === "margin" && hasFill && rect.width >= 900) ? 340 : 0;
   const sw = (rect.width - reserveRight - pad * 2) / state.img.width;
   const sh = (rect.height - pad * 2) / state.img.height;
   state.scale = Math.max(0.05, Math.min(sw, sh));
@@ -2022,7 +2339,25 @@ window.addEventListener("mousemove", (ev) => {
       else if (hit && hit.kind === "move") host.style.cursor = "move";
       else host.style.cursor = "crosshair";
     } else if (state.mode === "view") {
-      host.style.cursor = "grab";
+      if (state.showOverlay && state.fillDisplayMode === "hover" && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+        const p = currentPage();
+        const hitFill = (p && p.items || []).find(it => {
+          if (it.kind !== "fill" || !it.box || it.box.length !== 4) return false;
+          const [x1, y1, x2, y2] = it.box;
+          return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
+        });
+        if (hitFill) {
+          host.style.cursor = "pointer";
+          setHoverFillItem(hitFill.id);
+        } else {
+          host.style.cursor = "grab";
+          if (state.hoverItemId && !state.hoverInPopover) {
+            scheduleHoverClear();
+          }
+        }
+      } else {
+        host.style.cursor = "grab";
+      }
     }
     return;
   }
@@ -2112,6 +2447,12 @@ async function submitCurrentPage(goNext = true) {
   if (state.saving) return;
   const p = currentPage();
   if (!p) return;
+  const pendingItems = (p.items || []).filter(it => !it.transcription && (it.status === "等待视觉转录" || it.status === "等待豆包"));
+  if (pendingItems.length > 0) {
+    if (!confirm(`本页还有 ${pendingItems.length} 道手写题正在后台识别中（尚未出字）。\n确定现在就要把本页标为「已确认」吗？（建议点取消，等几秒答案自动出现后再确认）`)) {
+      return;
+    }
+  }
   state.saving = true;
   $("btnSubmitNext").disabled = true;
   try {
@@ -2253,7 +2594,7 @@ const TOUR_STEPS = [
   {
     selector: "#canvasHost",
     title: "核对原卷与修改答案",
-    desc: "左边看原卷，右边对识别结果，发现认错了直接点一下就能改。中键或右键拖动画布，滚轮缩放，按住 <b>Alt</b> 可暂时隐藏文字看原图。",
+    desc: "填空题默认<b>鼠标滑到题框上</b>即就近弹出答案（顶栏可切「右侧列表」），学生没写的空位会显示<b>「未作答」</b>胶囊，发现认错了点框或点气泡直接改。中键/右键拖图，滚轮缩放，按住 <b>Alt</b> 透视原图。",
     onEnter: () => { if (state.mode !== "view") setMode("view"); },
   },
   {
@@ -2380,7 +2721,18 @@ $("btnFit").onclick = () => { fitCanvas(); draw(); };
 $("btnZoomIn").onclick = () => { state.scale = Math.min(8, state.scale * 1.2); $("zoomLabel").textContent = Math.round(state.scale * 100) + "%"; draw(); };
 $("btnZoomOut").onclick = () => { state.scale = Math.max(0.08, state.scale / 1.2); $("zoomLabel").textContent = Math.round(state.scale * 100) + "%"; draw(); };
 $("chkConf").onchange = (ev) => { state.showConf = ev.target.checked; document.body.classList.toggle("show-conf", state.showConf); draw(); };
-$("chkOverlay").onchange = (ev) => { state.showOverlay = ev.target.checked; draw(); };
+$("chkOverlay").onchange = (ev) => { state.showOverlay = ev.target.checked; fitCanvas(); draw(); };
+$("btnFillDisplayMode").onclick = () => {
+  state.fillDisplayMode = state.fillDisplayMode === "hover" ? "margin" : "hover";
+  localStorage.setItem("reviewFillDisplayMode", state.fillDisplayMode);
+  state.hoverItemId = null;
+  state.hoverInPopover = false;
+  updateTopbar();
+  fitCanvas();
+  draw();
+  toast(state.fillDisplayMode === "hover" ? "已切换为「悬停看答案」（鼠标滑到填空题框显示）" : "已切换为「右侧列表」常驻显示", 2000);
+};
+$("btnRefreshNow").onclick = () => hotReloadResults(true);
 
 window.addEventListener("keydown", (ev) => {
   // 正在监听游戏改键位
@@ -2474,7 +2826,7 @@ window.addEventListener("blur", () => {
 });
 window.addEventListener("resize", resizeCanvas);
 
-// 每 3 秒静默拉取多人实时状态（谁在审哪张 + 实时已审进度）
+// 每 3 秒静默拉取多人实时状态 + 后台增量识别结果热合并
 async function pollLive() {
   if (document.hidden || state.saving) return;
   try {
@@ -2483,9 +2835,12 @@ async function pollLive() {
     const prevRev = (state.feedback && state.feedback.revision) || 0;
     const nextRev = (data.feedback && data.feedback.revision) || 0;
     const locksChanged = JSON.stringify(data.locks || {}) !== JSON.stringify(state.locks || {});
+    const mtimeChanged = Boolean(data.results_mtime && data.results_mtime !== state.resultsMtime);
     if (data.locks) state.locks = data.locks;
     if (data.feedback && nextRev !== prevRev) state.feedback = data.feedback;
-    if (locksChanged || nextRev !== prevRev) {
+    if (mtimeChanged) {
+      await hotReloadResults(false);
+    } else if (locksChanged || nextRev !== prevRev) {
       renderLeftList();
       updateWorkloadBar();
       $("leftSummary").textContent = `${state.pages.filter(isPageDone).length}/${state.pages.length}`;

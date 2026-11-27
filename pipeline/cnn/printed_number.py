@@ -4,8 +4,12 @@
 read(img)兼容DigitReader，read_details保留原文本，无法严格解析时返回0。
 """
 import math
+import os
 import re
+import threading
 import unicodedata
+
+os.environ.setdefault('PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK', 'True')
 
 
 def parse_number(text):
@@ -22,6 +26,7 @@ class PaddleNumberReader:
         # Windows: preload project torch DLLs before Paddle/ModelScope imports.
         import torch  # noqa: F401
         from paddleocr import TextRecognition
+        self._lock = threading.Lock()
         self.model = TextRecognition(
             model_name='PP-OCRv6_medium_rec', model_dir=str(model_dir),
             engine='onnxruntime', device='cpu', cpu_threads=cpu_threads,
@@ -30,7 +35,8 @@ class PaddleNumberReader:
     def read_details(self, images):
         if not images:
             return []
-        results = self.model.predict(input=images, batch_size=min(32, len(images)))
+        with self._lock:
+            results = self.model.predict(input=images, batch_size=min(32, len(images)))
         if len(results) != len(images):
             raise RuntimeError('PaddleOCR返回数量与题号输入不一致')
         output = []

@@ -13,6 +13,11 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+try:
+    from .runtime_diag import is_placeholder_key
+except ImportError:
+    from common.runtime_diag import is_placeholder_key  # type: ignore
+
 MODEL = 'doubao-seed-2-1-lite-260915'
 ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 
@@ -97,7 +102,7 @@ def _read_dotenv_map(root=None) -> dict:
 
 
 def load_vlm_config(root=None) -> dict:
-    """读取当前视觉大模型配置（优先环境变量，其次 .env，兼容旧 ARK_API_KEY）。"""
+    """读取当前视觉大模型配置（优先环境变量，其次 .env，兼容旧 ARK_API_KEY；自动过滤占位符）。"""
     dotenv = _read_dotenv_map(root)
 
     def get_val(name: str) -> str:
@@ -109,38 +114,74 @@ def load_vlm_config(root=None) -> dict:
     preset = VLM_PRESETS[provider]
     base_url = get_val('VLM_BASE_URL') or preset['base_url']
     model = get_val('VLM_MODEL') or preset['model'] or MODEL
-    api_key = get_val('VLM_API_KEY') or get_val('ARK_API_KEY')
+    raw_key = get_val('VLM_API_KEY') or get_val('ARK_API_KEY')
+    placeholder_detected = is_placeholder_key(raw_key)
+    api_key = '' if placeholder_detected else raw_key
     endpoint = normalize_chat_endpoint(base_url) or ENDPOINT
+    provider_short = preset['label'].split('（')[0].strip() or provider
     return {
         'provider': provider,
         'provider_label': preset['label'],
+        'provider_short': provider_short,
         'base_url': base_url,
         'endpoint': endpoint,
         'model': model,
         'api_key': api_key,
+        'placeholder_detected': placeholder_detected,
     }
 
 
-def test_vlm_connection(provider: str = 'doubao', base_url: str = '', api_key: str = '', model: str = '', timeout: float = 15.0) -> dict:
-    """发送极简 OpenAI 兼容请求验证 API 站点、Key 和模型名是否可用。"""
-    preset = VLM_PRESETS.get(provider) or VLM_PRESETS['custom']
-    eff_base = (base_url or '').strip() or preset['base_url']
-    eff_model = (model or '').strip() or preset['model']
-    eff_key = (api_key or '').strip()
+# 1x1 纯白 PNG（用于视觉接口极简连通性验证，几乎零 token 消耗）
+_TINY_PNG_B64 = (
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='
+)
+
+
+def test_vlm_connection(
+    provider: str = '',
+    base_url: str = '',
+    api_key: str = '',
+    model: str = '',
+    timeout: float = 20.0,
+    check_vision: bool = True,
+    root=None,
+) -> dict:
+    """发送极简 OpenAI 兼容请求验证 API 站点、Key 和模型名是否可用（默认带极小图片校验视觉能力）。"""
+    saved = load_vlm_config(root)
+    eff_provider = (provider or saved.get('provider') or 'doubao').strip()
+    preset = VLM_PRESETS.get(eff_provider) or VLM_PRESETS['custom']
+    eff_base = (base_url or '').strip() or (saved.get('base_url') if not provider else '') or preset['base_url']
+    eff_model = (model or '').strip() or (saved.get('model') if not provider else '') or preset['model']
+    raw_key = (api_key or '').strip()
+    if not raw_key:
+        eff_key = saved.get('api_key') or ''
+    elif is_placeholder_key(raw_key):
+        return {'ok': False, 'error': '填写的 API Key 仍是模板占位文字，请替换为真实的密钥'}
+    else:
+        eff_key = raw_key
     if not eff_base:
         return {'ok': False, 'error': '请先填写站点地址（Base URL）'}
     if not eff_key:
+        if saved.get('placeholder_detected') and not raw_key:
+            return {'ok': False, 'error': '.env 中的 API Key 仍是占位文字，请在上方填入真实密钥'}
         return {'ok': False, 'error': '请先填写 API Key'}
     if not eff_model:
         return {'ok': False, 'error': '请先填写模型名称'}
     endpoint = normalize_chat_endpoint(eff_base)
+    if check_vision:
+        user_content = [
+            {'type': 'text', 'text': '请只回复 OK'},
+            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + _TINY_PNG_B64}},
+        ]
+    else:
+        user_content = '请只回复 OK'
     payload = {
         'model': eff_model,
         'stream': False,
         'max_tokens': 12,
-        'messages': [{'role': 'user', 'content': '请只回复 OK'}],
+        'messages': [{'role': 'user', 'content': user_content}],
     }
-    if provider == 'doubao' or 'volces.com' in endpoint:
+    if eff_provider == 'doubao' or 'volces.com' in endpoint:
         payload['thinking'] = {'type': 'disabled'}
     body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     req = urllib.request.Request(
@@ -162,11 +203,18 @@ def test_vlm_connection(provider: str = 'doubao', base_url: str = '', api_key: s
             reply_text = str(data['choices'][0]['message'].get('content', '')).strip()[:60]
         except Exception:
             pass
+        returned_model = str(data.get('model') or eff_model)
+        warn = ''
+        if returned_model and eff_model and returned_model != eff_model:
+            warn = f'注意：请求模型为 {eff_model}，服务端实际返回 {returned_model}'
         return {
             'ok': True,
+            'vision_verified': bool(check_vision),
             'latency_ms': ms,
             'endpoint': endpoint,
-            'returned_model': data.get('model') or eff_model,
+            'requested_model': eff_model,
+            'returned_model': returned_model,
+            'warning': warn,
             'reply': reply_text,
         }
     except urllib.error.HTTPError as exc:
@@ -176,12 +224,21 @@ def test_vlm_connection(provider: str = 'doubao', base_url: str = '', api_key: s
             err_body = exc.read().decode('utf-8', errors='replace')[:300]
         except Exception:
             pass
+        hint = ''
+        if exc.code in (401, 403):
+            hint = '（密钥无效、已过期或无权访问该模型）'
+        elif exc.code == 400 and check_vision and ('image' in err_body.lower() or 'vision' in err_body.lower() or 'multimodal' in err_body.lower()):
+            hint = '（该模型不支持图片输入！请更换支持视觉/看图的模型）'
+        elif exc.code == 404:
+            hint = '（接口地址或模型名称不存在，请检查 Base URL 与 Model ID）'
+        elif exc.code == 429:
+            hint = '（请求过快或额度受限）'
         return {
             'ok': False,
             'latency_ms': ms,
             'endpoint': endpoint,
             'status': exc.code,
-            'error': f'HTTP {exc.code}: {err_body or exc.reason}',
+            'error': f'HTTP {exc.code}{hint}: {err_body or exc.reason}',
         }
     except Exception as exc:
         ms = round((time.perf_counter() - t0) * 1000, 1)
@@ -189,7 +246,7 @@ def test_vlm_connection(provider: str = 'doubao', base_url: str = '', api_key: s
             'ok': False,
             'latency_ms': ms,
             'endpoint': endpoint,
-            'error': str(exc),
+            'error': f'网络连接失败：{exc}',
         }
 PROMPT = r'''你是答题卡忠实转录工具，不解题、不纠错、不评分。图片包含多个独立图块，每块上方的黑色标题为ID编号；白色间隔和标题不是试题。必须逐块处理，不得把不同图块的题号或答案合并。
 只返回一个合法JSON对象，结构为 {"图块ID":{"kind":"fill","question_number":"卷面大题号","answers":{"小题号":{"空序号":"最终手写答案"}}}}。姓名学号图块改为 {"kind":"identity","name":"姓名","sid":"学号"}。
@@ -208,12 +265,35 @@ def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def save_json(path, data):
+def save_json(path, data, retries=100, delay=0.05):
+    """原子写 JSON，带 Windows 并发读写 PermissionError (WinError 5) 重试保护。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + '.writing')
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
-    temporary.replace(path)
+    # 带进程+线程后缀，避免多线程并发写同一目标文件时临时文件冲突
+    suffix = f'{path.suffix}.writing.{os.getpid()}.{threading.get_ident()}'
+    temporary = path.with_suffix(suffix)
+    payload = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False)
+    temporary.write_text(payload, encoding='utf-8')
+    last_exc = None
+    for attempt in range(max(1, int(retries))):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            if attempt + 1 < retries:
+                time.sleep(delay)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+    try:
+        temporary.unlink(missing_ok=True)
+    except OSError:
+        pass
+    raise last_exc  # type: ignore[misc]
 
 
 def strict_json(text):
@@ -382,10 +462,13 @@ class DoubaoClient:
         self.out = Path(out)
         cfg = load_vlm_config()
         self.provider = (provider or cfg['provider'] or 'doubao').strip()
+        preset = VLM_PRESETS.get(self.provider) or VLM_PRESETS['custom']
+        self.provider_label = preset['label'].split('（')[0].strip() or self.provider
         self.base_url = (base_url or cfg['base_url'] or '').strip()
         self.endpoint = normalize_chat_endpoint(self.base_url) or cfg['endpoint'] or ENDPOINT
         self.model = (model or cfg['model'] or MODEL).strip()
-        self.key = (key or cfg['api_key'] or '').strip()
+        raw_key = (key if key is not None else cfg['api_key']) or ''
+        self.key = '' if is_placeholder_key(raw_key) else raw_key.strip()
         self.is_doubao = self.provider == 'doubao' or 'volces.com' in self.endpoint
         self.transport = transport
         self.stop = threading.Event()
@@ -507,3 +590,7 @@ class DoubaoClient:
         record['seconds'] = round(time.monotonic() - start, 3)
         save_json(path, record)
         return record
+
+
+# 新版通用视觉客户端别名（保留 DoubaoClient 兼容历史调用与单测）
+VlmClient = DoubaoClient

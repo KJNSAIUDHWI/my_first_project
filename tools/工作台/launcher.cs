@@ -37,7 +37,7 @@ namespace AutoGradeLauncher
                 return;
             }
 
-            string python = FindPython();
+            string python = FindPython(root);
             if (string.IsNullOrEmpty(python))
             {
                 string prompt = "请帮我在这台 Windows 电脑上安装 Python 3.11~3.13（勾选 Add to PATH），然后进入项目目录 `" + root + "` 运行 `python tools/工作台.py check` 检查自动改卷环境。";
@@ -110,8 +110,19 @@ namespace AutoGradeLauncher
             }
         }
 
-        private static string FindPython()
+        private static string FindPython(string root)
         {
+            // 0. 优先使用项目内独立虚拟环境或嵌入式 Python（避免系统全局目录权限冲突）
+            string[] localVenvs = {
+                Path.Combine(root, ".venv", "Scripts", "python.exe"),
+                Path.Combine(root, "venv", "Scripts", "python.exe"),
+                Path.Combine(root, "python_embed", "python.exe")
+            };
+            foreach (string vp in localVenvs)
+            {
+                if (File.Exists(vp)) return vp;
+            }
+
             // 1. PATH 查找
             string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
             foreach (string dir in pathEnv.Split(';'))
