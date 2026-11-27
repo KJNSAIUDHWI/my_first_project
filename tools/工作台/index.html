@@ -77,16 +77,16 @@
   .btn.sm{padding:6px 12px;font-size:13px;border-radius:9px}
 
   /* 环境检查列表 */
-  .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px;margin:14px 0}
+  .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px;margin:14px 0;align-items:start}
   .check-item{border:1px solid var(--line);border-radius:12px;padding:11px 14px;display:flex;align-items:flex-start;gap:10px;background:#fcfbf8}
   .check-item.err{border-color:#fca5a5;background:#fff5f5}
   .check-item.warn{border-color:#fcd34d;background:#fffbeb}
-  .badge{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;flex:none;margin-top:2px}
+  .badge{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;flex:none;margin-top:2px;white-space:nowrap}
   .badge.ok{background:var(--primary-soft);color:var(--primary)}
   .badge.err{background:var(--err-soft);color:var(--err)}
   .badge.warn{background:var(--warn-soft);color:var(--warn)}
   .check-name{font-weight:600;font-size:14px}
-  .check-detail{font-size:12.5px;color:var(--muted);word-break:break-all}
+  .check-detail{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere;word-break:normal}
 
   /* 数据录入表单 */
   .field{margin-bottom:16px}
@@ -110,8 +110,10 @@
   .task-card h3{margin:0;font-size:15.5px}
   .task-desc{font-size:12.5px;color:var(--muted)}
   .prog-bar{height:8px;background:#e8e4da;border-radius:999px;overflow:hidden}
-  .prog-bar i{display:block;height:100%;background:linear-gradient(90deg,#1f7a53,#34b37c);border-radius:999px;transition:width .3s}
-  .prog-nums{display:flex;justify-content:space-between;font-size:13px;font-weight:600}
+  .prog-bar i{display:block;height:100%;background:linear-gradient(90deg,#1f7a53,#34b37c);border-radius:999px;transition:width .3s,background .25s}
+  .prog-bar.warn i{background:linear-gradient(90deg,#d97706,#f59e0b)}
+  .prog-bar.error i{background:linear-gradient(90deg,#b91c1c,#ef4444)}
+  .prog-nums{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
 
   /* 人员榜 */
   .person-row{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:10px;background:#faf8f3;border:1px solid var(--line);margin-bottom:8px;font-size:14px}
@@ -119,40 +121,154 @@
 
   /* 日志与实时播报条 */
   .log-box{background:#1c211e;color:#d6e3dc;font-family:Consolas,monospace;font-size:12.5px;padding:12px 14px;border-radius:12px;max-height:190px;overflow:auto;white-space:pre-wrap;margin-top:10px}
-  /* 中文分阶段识别进度面板 */
-  .pipe-dash{margin-top:14px;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;background:#faf8f3}
+  /* 实时系统架构流程图进度看板 */
+  .pipe-dash{margin-top:14px;border:1.5px solid var(--line);border-radius:14px;padding:16px 18px;background:#faf8f3}
   .pipe-dash.running{border-color:#86efac;background:#f4fbf7}
   .pipe-dash.warn{border-color:#f59e0b;background:#fffbf0}
   .pipe-dash.error{border-color:#fca5a5;background:#fff5f5}
-  .pipe-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-  .pipe-meta{font-size:12.5px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-  .stage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin-top:12px}
-  .stage-card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
-  .stage-card .st-title{font-size:12px;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
-  .stage-card .st-num{font-size:18px;font-weight:800;color:var(--text);line-height:1.25}
-  .stage-card .st-sub{font-size:11.5px;color:var(--muted)}
+  .pipe-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .pipe-head-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pipe-meta{font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .pipe-meta-chip{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-size:11.5px;color:#374151;font-weight:600;white-space:nowrap}
+  .pipe-meta-chip.warn{background:#fffbeb;border-color:#fcd34d;color:#b45309}
+
+  .arch-wrap{margin-top:14px;padding:14px;background:rgba(255,255,255,.72);border:1px solid var(--line);border-radius:13px}
+  .arch-legend{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:11.5px;color:var(--muted)}
+  .arch-legend-items{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .arch-lg{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .arch-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;background:#cbd5e1}
+  .arch-dot.active{background:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.22);animation:archPulse 1.3s ease-in-out infinite}
+  .arch-dot.done{background:#16a34a}
+  .arch-dot.warn{background:#d97706}
+  .arch-dot.err{background:#dc2626}
+  @keyframes archPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.22);opacity:.72}}
+  @keyframes archFlow{from{stroke-dashoffset:22}to{stroke-dashoffset:0}}
+
+  /* 3 列 × 2 行真实数据流架构拓扑（中间两列 + 中间行为像素精确 SVG 流向连接槽） */
+  .arch-dag{
+    display:grid;
+    grid-template-columns:minmax(220px,0.92fr) 54px minmax(280px,1.22fr) 54px minmax(250px,1.04fr);
+    grid-template-rows:1fr 34px 1fr;
+    align-items:stretch;
+  }
+  .arch-node{
+    background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:11px 13px;
+    display:flex;flex-direction:column;gap:7px;min-width:0;
+    box-shadow:0 2px 8px rgba(31,36,33,.04);transition:border-color .2s,box-shadow .2s,background .2s;
+  }
+  .arch-node.is-active{border-color:#2ea371;background:#fcfffd;box-shadow:0 4px 14px rgba(31,122,83,.10)}
+  .arch-node.is-done{border-color:#bbf7d0;background:#fff}
+  .arch-node.is-warn{border-color:#f59e0b;background:#fffdf6}
+  .arch-node.is-err{border-color:#f87171;background:#fff8f8}
+  .arch-node.is-idle{border-color:var(--line);background:#fcfbf8;opacity:.86}
+  .an-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .an-title{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:var(--text);white-space:nowrap;min-width:0}
+  .an-tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;white-space:nowrap;flex:none}
+  .arch-node.is-active .an-tag{background:#dcfce7;color:#15803d;border-color:#bbf7d0}
+  .arch-node.is-err .an-tag{background:#fee2e2;color:#b91c1c;border-color:#fecaca}
+  .arch-node.is-warn .an-tag{background:#fef3c7;color:#b45309;border-color:#fde68a}
+
+  .an-up{
+    display:flex;align-items:center;justify-content:space-between;gap:6px;
+    font-size:11.5px;color:#475569;background:#f7f5f0;border:1px solid #ece7dc;
+    border-radius:7px;padding:3px 8px;font-variant-numeric:tabular-nums;
+  }
+  .an-up b{color:var(--text);font-weight:700}
+  .an-rows{display:flex;flex-direction:column;gap:6px;flex:1;justify-content:center}
+  .an-row{display:flex;flex-direction:column;gap:3px}
+  .an-row-top{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;line-height:1.3;font-variant-numeric:tabular-nums}
+  .an-row-lbl{color:#4b5563;font-weight:600;white-space:nowrap}
+  .an-row-val{color:var(--text);font-weight:700;white-space:nowrap}
+  .an-row-val.ok{color:#15803d}
+  .an-row-val.warn{color:#b45309}
+  .an-row-val.err{color:#b91c1c}
+  .an-bar{height:5px;background:#ece8df;border-radius:999px;overflow:hidden}
+  .an-bar i{display:block;height:100%;border-radius:999px;background:#1f7a53;transition:width .28s ease}
+  .an-bar.blue i{background:#2563eb}
+  .an-bar.amber i{background:#d97706}
+  .an-bar.err i{background:#dc2626}
+  .an-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:1px}
+  .an-chip{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .an-chip.choice{background:#ecfdf5;color:#15803d;border:1px solid #bbf7d0}
+  .an-chip.fill{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .an-chip.id{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+  .an-chip.neu{background:#f3f4f6;color:#374151;border:1px solid #e5e7eb}
+  .an-foot{font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;gap:6px;padding-top:4px;border-top:1px dashed #ebe6db;font-variant-numeric:tabular-nums}
+
+  /* 节点坐标 */
+  #nodeOrient{grid-column:1;grid-row:1}
+  #nodeM1{grid-column:1;grid-row:3}
+  #nodeM2{grid-column:3;grid-row:1}
+  #nodeM3{grid-column:3;grid-row:3}
+  #nodeOut{grid-column:5;grid-row:1}
+  #nodeApi{grid-column:5;grid-row:3}
+
+  /* 架构连接管道槽 */
+  .arch-conn{position:relative;display:flex;align-items:center;justify-content:center;pointer-events:none;user-select:none}
+  .arch-conn svg{display:block;width:100%;height:100%;overflow:visible}
+  .arch-path{fill:none;stroke:#cbd5e1;stroke-width:2.2;stroke-linecap:round;transition:stroke .25s}
+  .arch-path.active{stroke:#1f7a53;stroke-dasharray:6 5;animation:archFlow .85s linear infinite}
+  .arch-path.done{stroke:#16a34a}
+  .arch-path.warn{stroke:#d97706;stroke-dasharray:5 4}
+  .arch-path.err{stroke:#dc2626}
+  .arch-lbl{
+    position:absolute;font-size:10px;font-weight:700;line-height:1.2;white-space:nowrap;
+    padding:1px 6px;border-radius:999px;background:#fff;border:1px solid #e2e8f0;color:#475569;
+    box-shadow:0 1px 3px rgba(0,0,0,.05);font-variant-numeric:tabular-nums;
+  }
+  .arch-lbl.active{border-color:#86efac;color:#15803d;background:#f0fdf4}
+  .arch-lbl.err{border-color:#fca5a5;color:#b91c1c;background:#fef2f2}
+  .arch-arrow-r{position:absolute;right:0;width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:7px solid #cbd5e1;transition:border-color .25s}
+  .arch-arrow-d{position:absolute;bottom:0;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #cbd5e1;transition:border-color .25s}
+  .arch-arrow-u{position:absolute;top:0;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:7px solid #cbd5e1;transition:border-color .25s}
+  .arch-arrow-r.active,.arch-arrow-r.done{border-left-color:#16a34a}
+  .arch-arrow-r.warn{border-left-color:#d97706}
+  .arch-arrow-r.err{border-left-color:#dc2626}
+  .arch-arrow-d.active,.arch-arrow-d.done{border-top-color:#16a34a}
+  .arch-arrow-d.err{border-top-color:#dc2626}
+  .arch-arrow-u.active,.arch-arrow-u.done{border-bottom-color:#16a34a}
+  .arch-arrow-u.warn{border-bottom-color:#d97706}
+  .arch-arrow-u.err{border-bottom-color:#dc2626}
+
+  #connOrientM1{grid-column:1;grid-row:2}
+  #connM1Split{grid-column:2;grid-row:1 / 4}
+  #connM2Out{grid-column:4;grid-row:1}
+  #connM3Api{grid-column:4;grid-row:3}
+  #connApiOut{grid-column:5;grid-row:2}
+
+  @media(max-width:980px){
+    .arch-dag{grid-template-columns:1fr;grid-template-rows:auto;gap:10px}
+    #nodeOrient,#nodeM1,#nodeM2,#nodeM3,#nodeApi,#nodeOut{grid-column:1;grid-row:auto}
+    .arch-conn{display:none}
+  }
+
   /* 中文错误与退出码诊断卡片 */
   .diag-box{margin-top:12px;border:1.5px solid #f87171;background:#fff5f5;border-radius:12px;padding:13px 15px}
   .diag-box.warn{border-color:#f59e0b;background:#fffbeb}
   .diag-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
   .diag-title{font-weight:800;font-size:14.5px;color:var(--err)}
   .diag-box.warn .diag-title{color:var(--warn)}
-  .diag-code{font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:#fee2e2;color:#991b1b}
+  .diag-code{font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:#fee2e2;color:#991b1b;white-space:nowrap}
   .diag-box.warn .diag-code{background:#fef3c7;color:#92400e}
   .diag-row{font-size:13px;margin:4px 0;line-height:1.55}
   .diag-row b{color:var(--text)}
   .fix-hint{margin-top:5px;padding:5px 8px;border-radius:7px;background:#fff8eb;border:1px solid #fde68a;font-size:12px;color:#92400e;line-height:1.45}
   /* 加速与压测面板 */
-  .perf-box{margin-top:14px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:#faf8f3}
-  .perf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 12px}
-  .bench-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;background:#fff;border-radius:10px;overflow:hidden}
-  .bench-table th,.bench-table td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left}
+  .perf-box{margin-top:14px;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:#faf8f3}
+  .perf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0 14px;align-items:end}
+  @media(max-width:780px){.perf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .perf-grid label{display:block;margin-bottom:5px;font-weight:600;font-size:12.5px;color:#4b5563;white-space:nowrap}
+  .perf-grid select.input{height:38px;padding:6px 10px;font-size:13px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bench-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;background:#fff;border-radius:10px;overflow:hidden;border:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .bench-table th,.bench-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  .bench-table th.num,.bench-table td.num{text-align:right}
+  .bench-table th.ctr,.bench-table td.ctr{text-align:center}
   .bench-table th{background:#f3f0e8;color:var(--muted);font-weight:600}
   .bench-table tr.best{background:#ecfdf5;font-weight:700}
   .live-banner{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#1f2421;color:#fff;padding:10px 18px;border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.22);display:none;align-items:center;gap:10px;font-size:13.5px;max-width:92vw;z-index:50}
   .live-banner.show{display:flex}
   .pulse-dot{width:9px;height:9px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 4px rgba(74,222,128,.25);flex:none}
-  .live-src{background:rgba(255,255,255,.15);padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:700}
+  .live-src{background:rgba(255,255,255,.15);padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap;flex:none}
 
   /* 弹窗与新手引导 */
   dialog{border:none;border-radius:18px;padding:22px;max-width:460px;width:92vw;box-shadow:0 20px 50px rgba(0,0,0,.25)}
@@ -259,16 +375,16 @@
 
       <div class="perf-grid">
         <div>
-          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">推理设备策略</label>
-          <select id="selInferDevice" class="input" style="padding:7px 10px">
-            <option value="auto">自动（优先 GPU，无显卡用 CPU）</option>
-            <option value="cuda:0">强制 CUDA GPU (cuda:0)</option>
+          <label>推理设备策略</label>
+          <select id="selInferDevice" class="input">
+            <option value="auto">自动（优先 GPU）</option>
+            <option value="cuda:0">强制 GPU (cuda:0)</option>
             <option value="cpu">仅使用 CPU</option>
           </select>
         </div>
         <div>
-          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">YOLO 批大小 (Batch)</label>
-          <select id="selYoloBatch" class="input" style="padding:7px 10px">
+          <label>YOLO 批大小 (Batch)</label>
+          <select id="selYoloBatch" class="input">
             <option value="0">自动推荐</option>
             <option value="1">1（最省显存）</option>
             <option value="2">2</option>
@@ -278,8 +394,8 @@
           </select>
         </div>
         <div>
-          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">CPU 读图/纠偏线程</label>
-          <select id="selCpuWorkers" class="input" style="padding:7px 10px">
+          <label>CPU 读图/纠偏线程</label>
+          <select id="selCpuWorkers" class="input">
             <option value="0">自动推荐</option>
             <option value="1">1 线程</option>
             <option value="2">2 线程</option>
@@ -288,8 +404,8 @@
           </select>
         </div>
         <div>
-          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">视觉 API 并发数</label>
-          <select id="selApiConc" class="input" style="padding:7px 10px">
+          <label>视觉 API 并发数</label>
+          <select id="selApiConc" class="input">
             <option value="2">2（防限流保守）</option>
             <option value="3">3</option>
             <option value="4" selected>4（标准推荐）</option>
@@ -382,46 +498,196 @@
         </div>
       </div>
 
-      <!-- 中文分阶段实时进度仪表盘 -->
+      <!-- 实时系统架构流程图进度看板 -->
       <div id="pipelineDashboard" class="pipe-dash hidden">
         <div class="pipe-head">
-          <div>
-            <strong id="pipeStageTitle" style="font-size:15px">识别流水线</strong>
-            <span id="pipeStageBadge" class="badge ok" style="margin-left:6px">就绪</span>
+          <div class="pipe-head-left">
+            <strong id="pipeStageTitle" style="font-size:15.5px">识别流水线架构</strong>
+            <span id="pipeStageBadge" class="badge ok">就绪</span>
           </div>
           <div class="pipe-meta" id="pipeMetaRow"></div>
         </div>
-        <div class="prog-nums" style="margin-bottom:5px">
+        <div class="prog-nums" style="margin-bottom:6px">
           <span id="pipeMainDesc">准备中...</span>
           <span id="pipeSpeedEta" class="muted"></span>
         </div>
-        <div class="prog-bar"><i id="pipeMainBar" style="width:0%"></i></div>
+        <div class="prog-bar" id="pipeMainBarWrap"><i id="pipeMainBar" style="width:0%"></i></div>
 
-        <div class="stage-grid">
-          <div class="stage-card">
-            <div class="st-title"><span>① 页面纠偏与准备</span><span id="stPageTag">0%</span></div>
-            <div class="st-num" id="stPageNum">0 / 0 页</div>
-            <div class="st-sub" id="stPageSub">等待开始</div>
+        <div class="arch-wrap">
+          <div class="arch-legend">
+            <span style="font-weight:700;color:#374151">实时流水线架构图（上游流向 → 并行分支 → 增量落盘）</span>
+            <div class="arch-legend-items">
+              <span class="arch-lg"><i class="arch-dot active"></i>运行中</span>
+              <span class="arch-lg"><i class="arch-dot done"></i>已完成</span>
+              <span class="arch-lg"><i class="arch-dot warn"></i>待补跑</span>
+              <span class="arch-lg"><i class="arch-dot err"></i>异常</span>
+            </div>
           </div>
-          <div class="stage-card">
-            <div class="st-title"><span>② M1 版面分区</span><span>YOLO</span></div>
-            <div class="st-num" id="stM1Num">0 框</div>
-            <div class="st-sub">姓名 / 选择区 / 填空区</div>
-          </div>
-          <div class="stage-card">
-            <div class="st-title"><span>③ M2 选择题与涂卡</span><span>YOLO+CNN</span></div>
-            <div class="st-num" id="stM2Num">0 题</div>
-            <div class="st-sub" id="stM2Sub">检出 0 框</div>
-          </div>
-          <div class="stage-card">
-            <div class="st-title"><span>④ M3 填空大题与OCR</span><span>YOLO+OCR</span></div>
-            <div class="st-num" id="stM3Num">0 题</div>
-            <div class="st-sub" id="stM3Sub">题号 OCR 0 处 · 0 框</div>
-          </div>
-          <div class="stage-card">
-            <div class="st-title"><span>⑤ 大模型拼图转录</span><span id="stApiTag">并发</span></div>
-            <div class="st-num" id="stApiNum">0 / 0 块</div>
-            <div class="st-sub" id="stApiSub">已转录 0 处 · 失败 0</div>
+
+          <div class="arch-dag" id="archDag">
+            <!-- 节点 1：原图读入与方向纠偏 -->
+            <div class="arch-node is-idle" id="nodeOrient">
+              <div class="an-head">
+                <span class="an-title"><i class="arch-dot" id="dotOrient"></i>① 原图纠偏</span>
+                <span class="an-tag">Orient + Deskew</span>
+              </div>
+              <div class="an-up"><span>输入原图</span><b id="anOrientIn">0 页</b></div>
+              <div class="an-rows">
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">方向分类与拉正</span><span class="an-row-val" id="anOrientVal">0 / 0 页</span></div>
+                  <div class="an-bar"><i id="anOrientBar" style="width:0%"></i></div>
+                </div>
+              </div>
+              <div class="an-foot"><span id="anOrientFoot">等待开始</span><span id="anOrientPct">0%</span></div>
+            </div>
+
+            <!-- 连接 1→2：垂直向下 -->
+            <div class="arch-conn" id="connOrientM1">
+              <svg viewBox="0 0 100 34" preserveAspectRatio="none">
+                <path id="pathOrientM1" class="arch-path" d="M 50 0 L 50 28" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <span class="arch-arrow-d" id="arrOrientM1"></span>
+              <span class="arch-lbl" id="lblOrientM1" style="left:calc(50% + 10px)">0 页</span>
+            </div>
+
+            <!-- 节点 2：M1 版面分区 -->
+            <div class="arch-node is-idle" id="nodeM1">
+              <div class="an-head">
+                <span class="an-title"><i class="arch-dot" id="dotM1"></i>② M1 版面分区</span>
+                <span class="an-tag" id="tagM1Dev">YOLO</span>
+              </div>
+              <div class="an-up"><span>接收上游原图</span><b id="anM1In">0 / 0 页</b></div>
+              <div class="an-rows">
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">版面切分进度</span><span class="an-row-val" id="anM1Val">共 0 框</span></div>
+                  <div class="an-bar"><i id="anM1Bar" style="width:0%"></i></div>
+                </div>
+                <div class="an-chips">
+                  <span class="an-chip choice" id="anM1Choice">选择区 0</span>
+                  <span class="an-chip fill" id="anM1Fill">填空区 0</span>
+                  <span class="an-chip id" id="anM1Id">姓名 0</span>
+                </div>
+              </div>
+              <div class="an-foot"><span>分发至 M2 / M3 / 拼图</span><span id="anM1Pct">0%</span></div>
+            </div>
+
+            <!-- 连接 2→3/4：跨 3 行分叉 SVG 管道 -->
+            <div class="arch-conn" id="connM1Split">
+              <svg viewBox="0 0 54 200" preserveAspectRatio="none">
+                <path id="pathM1ToM2" class="arch-path" d="M 0 153 C 24 153, 24 47, 48 47" vector-effect="non-scaling-stroke"/>
+                <path id="pathM1ToM3" class="arch-path" d="M 0 153 L 48 153" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <span class="arch-arrow-r" id="arrM1ToM2" style="top:calc(23.5% - 5px)"></span>
+              <span class="arch-arrow-r" id="arrM1ToM3" style="top:calc(76.5% - 5px)"></span>
+              <span class="arch-lbl" id="lblM1ToM2" style="top:calc(23.5% - 22px);left:50%;transform:translateX(-50%)">选择</span>
+              <span class="arch-lbl" id="lblM1ToM3" style="top:calc(76.5% - 22px);left:50%;transform:translateX(-50%)">填空</span>
+            </div>
+
+            <!-- 节点 3：M2 选择题本地分支 -->
+            <div class="arch-node is-idle" id="nodeM2">
+              <div class="an-head">
+                <span class="an-title"><i class="arch-dot" id="dotM2"></i>③ M2 选择题识别</span>
+                <span class="an-tag">YOLO · Paddle · CNN</span>
+              </div>
+              <div class="an-up"><span>接收上游选择区</span><b id="anM2In">0 区（已完 0/0）</b></div>
+              <div class="an-rows">
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">M2 YOLO 选项定位</span><span class="an-row-val" id="anM2YoloVal">0 / 0 区 · 0 框</span></div>
+                  <div class="an-bar"><i id="anM2YoloBar" style="width:0%"></i></div>
+                </div>
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">Paddle 题号 OCR</span><span class="an-row-val" id="anM2OcrVal">0 题号</span></div>
+                  <div class="an-bar blue"><i id="anM2OcrBar" style="width:0%"></i></div>
+                </div>
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">CNN 涂卡判读</span><span class="an-row-val" id="anM2CnnVal">0 题答案</span></div>
+                  <div class="an-bar"><i id="anM2CnnBar" style="width:0%"></i></div>
+                </div>
+              </div>
+              <div class="an-foot"><span>纯本地直出（零 API 费用）</span><span id="anM2Pct">0%</span></div>
+            </div>
+
+            <!-- 节点 4：M3 填空大题分支 -->
+            <div class="arch-node is-idle" id="nodeM3">
+              <div class="an-head">
+                <span class="an-title"><i class="arch-dot" id="dotM3"></i>④ M3 填空大题定位</span>
+                <span class="an-tag">YOLO · Paddle</span>
+              </div>
+              <div class="an-up"><span>接收上游填空区</span><b id="anM3In">0 区（已完 0/0）</b></div>
+              <div class="an-rows">
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">M3 YOLO 大题定位</span><span class="an-row-val" id="anM3YoloVal">0 / 0 区 · 0 题</span></div>
+                  <div class="an-bar"><i id="anM3YoloBar" style="width:0%"></i></div>
+                </div>
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">Paddle 大题号 OCR</span><span class="an-row-val" id="anM3OcrVal">0 / 0 题号</span></div>
+                  <div class="an-bar blue"><i id="anM3OcrBar" style="width:0%"></i></div>
+                </div>
+              </div>
+              <div class="an-foot"><span id="anM3Foot">连同姓名区 0 框送入下游拼图</span><span id="anM3Pct">0%</span></div>
+            </div>
+
+            <!-- 连接 3→6：水平直出 -->
+            <div class="arch-conn" id="connM2Out">
+              <svg viewBox="0 0 54 40" preserveAspectRatio="none">
+                <path id="pathM2ToOut" class="arch-path" d="M 0 20 L 48 20" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <span class="arch-arrow-r" id="arrM2ToOut"></span>
+              <span class="arch-lbl" id="lblM2ToOut" style="top:calc(50% - 22px)">直出</span>
+            </div>
+
+            <!-- 连接 4→5：水平投递拼图 -->
+            <div class="arch-conn" id="connM3Api">
+              <svg viewBox="0 0 54 40" preserveAspectRatio="none">
+                <path id="pathM3ToApi" class="arch-path" d="M 0 20 L 48 20" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <span class="arch-arrow-r" id="arrM3ToApi"></span>
+              <span class="arch-lbl" id="lblM3ToApi" style="top:calc(50% - 22px)">拼图</span>
+            </div>
+
+            <!-- 节点 6：实时合并落盘 -->
+            <div class="arch-node is-idle" id="nodeOut">
+              <div class="an-head">
+                <span class="an-title"><i class="arch-dot" id="dotOut"></i>⑥ 实时合并落盘</span>
+                <span class="an-tag" id="tagOutState">results.json</span>
+              </div>
+              <div class="an-up"><span>汇聚两路输出</span><b id="anOutIn">已落盘 0 / 0 页</b></div>
+              <div class="an-rows">
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">选择题直出就绪</span><span class="an-row-val ok" id="anOutChoice">0 题</span></div>
+                </div>
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">手写转录合并进度</span><span class="an-row-val" id="anOutTrans">0 / 0 处</span></div>
+                  <div class="an-bar" id="anOutBarWrap"><i id="anOutBar" style="width:0%"></i></div>
+                </div>
+              </div>
+              <div class="an-foot"><span id="anOutFoot">8904 审阅页每 3 秒自动同步</span><span id="anOutPct">0%</span></div>
+            </div>
+
+            <!-- 连接 5→6：垂直向上合并 -->
+            <div class="arch-conn" id="connApiOut">
+              <svg viewBox="0 0 100 34" preserveAspectRatio="none">
+                <path id="pathApiToOut" class="arch-path" d="M 50 34 L 50 6" vector-effect="non-scaling-stroke"/>
+              </svg>
+              <span class="arch-arrow-u" id="arrApiToOut"></span>
+              <span class="arch-lbl" id="lblApiToOut" style="left:calc(50% + 10px)">增量合并</span>
+            </div>
+
+            <!-- 节点 5：拼图打包 & 视觉大模型 API -->
+            <div class="arch-node is-idle" id="nodeApi">
+              <div class="an-head">
+                <span class="an-title"><i class="arch-dot" id="dotApi"></i>⑤ 拼图 &amp; 大模型 API</span>
+                <span class="an-tag" id="stApiTag">4 并发</span>
+              </div>
+              <div class="an-up"><span>接收上游裁图</span><b id="anApiIn">0 块 → 0 张拼图</b></div>
+              <div class="an-rows">
+                <div class="an-row">
+                  <div class="an-row-top"><span class="an-row-lbl">并发转录进度</span><span class="an-row-val" id="anApiVal">成功 0 / 0 块</span></div>
+                  <div class="an-bar" id="anApiBarWrap"><i id="anApiBar" style="width:0%"></i></div>
+                </div>
+              </div>
+              <div class="an-foot"><span id="anApiFoot">已转录 0 处 · 失败 0</span><span id="anApiPct">0%</span></div>
+            </div>
           </div>
         </div>
 
@@ -884,18 +1150,18 @@ function renderBenchmarkJob(bjob) {
     const bestLabel = LAST_BENCH_REC?.label || '';
     $('benchTableWrap').innerHTML = `
       <table class="bench-table">
-        <thead><tr><th>组合方案</th><th>设备</th><th>Batch</th><th>线程</th><th>耗时(秒/页)</th><th>速度(页/分)</th><th>峰值显存</th><th>状态</th></tr></thead>
+        <thead><tr><th>组合方案</th><th class="ctr">设备</th><th class="ctr">Batch</th><th class="ctr">线程</th><th class="num">耗时(秒/页)</th><th class="num">速度(页/分)</th><th class="num">峰值显存</th><th class="ctr">状态</th></tr></thead>
         <tbody>
           ${rows.map(r => `
             <tr class="${r.label === bestLabel ? 'best' : ''}">
               <td>${esc(r.label)}${r.label === bestLabel ? ' ★ 最优' : ''}</td>
-              <td>${esc(r.device)}</td>
-              <td>${r.yolo_batch}</td>
-              <td>${r.cpu_workers}</td>
-              <td>${r.ok ? r.sec_per_page + ' s' : '-'}</td>
-              <td>${r.ok ? r.pages_per_min : '-'}</td>
-              <td>${r.peak_vram_mb ? r.peak_vram_mb + ' MB' : '-'}</td>
-              <td>${r.ok ? '<span class="badge ok">稳定</span>' : `<span class="badge err">${esc(r.error || '失败')}</span>`}</td>
+              <td class="ctr">${esc(r.device)}</td>
+              <td class="ctr">${r.yolo_batch}</td>
+              <td class="ctr">${r.cpu_workers}</td>
+              <td class="num">${r.ok ? r.sec_per_page + ' s' : '-'}</td>
+              <td class="num">${r.ok ? r.pages_per_min : '-'}</td>
+              <td class="num">${r.peak_vram_mb ? r.peak_vram_mb + ' MB' : '-'}</td>
+              <td class="ctr">${r.ok ? '<span class="badge ok">稳定</span>' : `<span class="badge err">${esc(r.error || '失败')}</span>`}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -912,6 +1178,27 @@ function fmtSec(sec) {
   return `${m} 分 ${r} 秒`;
 }
 
+function setArchNodeState(nodeId, dotId, state) {
+  const node = $(nodeId), dot = $(dotId);
+  if (node) node.className = 'arch-node is-' + (state || 'idle');
+  if (dot) dot.className = 'arch-dot' + (state && state !== 'idle' ? ' ' + state : '');
+}
+function setArchLinkState(pathId, arrId, lblId, state, labelText) {
+  const cls = state && state !== 'idle' ? ' ' + state : '';
+  const p = $(pathId);
+  if (p) p.setAttribute('class', 'arch-path' + cls);
+  const a = $(arrId);
+  if (a) {
+    const base = a.className.split(' ').find(c => c.startsWith('arch-arrow-')) || 'arch-arrow-r';
+    a.className = base + cls;
+  }
+  const l = $(lblId);
+  if (l) {
+    l.className = 'arch-lbl' + (state === 'active' || state === 'done' ? ' active' : (state === 'err' ? ' err' : ''));
+    if (labelText !== undefined) l.textContent = labelText;
+  }
+}
+
 function renderPipelineDashboard(data) {
   const ab = data.active_batch;
   const job = data.pipeline_job || {};
@@ -926,81 +1213,187 @@ function renderPipelineDashboard(data) {
   $('pipelineDashboard').classList.toggle('hidden', !showDash);
   if (!showDash) return;
 
+  const isErrState = !running && (job.status === 'error' || String(rs?.status || '').includes('识别失败'));
+  const isWarnState = !running && !isErrState && (job.status === 'warn' || hasFailed);
+
   const dash = $('pipelineDashboard');
   dash.className = 'pipe-dash' + (
-    running ? ' running'
-    : (job.status === 'error' || (rs && String(rs.status || '').includes('识别失败'))) ? ' error'
-    : (job.status === 'warn' || hasFailed) ? ' warn'
-    : ''
+    running ? ' running' : (isErrState ? ' error' : (isWarnState ? ' warn' : ''))
   );
 
   const prog = job.progress || {};
   const st = (rs && rs.stats) || {};
-  const pagesTotal = Number(prog.pages_total || st.pages || ab?.total_images || 0);
-  const pagesDone = Number(running ? (prog.pages_done || 0) : (st.pages || prog.pages_done || 0));
-  const pageFail = Number(running ? (prog.page_failures || 0) : (st.page_failures || prog.page_failures || 0));
-  const gridsTotal = Number(running ? (prog.grids_total || 0) : (st.grids || prog.grids_total || 0));
-  const apiSuccess = Number(running ? (prog.api_success || 0) : (st.api_success || prog.api_success || 0));
-  const apiFail = Number(running ? (prog.api_failures || 0) : (st.api_failures || prog.api_failures || 0));
-  const apiInflight = Number(running ? (prog.api_inflight || 0) : 0);
-  const transCnt = Number(running ? (prog.items_with_transcription || 0) : (st.items_with_transcription || prog.items_with_transcription || 0));
+  const pick = (k, fallback = 0) => {
+    if (running && prog[k] !== undefined && prog[k] !== null) return Number(prog[k]) || 0;
+    if (st[k] !== undefined && st[k] !== null) return Number(st[k]) || 0;
+    if (prog[k] !== undefined && prog[k] !== null) return Number(prog[k]) || 0;
+    return Number(fallback) || 0;
+  };
+  const pctOf = (a, b) => (b > 0 ? Math.max(0, Math.min(100, Math.round((a / b) * 100))) : 0);
 
-  // 计算总进度百分比（本地检测占 65%，大模型拼图转录占 35%）
+  const pagesTotal = Math.max(1, pick('pages_total', ab?.total_images || st.pages || 0));
+  const pagesDone = running ? Number(prog.pages_done || 0) : pick('pages', prog.pages_done || 0);
+  const pageFail = pick('page_failures', 0);
+  const orientDone = Math.max(pagesDone - pageFail, pick('orient_done', pagesDone - pageFail));
+  const m1PagesDone = Math.max(pagesDone - pageFail, pick('m1_pages_done', pagesDone - pageFail));
+  const m1Boxes = pick('m1_boxes', 0);
+  const m1Choice = pick('m1_choice_zones', 0);
+  const m1Fill = pick('m1_fill_zones', 0);
+  const m1Identity = pick('m1_identity_zones', 0);
+
+  const m2ZonesYolo = Math.max(pick('m2_zones_yolo_done', 0), pick('m2_zones_done', 0));
+  const m2ZonesDone = pick('m2_zones_done', m2ZonesYolo);
+  const m2Boxes = pick('m2_boxes', 0);
+  const m2Ocr = pick('m2_ocr_done', pick('choice_items', 0));
+  const m2Cnn = pick('m2_cnn_done', pick('choice_items', 0));
+  const choiceItems = pick('choice_items', m2Cnn);
+
+  const m3ZonesYolo = Math.max(pick('m3_zones_yolo_done', 0), pick('m3_zones_done', 0));
+  const m3ZonesDone = pick('m3_zones_done', m3ZonesYolo);
+  const m3Boxes = pick('m3_boxes', 0);
+  const m3Ocr = pick('m3_ocr_done', 0);
+  const fillItems = pick('fill_items', 0);
+  const idItems = pick('identity_items', m1Identity);
+  const tilesQueued = pick('tiles_queued', fillItems + idItems);
+
+  const gridsTotal = running ? Number(prog.grids_total || 0) : pick('grids', prog.grids_total || 0);
+  const apiSuccess = running ? Number(prog.api_success || 0) : pick('api_success', prog.api_success || 0);
+  const apiFail = running ? Number(prog.api_failures || 0) : pick('api_failures', prog.api_failures || 0);
+  const apiInflight = running ? Number(prog.api_inflight || 0) : 0;
+  const transCnt = running ? Number(prog.items_with_transcription || 0) : pick('items_with_transcription', prog.items_with_transcription || 0);
+
+  // 总进度计算（出错/待补跑态按实际成功占比显示，绝不伪装 100% 全绿）
   let pct = 0;
-  if (!running && job.status === 'done') pct = 100;
-  else if (pagesTotal > 0) {
+  if (!running && !isErrState && !isWarnState && (job.status === 'done' || rs)) {
+    pct = 100;
+  } else {
     const detFrac = Math.min(1, pagesDone / pagesTotal);
-    const apiFrac = gridsTotal > 0 ? Math.min(1, (apiSuccess + apiFail) / gridsTotal) : (detFrac >= 1 ? 1 : 0);
-    pct = Math.round((detFrac * 0.65 + apiFrac * 0.35) * 100);
-    if (running && pct < 3) pct = 3;
+    const apiFrac = gridsTotal > 0 ? Math.min(1, apiSuccess / gridsTotal) : (detFrac >= 1 ? 1 : 0);
+    pct = Math.round((detFrac * 0.60 + apiFrac * 0.40) * 100);
+    if (running && pct < 4) pct = 4;
   }
   $('pipeMainBar').style.width = pct + '%';
+  $('pipeMainBarWrap').className = 'prog-bar' + (isErrState ? ' error' : (isWarnState ? ' warn' : ''));
 
-  // 顶栏状态与设备/模型元信息
+  // 顶栏标题与设备/模型徽章
   const stageText = running
     ? (prog.stage || (job.kind === 'retry' ? '补跑失败图块中' : '识别流水线运行中'))
-    : (rs?.status || (job.status === 'error' ? '识别失败' : job.status === 'warn' ? '部分待补跑' : '识别完成'));
+    : (rs?.status || (isErrState ? '识别失败' : isWarnState ? '部分待补跑' : '识别完成'));
   $('pipeStageTitle').textContent = stageText;
   const badgeEl = $('pipeStageBadge');
   if (running) { badgeEl.className = 'badge ok'; badgeEl.textContent = `运行中 ${pct}%`; }
-  else if (job.status === 'error' || String(rs?.status || '').includes('识别失败')) { badgeEl.className = 'badge err'; badgeEl.textContent = '存在错误'; }
-  else if (job.status === 'warn' || hasFailed) { badgeEl.className = 'badge warn'; badgeEl.textContent = '待补跑'; }
+  else if (isErrState) { badgeEl.className = 'badge err'; badgeEl.textContent = '存在错误'; }
+  else if (isWarnState) { badgeEl.className = 'badge warn'; badgeEl.textContent = '待补跑'; }
   else { badgeEl.className = 'badge ok'; badgeEl.textContent = '全部就绪'; }
 
   const metaParts = [];
-  const devTxt = prog.device_label || (rs?.settings?.device ? `设备: ${rs.settings.device}` : '');
-  if (devTxt) metaParts.push(`<span>🖥 ${esc(devTxt)}</span>`);
+  const rawDev = prog.device_label || (rs?.settings?.device ? String(rs.settings.device).toUpperCase() : '');
+  if (rawDev) metaParts.push(`<span class="pipe-meta-chip">🖥 ${esc(rawDev)}</span>`);
   const modTxt = prog.model || rs?.model || '';
-  if (modTxt) metaParts.push(`<span>🤖 模型: ${esc(modTxt)}</span>`);
+  if (modTxt) metaParts.push(`<span class="pipe-meta-chip">🤖 ${esc(modTxt)}</span>`);
   if (rs?.returned_model && rs.returned_model !== rs.model) {
-    metaParts.push(`<span style="color:var(--warn)">⚠ 实际返回: ${esc(String(rs.returned_model))}</span>`);
+    metaParts.push(`<span class="pipe-meta-chip warn">⚠ 实际返回: ${esc(String(rs.returned_model))}</span>`);
   }
   $('pipeMetaRow').innerHTML = metaParts.join('');
 
   $('pipeMainDesc').textContent = running
-    ? (prog.message || `已处理 ${pagesDone}/${pagesTotal} 页，拼图转录完成 ${apiSuccess}/${gridsTotal}`)
-    : `共 ${pagesDone}/${pagesTotal} 页，已转录手写 ${transCnt} 处` + (pageFail > 0 ? `，本地失败 ${pageFail} 页` : '') + (hasFailed ? `，待补跑 ${rs?.failed_items || apiFail} 项` : '');
+    ? (prog.message || `已落盘 ${pagesDone}/${pagesTotal} 页，大模型拼图完成 ${apiSuccess}/${gridsTotal} 块`)
+    : `共 ${pagesDone}/${pagesTotal} 页，选择题 ${choiceItems} 题 · 手写已转录 ${transCnt} 处`
+      + (pageFail > 0 ? ` · 本地失败 ${pageFail} 页` : '')
+      + (hasFailed ? ` · 待补跑 ${rs?.failed_items || apiFail} 项` : '');
   const spdParts = [];
   if (prog.pages_per_min > 0) spdParts.push(`速度 ${prog.pages_per_min} 页/分`);
   if (running && prog.eta_seconds !== null && prog.eta_seconds !== undefined) spdParts.push(`预计剩余 ${fmtSec(prog.eta_seconds)}`);
   else if (st.wall_seconds) spdParts.push(`总耗时 ${fmtSec(st.wall_seconds)}`);
   $('pipeSpeedEta').textContent = spdParts.join(' · ');
 
-  // 5 个中文模块实时卡片
-  const pagePct = pagesTotal > 0 ? Math.round((pagesDone / pagesTotal) * 100) : 0;
-  $('stPageTag').textContent = pagePct + '%';
-  $('stPageNum').textContent = `${pagesDone} / ${pagesTotal} 页`;
-  $('stPageSub').textContent = pageFail > 0 ? `失败 ${pageFail} 页（请查看下方诊断）` : (running ? '并行读图与方向纠偏中' : '本地页面就绪');
+  // ── 节点 1：原图纠偏 ──
+  const orientPct = pctOf(orientDone, pagesTotal);
+  const orientState = pageFail >= pagesTotal ? 'err' : (running && orientDone < pagesTotal ? 'active' : (orientDone > 0 ? (pageFail > 0 ? 'warn' : 'done') : 'idle'));
+  setArchNodeState('nodeOrient', 'dotOrient', orientState);
+  $('anOrientIn').textContent = `${pagesTotal} 页`;
+  $('anOrientVal').textContent = `${orientDone} / ${pagesTotal} 页`;
+  $('anOrientBar').style.width = orientPct + '%';
+  $('anOrientFoot').textContent = pageFail > 0 ? `失败 ${pageFail} 页（已隔离）` : (running && orientDone < pagesTotal ? '多线程读图 + 方向纠偏中' : '全部拉正就绪');
+  $('anOrientPct').textContent = orientPct + '%';
+  setArchLinkState('pathOrientM1', 'arrOrientM1', 'lblOrientM1', orientDone > 0 ? (running && m1PagesDone < pagesTotal ? 'active' : 'done') : 'idle', `${orientDone} 页`);
 
-  $('stM1Num').textContent = `${prog.m1_boxes || 0} 框`;
-  $('stM2Num').textContent = `${prog.choice_items || 0} 题`;
-  $('stM2Sub').textContent = `M2 检出 ${prog.m2_boxes || 0} 框`;
-  $('stM3Num').textContent = `${prog.fill_items || 0} 题`;
-  $('stM3Sub').textContent = `题号 OCR ${prog.ocr_numbers || 0} 处 · M3 ${prog.m3_boxes || 0} 框`;
+  // ── 节点 2：M1 版面分区 ──
+  const m1Pct = pctOf(m1PagesDone, pagesTotal);
+  const m1State = running && orientDone > 0 && m1PagesDone < pagesTotal ? 'active' : (m1PagesDone > 0 ? 'done' : 'idle');
+  setArchNodeState('nodeM1', 'dotM1', m1State);
+  $('tagM1Dev').textContent = rawDev.toLowerCase().includes('gpu') || rawDev.toLowerCase().includes('cuda') ? 'GPU · YOLO' : 'YOLO';
+  $('anM1In').textContent = `${orientDone} / ${pagesTotal} 页`;
+  $('anM1Val').textContent = `完成 ${m1PagesDone}/${pagesTotal} 页 · ${m1Boxes} 框`;
+  $('anM1Bar').style.width = m1Pct + '%';
+  $('anM1Choice').textContent = `选择区 ${m1Choice}`;
+  $('anM1Fill').textContent = `填空区 ${m1Fill}`;
+  $('anM1Id').textContent = `姓名 ${m1Identity}`;
+  $('anM1Pct').textContent = m1Pct + '%';
+  setArchLinkState('pathM1ToM2', 'arrM1ToM2', 'lblM1ToM2', m1Choice > 0 ? (running && m2ZonesDone < m1Choice ? 'active' : 'done') : 'idle', `${m1Choice} 区`);
+  setArchLinkState('pathM1ToM3', 'arrM1ToM3', 'lblM1ToM3', m1Fill > 0 ? (running && m3ZonesDone < m1Fill ? 'active' : 'done') : 'idle', `${m1Fill} 区`);
 
+  // ── 节点 3：M2 选择题本地分支（含上游接收 + YOLO + Paddle 题号 + CNN 涂卡）──
+  const m2YoloPct = pctOf(m2ZonesYolo, Math.max(1, m1Choice));
+  const m2DonePct = pctOf(m2ZonesDone, Math.max(1, m1Choice));
+  const m2State = running && m1Choice > 0 && m2ZonesDone < m1Choice ? 'active' : (m2ZonesDone > 0 || choiceItems > 0 ? 'done' : (m1Choice > 0 ? 'active' : 'idle'));
+  setArchNodeState('nodeM2', 'dotM2', m2State);
+  $('anM2In').textContent = `${m1Choice} 区（已完 ${m2ZonesDone}/${m1Choice}）`;
+  $('anM2YoloVal').textContent = `${m2ZonesYolo}/${m1Choice} 区 · ${m2Boxes} 框`;
+  $('anM2YoloBar').style.width = (m1Choice > 0 ? m2YoloPct : 0) + '%';
+  $('anM2OcrVal').textContent = `${m2Ocr} 题号（${m2DonePct}%）`;
+  $('anM2OcrBar').style.width = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  $('anM2CnnVal').textContent = `${choiceItems} 题答案`;
+  $('anM2CnnBar').style.width = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  $('anM2Pct').textContent = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  setArchLinkState('pathM2ToOut', 'arrM2ToOut', 'lblM2ToOut', choiceItems > 0 ? (running && m2ZonesDone < m1Choice ? 'active' : 'done') : 'idle', `${choiceItems} 题`);
+
+  // ── 节点 4：M3 填空大题分支（含上游接收 + YOLO + Paddle 大题号）──
+  const m3YoloPct = pctOf(m3ZonesYolo, Math.max(1, m1Fill));
+  const m3DonePct = pctOf(m3ZonesDone, Math.max(1, m1Fill));
+  const m3OcrPct = fillItems > 0 ? pctOf(m3Ocr, fillItems) : m3DonePct;
+  const m3State = running && m1Fill > 0 && m3ZonesDone < m1Fill ? 'active' : (m3ZonesDone > 0 || fillItems > 0 ? 'done' : (m1Fill > 0 ? 'active' : 'idle'));
+  setArchNodeState('nodeM3', 'dotM3', m3State);
+  $('anM3In').textContent = `${m1Fill} 区（已完 ${m3ZonesDone}/${m1Fill}）`;
+  $('anM3YoloVal').textContent = `${m3ZonesYolo}/${m1Fill} 区 · ${fillItems} 题 (${m3Boxes} 框)`;
+  $('anM3YoloBar').style.width = (m1Fill > 0 ? m3YoloPct : 0) + '%';
+  $('anM3OcrVal').textContent = `${m3Ocr} / ${fillItems} 题号`;
+  $('anM3OcrBar').style.width = (m1Fill > 0 ? m3OcrPct : 0) + '%';
+  $('anM3Foot').textContent = `连同姓名 ${idItems} 框 → 共送下游 ${tilesQueued} 块`;
+  $('anM3Pct').textContent = (m1Fill > 0 ? m3DonePct : 0) + '%';
+  setArchLinkState('pathM3ToApi', 'arrM3ToApi', 'lblM3ToApi', tilesQueued > 0 ? (running && pagesDone < pagesTotal ? 'active' : 'done') : 'idle', `${tilesQueued} 块`);
+
+  // ── 节点 5：拼图打包 & 视觉大模型 API ──
+  const apiPct = gridsTotal > 0 ? pctOf(apiSuccess, gridsTotal) : 0;
+  const apiState = (isErrState || (!running && apiFail > 0 && apiSuccess === 0))
+    ? 'err'
+    : (apiFail > 0 ? (running ? 'warn' : 'err') : (running && (apiInflight > 0 || gridsTotal > apiSuccess) ? 'active' : (apiSuccess > 0 ? 'done' : 'idle')));
+  setArchNodeState('nodeApi', 'dotApi', apiState);
   $('stApiTag').textContent = running && apiInflight > 0 ? `${apiInflight} 并发中` : `${prog.concurrency || st.concurrency || 4} 并发`;
-  $('stApiNum').textContent = `${apiSuccess} / ${gridsTotal} 块`;
-  $('stApiSub').textContent = `已转录 ${transCnt} 处 · 失败 ${apiFail}`;
+  $('anApiIn').textContent = `${tilesQueued} 块 → ${gridsTotal} 张拼图`;
+  $('anApiVal').textContent = `成功 ${apiSuccess} / ${gridsTotal} 块` + (apiFail > 0 ? ` · 失败 ${apiFail}` : '');
+  $('anApiVal').className = 'an-row-val' + (apiFail > 0 ? ' err' : (apiSuccess > 0 && apiSuccess >= gridsTotal ? ' ok' : ''));
+  $('anApiBar').style.width = apiPct + '%';
+  $('anApiBarWrap').className = 'an-bar' + (apiFail > 0 ? ' err' : '');
+  $('anApiFoot').textContent = `已转录 ${transCnt} 处` + (apiInflight > 0 ? ` · 在途 ${apiInflight} 块` : (apiFail > 0 ? ` · 待补跑 ${rs?.failed_items || apiFail} 项` : ' · 全部成功'));
+  $('anApiPct').textContent = apiPct + '%';
+  const apiLinkState = apiFail > 0 ? 'err' : (running && (apiInflight > 0 || apiSuccess > 0) && apiSuccess < gridsTotal ? 'active' : (apiSuccess > 0 ? 'done' : 'idle'));
+  setArchLinkState('pathApiToOut', 'arrApiToOut', 'lblApiToOut', apiLinkState, apiFail > 0 ? `失败 ${apiFail}` : `${apiSuccess}/${gridsTotal} 块`);
+
+  // ── 节点 6：实时合并落盘 results.json ──
+  const transDenom = Math.max(transCnt, tilesQueued);
+  const outPct = transDenom > 0 ? pctOf(transCnt, transDenom) : pctOf(pagesDone, pagesTotal);
+  const outState = isErrState ? 'err' : (isWarnState ? 'warn' : (running ? 'active' : (pagesDone > 0 ? 'done' : 'idle')));
+  setArchNodeState('nodeOut', 'dotOut', outState);
+  $('tagOutState').textContent = running ? '实时写入中' : (isErrState ? '待排查补跑' : (isWarnState ? '部分待补跑' : '8904 就绪'));
+  $('anOutIn').textContent = `已落盘 ${pagesDone} / ${pagesTotal} 页`;
+  $('anOutChoice').textContent = `${choiceItems} 题就绪`;
+  $('anOutTrans').textContent = `${transCnt} / ${transDenom} 处`;
+  $('anOutTrans').className = 'an-row-val' + (isErrState ? ' err' : (isWarnState ? ' warn' : (transCnt > 0 && transCnt >= transDenom ? ' ok' : '')));
+  $('anOutBar').style.width = outPct + '%';
+  $('anOutBarWrap').className = 'an-bar' + (isErrState ? ' err' : (isWarnState ? ' amber' : ''));
+  $('anOutFoot').textContent = running ? '8904 审阅页每 3 秒热更新，可边跑边审' : (hasFailed ? `已保全 ${transCnt} 处，可一键补跑剩余项` : '全部结果已落盘，随时可进 8904 核对');
+  $('anOutPct').textContent = outPct + '%';
 
   // 中文错误与退出码诊断卡片
   const diagBox = $('pipelineDiagBox');

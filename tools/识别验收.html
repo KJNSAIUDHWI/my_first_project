@@ -32,7 +32,8 @@
   button {
     font-family: inherit; cursor: pointer; border: 1px solid var(--line);
     background: #fff; color: var(--text); border-radius: 8px;
-    padding: 5px 10px; font-size: 12.5px; transition: all 0.14s ease;
+    padding: 5px 9px; font-size: 12px; line-height: 1.25; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.14s ease;
   }
   button:hover:not(:disabled) { border-color: #b7c4bc; background: #f8faf9; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -47,15 +48,16 @@
   .topbar {
     height: 52px; background: var(--panel); border-bottom: 1px solid var(--line);
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 12px; gap: 10px; user-select: none;
+    padding: 0 10px; gap: 8px; user-select: none; overflow: hidden;
   }
-  .top-left, .top-center, .top-right { display: flex; align-items: center; gap: 7px; min-width: 0; }
-  .page-title { font-weight: 700; font-size: 13.5px; white-space: nowrap; }
+  .top-left, .top-center, .top-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .top-center, .top-right { flex-shrink: 0; }
+  .page-title { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 210px; }
   .workload-bar {
-    display: inline-flex; align-items: center; gap: 8px;
+    display: inline-flex; align-items: center; gap: 6px;
     background: #f4f7f5; border: 1px solid var(--line-soft);
-    border-radius: 99px; padding: 3px 10px; font-size: 11.5px; color: var(--muted);
-    white-space: nowrap;
+    border-radius: 99px; padding: 3px 9px; font-size: 11.5px; color: var(--muted);
+    white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums;
   }
   .workload-bar b { color: var(--text); font-weight: 700; }
   .workload-bar .w-sep { color: #cbd5cf; }
@@ -89,7 +91,7 @@
 
   /* 左栏：极简页码列表 */
   .sidebar-left {
-    width: 186px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line);
+    width: 204px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line);
     display: flex; flex-direction: column; transition: width 0.18s ease;
   }
   .sidebar-left.collapsed { width: 0; border-right: none; overflow: hidden; }
@@ -108,8 +110,9 @@
   .page-row.active { background: var(--brand-soft); border-color: #b7dfc9; }
   .page-row-main { min-width: 0; flex: 1; }
   .page-row-name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .page-row-sub { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; gap: 5px; align-items: center; }
-  .badge { font-size: 10.5px; padding: 1px 6px; border-radius: 99px; font-weight: 600; white-space: nowrap; }
+  .page-row-sub { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; overflow: hidden; }
+  .page-row-sub > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 10.5px; padding: 1px 6px; border-radius: 99px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
   .badge-done { background: #dcfce7; color: #166534; }
   .badge-todo { background: #eef1ef; color: #5b6861; }
   .badge-lock { background: #fef3c7; color: #92400e; }
@@ -223,19 +226,20 @@
   .margin-ans .blank-idx {
     font-size: 10.5px; font-weight: 700; color: #64748b;
   }
-  /* 填空题悬停模式：框左上角极简微徽章 + 就近弹出答案气泡 */
+  /* 填空题悬停模式：题框右上角内嵌紧凑微徽章（绝不压到上一题）+ 就近弹出答案气泡 */
   .fill-mini-tag {
     position: absolute; pointer-events: auto; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 4px;
-    background: rgba(37, 99, 235, 0.88); color: #fff;
-    font-size: 11px; font-weight: 700; line-height: 1;
-    padding: 3px 7px; border-radius: 5px;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+    display: inline-flex; align-items: center; gap: 3px;
+    background: rgba(37, 99, 235, 0.78); color: #fff;
+    backdrop-filter: blur(2px);
+    font-size: 10.5px; font-weight: 700; line-height: 1;
+    padding: 2px 6px; border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
     white-space: nowrap; user-select: none; z-index: 18;
-    transition: transform 0.1s ease, background 0.12s ease;
+    transition: transform 0.1s ease, background 0.12s ease, opacity 0.12s ease;
   }
   .fill-mini-tag:hover, .fill-mini-tag.active {
-    background: #1d4ed8; transform: scale(1.04); z-index: 26;
+    background: #1d4ed8; transform: scale(1.05); z-index: 26;
   }
   .fill-mini-tag.edited { background: rgba(22, 163, 74, 0.92); }
   .fill-mini-tag.pending { background: rgba(217, 119, 6, 0.92); }
@@ -1157,10 +1161,10 @@ function updateLowConfButton() {
   if (targets.length > 0) {
     const cur = state.lowConfCursor >= 0 ? ((state.lowConfCursor % targets.length) + 1) : 0;
     btn.style.display = "";
-    btn.textContent = cur > 0 ? `⚠ 低置框 ${cur}/${targets.length} (${keyTag})` : `⚠ 定位低置框 (${targets.length}) (${keyTag})`;
+    btn.textContent = cur > 0 ? `⚠ 低置 ${cur}/${targets.length} (${keyTag})` : `⚠ 低置 (${targets.length}) (${keyTag})`;
   } else if (findNextLowConfPageIdx() >= 0) {
     btn.style.display = "";
-    btn.textContent = `⚠ 下一低置框 (${keyTag})`;
+    btn.textContent = `⚠ 下页低置 (${keyTag})`;
   } else {
     btn.style.display = "none";
   }
@@ -1348,6 +1352,21 @@ function hasUnansweredBlank(it) {
   return false;
 }
 
+function compareSubKey(a, b) {
+  if (a === b) return 0;
+  if (a === "无小题号") return -1;
+  if (b === "无小题号") return 1;
+  const pa = String(a).split(/[^0-9]+/).filter(Boolean).map(Number);
+  const pb = String(b).split(/[^0-9]+/).filter(Boolean).map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    if (pa[i] === undefined) return -1;
+    if (pb[i] === undefined) return 1;
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return String(a).localeCompare(String(b), "zh-CN");
+}
+
 function renderFillMarginInto(el, it) {
   el.innerHTML = "";
   const hasManualEdit = Boolean(
@@ -1356,7 +1375,7 @@ function renderFillMarginInto(el, it) {
   );
   const ans = it.transcription && it.transcription.answers;
   if (!hasManualEdit && ans && typeof ans === "object" && Object.keys(ans).length > 0) {
-    const entries = Object.entries(ans);
+    const entries = Object.entries(ans).sort((a, b) => compareSubKey(a[0], b[0]));
     entries.forEach(([sub, blanks]) => {
       const seg = document.createElement("span");
       seg.className = "sub-seg";
@@ -1670,14 +1689,23 @@ function renderOverlays() {
         dot.title = "含学生未作答空位";
         tag.appendChild(dot);
       }
-      tag.style.left = Math.max(4, Math.round(sx1)) + "px";
-      tag.style.top = Math.max(4, Math.round(sy1 - 19)) + "px";
+      tag.style.left = "0px";
+      tag.style.top = "-9999px";
       tag.title = `第 ${qno} 题（悬停查看答案，点击原地修改）`;
       tag.onmouseenter = () => setHoverFillItem(it.id);
       tag.onmouseleave = () => scheduleHoverClear();
       tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       tag.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
       overlayLayer.appendChild(tag);
+      // 嵌在题框右上角内侧（紧贴框内右边缘，彻底避免压到上一题答案或遮挡左侧手写开头）
+      const tw = tag.offsetWidth || 24;
+      const th = tag.offsetHeight || 16;
+      const insideLeft = Math.max(Math.round(row.sx1 + 2), Math.round(row.sx2 - tw - 3));
+      const insideTop = (row.sy2 - row.sy1 >= th + 4)
+        ? Math.round(row.sy1 + 2)
+        : Math.round(row.sy1 + (row.sy2 - row.sy1 - th) / 2);
+      tag.style.left = Math.max(4, Math.min(rect.width - tw - 4, insideLeft)) + "px";
+      tag.style.top = Math.max(4, insideTop) + "px";
     });
     if (hoveredRow) {
       renderFillHoverPopover(hoveredRow, rect);
@@ -1713,7 +1741,8 @@ function renderOverlays() {
     svg.setAttribute("class", "connector-svg");
     overlayLayer.appendChild(svg);
 
-    let prevBottom = 6;
+    const placed = [];
+    let prevBottom = 8;
     groups.forEach(g => {
       const card = document.createElement("div");
       const anyEdited = g.items.some(x => Boolean(state.itemEdits[x.it.id] || ((state.feedback.items || {})[x.it.id] || {}).correction));
@@ -1752,25 +1781,43 @@ function renderOverlays() {
       overlayLayer.appendChild(card);
       const ch = card.offsetHeight || 42;
       const idealTop = Math.round(g.midY - ch / 2);
-      const top = Math.max(prevBottom, Math.max(6, idealTop));
-      card.style.top = top + "px";
+      const top = Math.max(prevBottom, Math.max(8, idealTop));
       prevBottom = top + ch + 7;
-
-      const lineX1 = Math.min(cardLeft - 4, Math.round(g.maxSx2));
-      const lineY1 = Math.round(g.midY);
-      const lineX2 = cardLeft;
-      const lineY2 = Math.round(top + ch / 2);
-      if (lineX2 - lineX1 >= 6) {
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        const midX = Math.round((lineX1 + lineX2) / 2);
-        path.setAttribute("d", `M ${lineX1} ${lineY1} C ${midX} ${lineY1}, ${midX} ${lineY2}, ${lineX2} ${lineY2}`);
-        path.setAttribute("fill", "none");
-        path.setAttribute("stroke", anyActive ? "#2563eb" : "rgba(37, 99, 235, 0.35)");
-        path.setAttribute("stroke-width", anyActive ? "2" : "1.2");
-        path.setAttribute("stroke-dasharray", anyActive ? "" : "4 3");
-        svg.appendChild(path);
-      }
+      placed.push({ g, card, ch, top, anyActive });
     });
+
+    // 底部防裁切回推：若最底一张卡片超出画布可视区，顺次向上紧缩，绝不裁切第23题等底部卡片
+    const maxBottom = Math.max(120, rect.height - 52);
+    if (placed.length) {
+      let overflow = (placed[placed.length - 1].top + placed[placed.length - 1].ch) - maxBottom;
+      if (overflow > 0) {
+        let curBottom = maxBottom;
+        for (let k = placed.length - 1; k >= 0; k--) {
+          const item = placed[k];
+          if (item.top + item.ch > curBottom) {
+            item.top = Math.max(6, curBottom - item.ch);
+          }
+          curBottom = item.top - 6;
+        }
+      }
+      placed.forEach(({ g, card, ch, top, anyActive }) => {
+        card.style.top = Math.round(top) + "px";
+        const lineX1 = Math.min(cardLeft - 4, Math.round(g.maxSx2));
+        const lineY1 = Math.round(g.midY);
+        const lineX2 = cardLeft;
+        const lineY2 = Math.round(top + ch / 2);
+        if (lineX2 - lineX1 >= 6) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          const midX = Math.round((lineX1 + lineX2) / 2);
+          path.setAttribute("d", `M ${lineX1} ${lineY1} C ${midX} ${lineY1}, ${midX} ${lineY2}, ${lineX2} ${lineY2}`);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", anyActive ? "#2563eb" : "rgba(37, 99, 235, 0.35)");
+          path.setAttribute("stroke-width", anyActive ? "2" : "1.2");
+          path.setAttribute("stroke-dasharray", anyActive ? "" : "4 3");
+          svg.appendChild(path);
+        }
+      });
+    }
   }
 
   // 如果正在编辑某题，渲染紧贴该题的轻量原地编辑器

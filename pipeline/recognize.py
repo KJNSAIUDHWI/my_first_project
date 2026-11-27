@@ -261,7 +261,21 @@ class Recognizer:
             'items': [],
             'issues': [],
             'timings': {},
-            'stage_counts': {'m1': len(m1_boxes), 'm2': 0, 'm3': 0, 'ocr': 0},
+            'stage_counts': {
+                'm1': len(m1_boxes),
+                'm1_choice': sum(1 for z in m1_boxes if z.get('cls') == 1),
+                'm1_fill': sum(1 for z in m1_boxes if z.get('cls') == 4),
+                'm1_identity': sum(1 for z in m1_boxes if z.get('cls') == 0),
+                'm2_zones': 0,
+                'm2': 0,
+                'm2_ocr': 0,
+                'm2_cnn': 0,
+                'm3_zones': 0,
+                'm3': 0,
+                'm3_ocr': 0,
+                'm3_fills': 0,
+                'ocr': 0,
+            },
         }
         tiles = []
 
@@ -314,7 +328,10 @@ class Recognizer:
                     for b in local
                 ]
                 if task == 'm2':
+                    page['stage_counts']['m2_zones'] += 1
                     rows = read_choice_zone(bgr, norm, self.numbers, self.choices, fix_no=True)
+                    page['stage_counts']['m2_ocr'] += len(rows)
+                    page['stage_counts']['m2_cnn'] += len(rows)
                     page['stage_counts']['ocr'] += len(rows)
                     paired_num, paired_opt = set(), set()
                     for row in rows:
@@ -354,6 +371,7 @@ class Recognizer:
                     if not rows:
                         page['issues'].append('选择题区未配出答案行')
                 else:
+                    page['stage_counts']['m3_zones'] += 1
                     pairs = pair_fill(local)
                     number_for_big = {bi: ni for bi, ni, _ in pairs}
                     used_numbers = {ni for _, ni, _ in pairs}
@@ -367,6 +385,7 @@ class Recognizer:
                     details_by_bi = {}
                     if num_crops:
                         batch_details = self.numbers.read_details(num_crops)
+                        page['stage_counts']['m3_ocr'] += len(batch_details)
                         page['stage_counts']['ocr'] += len(batch_details)
                         for bi, det in zip(paired_bis, batch_details):
                             details_by_bi[bi] = det
@@ -374,6 +393,7 @@ class Recognizer:
                     for bi, b in enumerate(local):
                         if b['cls'] != 5:
                             continue
+                        page['stage_counts']['m3_fills'] += 1
                         issues, number, number_detail = [], None, None
                         if bi in details_by_bi:
                             number_detail = details_by_bi[bi]
@@ -623,14 +643,28 @@ def run(args):
     futures: dict = {}
     merged_grid_ids: set[str] = set()
     counters = {
+        'orient_done': 0,
+        'm1_pages_done': 0,
         'm1_boxes': 0,
+        'm1_choice_zones': 0,
+        'm1_fill_zones': 0,
+        'm1_identity_zones': 0,
+        'm2_zones_yolo_done': 0,
+        'm2_zones_done': 0,
         'm2_boxes': 0,
+        'm2_ocr_done': 0,
+        'm2_cnn_done': 0,
+        'm3_zones_yolo_done': 0,
+        'm3_zones_done': 0,
         'm3_boxes': 0,
+        'm3_ocr_done': 0,
         'ocr_numbers': 0,
         'choice_items': 0,
         'fill_items': 0,
         'identity_items': 0,
+        'tiles_queued': 0,
     }
+    live_yolo_counted_pages: set[str] = set()
     recent_error: dict | None = None
     last_checkpoint_ts = 0.0
     total_pages = len(sources)
@@ -651,6 +685,7 @@ def run(args):
             'api_failures': api_failures,
             'api_inflight': max(0, len(futures) - api_done),
             'items_with_transcription': items_trans,
+            **counters,
         }
 
     def emit_progress(stage: str, message: str = '', force_error: dict | None = None):
@@ -671,13 +706,7 @@ def run(args):
             'pages_done': done_p,
             'pages_total': total_pages,
             'page_failures': snap['page_failures'],
-            'm1_boxes': counters['m1_boxes'],
-            'm2_boxes': counters['m2_boxes'],
-            'm3_boxes': counters['m3_boxes'],
-            'ocr_numbers': counters['ocr_numbers'],
-            'choice_items': counters['choice_items'],
-            'fill_items': counters['fill_items'],
-            'identity_items': counters['identity_items'],
+            **counters,
             'grids_total': snap['grids'],
             'api_done': snap['api_done'],
             'api_success': snap['api_success'],
@@ -751,25 +780,71 @@ def run(args):
         return changed
 
     def accumulate_page_counts(page: dict) -> None:
-        sc = page.get('stage_counts')
-        if isinstance(sc, dict):
-            counters['m1_boxes'] += int(sc.get('m1', 0))
-            counters['m2_boxes'] += int(sc.get('m2', 0))
-            counters['m3_boxes'] += int(sc.get('m3', 0))
-            counters['ocr_numbers'] += int(sc.get('ocr', 0))
+        if page.get('error'):
+            return
+        pid = str(page.get('id') or '')
+        sc = page.get('stage_counts') if isinstance(page.get('stage_counts'), dict) else None
+        boxes = page.get('boxes') or []
+        items = page.get('items') or []
+
+        # 缓存页或未提前计数的页：补计上游 orient / M1 / M2 YOLO / M3 YOLO 计数
+        if pid not in live_yolo_counted_pages:
+            counters['orient_done'] += 1
+            counters['m1_pages_done'] += 1
+            if sc:
+                counters['m1_boxes'] += int(sc.get('m1', 0))
+                counters['m1_choice_zones'] += int(sc.get('m1_choice', sum(1 for b in boxes if b.get('cls') == 1)))
+                counters['m1_fill_zones'] += int(sc.get('m1_fill', sum(1 for b in boxes if b.get('cls') == 4)))
+                counters['m1_identity_zones'] += int(sc.get('m1_identity', sum(1 for b in boxes if b.get('cls') == 0)))
+                counters['m2_boxes'] += int(sc.get('m2', 0))
+                counters['m3_boxes'] += int(sc.get('m3', 0))
+                counters['m2_zones_yolo_done'] += int(sc.get('m2_zones', sum(1 for b in boxes if b.get('cls') == 1)))
+                counters['m3_zones_yolo_done'] += int(sc.get('m3_zones', sum(1 for b in boxes if b.get('cls') == 4)))
+            else:
+                for b in boxes:
+                    cls = b.get('cls')
+                    st = b.get('stage')
+                    if cls in (0, 1, 4) or st == 'm1':
+                        counters['m1_boxes'] += 1
+                        if cls == 1:
+                            counters['m1_choice_zones'] += 1
+                            counters['m2_zones_yolo_done'] += 1
+                        elif cls == 4:
+                            counters['m1_fill_zones'] += 1
+                            counters['m3_zones_yolo_done'] += 1
+                        elif cls == 0:
+                            counters['m1_identity_zones'] += 1
+                    elif cls in (2, 3) or st == 'm2':
+                        counters['m2_boxes'] += 1
+                    elif cls in (5, 6) or st == 'm3':
+                        counters['m3_boxes'] += 1
+
+        # 后处理阶段计数（PaddleOCR / 涂卡 CNN / 题块裁图）
+        p_choice = sum(1 for it in items if it.get('kind') == 'choice')
+        p_fill = sum(1 for it in items if it.get('kind') == 'fill')
+        p_id = sum(1 for it in items if it.get('kind') == 'identity')
+        counters['choice_items'] += p_choice
+        counters['fill_items'] += p_fill
+        counters['identity_items'] += p_id
+        counters['tiles_queued'] += p_fill + p_id
+        if sc:
+            counters['m2_zones_done'] += int(sc.get('m2_zones', sum(1 for b in boxes if b.get('cls') == 1)))
+            counters['m3_zones_done'] += int(sc.get('m3_zones', sum(1 for b in boxes if b.get('cls') == 4)))
+            m2_o = int(sc.get('m2_ocr', p_choice))
+            m2_c = int(sc.get('m2_cnn', p_choice))
+            m3_o = int(sc.get('m3_ocr', sum(1 for it in items if it.get('kind') == 'fill' and it.get('number') is not None)))
+            counters['m2_ocr_done'] += m2_o
+            counters['m2_cnn_done'] += m2_c
+            counters['m3_ocr_done'] += m3_o
+            counters['ocr_numbers'] += int(sc.get('ocr', m2_o + m3_o))
         else:
-            for b in page.get('boxes', []):
-                st = b.get('stage')
-                if st in ('m1', 'm2', 'm3'):
-                    counters[f'{st}_boxes'] += 1
-        for it in page.get('items', []):
-            k = it.get('kind')
-            if k == 'choice':
-                counters['choice_items'] += 1
-            elif k == 'fill':
-                counters['fill_items'] += 1
-            elif k == 'identity':
-                counters['identity_items'] += 1
+            counters['m2_zones_done'] += sum(1 for b in boxes if b.get('cls') == 1)
+            counters['m3_zones_done'] += sum(1 for b in boxes if b.get('cls') == 4)
+            m3_o = sum(1 for it in items if it.get('kind') == 'fill' and it.get('number') is not None)
+            counters['m2_ocr_done'] += p_choice
+            counters['m2_cnn_done'] += p_choice
+            counters['m3_ocr_done'] += m3_o
+            counters['ocr_numbers'] += p_choice + m3_o
 
     emit_progress('准备模型与环境', f'启动识别（设备：{device_label}，YOLO 批大小 {yolo_batch}，工作线程 {workers}，API 并发 {args.concurrency}）')
 
@@ -931,6 +1006,9 @@ def run(args):
                             diag = diagnose_exception(exc, default_module='方向与纠偏')
                             append_error_log(out, diag['module'], exc, diag, context={'page': f'p{idx_p:03d}'})
                             failed_entries[idx_p] = (exc, diag)
+                    if oriented_entries:
+                        counters['orient_done'] += len(oriented_entries)
+                        emit_progress('原图方向纠偏', f"已纠偏 {counters['orient_done']}/{total_pages} 页，正送入 M1 版面分区")
                 except Exception as exc:
                     diag = diagnose_exception(exc, default_module='方向分类模型 (orient)')
                     for idx_p, src_p, _ in loaded_entries:
@@ -947,14 +1025,23 @@ def run(args):
                     m2_tasks = []  # (idx_p, zi, area, crop_im)
                     m3_tasks = []
                     for (idx_p, _, rot_im, _), m1_boxes in zip(oriented_entries, m1_batch_res):
+                        pid_live = f'p{idx_p:03d}'
+                        live_yolo_counted_pages.add(pid_live)
+                        counters['m1_pages_done'] += 1
+                        counters['m1_boxes'] += len(m1_boxes)
                         m1_by_idx[idx_p] = m1_boxes
                         zone_local_by_idx[idx_p] = {}
                         zone_err_by_idx[idx_p] = {}
                         for zi, zone in enumerate(m1_boxes):
                             if zone['cls'] == 0:
+                                counters['m1_identity_zones'] += 1
                                 continue
                             area = bounds(zone['box'], *rot_im.size)
                             task = 'm2' if zone['cls'] == 1 else 'm3'
+                            if task == 'm2':
+                                counters['m1_choice_zones'] += 1
+                            else:
+                                counters['m1_fill_zones'] += 1
                             try:
                                 local_im = crop(rot_im, area)
                                 if task == 'm2':
@@ -963,6 +1050,10 @@ def run(args):
                                     m3_tasks.append((idx_p, zi, area, local_im))
                             except Exception as exc:
                                 zone_err_by_idx[idx_p][zi] = f'{task}裁剪失败：{exc}'
+                    emit_progress(
+                        'M1 版面分区',
+                        f"M1 已完成 {counters['m1_pages_done']}/{total_pages} 页，切出选择区 {counters['m1_choice_zones']} · 填空区 {counters['m1_fill_zones']} · 姓名 {counters['m1_identity_zones']}",
+                    )
 
                     # 批量跑 M2 与 M3（GPU 上显著提速；单块异常自动兜底隔离）
                     for task_name, task_list in (('m2', m2_tasks), ('m3', m3_tasks)):
@@ -976,16 +1067,24 @@ def run(args):
                                 dets = recognizer.infer_batch(task_name, [c[3] for c in chunk])
                                 for (idx_p, zi, area, local_im), local_boxes in zip(chunk, dets):
                                     zone_local_by_idx[idx_p][zi] = (task_name, area, local_im, local_boxes)
+                                    counters[f'{task_name}_zones_yolo_done'] += 1
+                                    counters[f'{task_name}_boxes'] += len(local_boxes)
                         except Exception:
                             # 批次异常则逐区单独推理，精确隔离坏区域
                             for idx_p, zi, area, local_im in task_list:
                                 try:
                                     local_boxes = recognizer.infer(task_name, local_im)
                                     zone_local_by_idx[idx_p][zi] = (task_name, area, local_im, local_boxes)
+                                    counters[f'{task_name}_zones_yolo_done'] += 1
+                                    counters[f'{task_name}_boxes'] += len(local_boxes)
                                 except Exception as exc:
                                     diag = diagnose_exception(exc, default_module=f'{task_name.upper()} 检测')
                                     zone_err_by_idx[idx_p][zi] = f"{diag['module']}失败：{diag['title']}"
                                     append_error_log(out, diag['module'], exc, diag, context={'page': f'p{idx_p:03d}', 'zone': zi})
+                    emit_progress(
+                        'M2/M3 本地定位',
+                        f"M2 已定位 {counters['m2_zones_yolo_done']}/{counters['m1_choice_zones']} 区 · M3 已定位 {counters['m3_zones_yolo_done']}/{counters['m1_fill_zones']} 区，正在执行 PaddleOCR 与 CNN 涂卡",
+                    )
                 except Exception as exc:
                     diag = diagnose_exception(exc, default_module='M1 版面检测')
                     for idx_p, _, _, _ in oriented_entries:
@@ -1084,6 +1183,7 @@ def run(args):
     api_failures = sum(not r.get('ok') for r in responses)
     stats = {
         'pages': len(pages),
+        'pages_total': total_pages,
         'page_failures': page_failures,
         'grids': len(grids),
         'api_success': api_success,
@@ -1104,6 +1204,7 @@ def run(args):
         'workers': workers,
         'human_accuracy': None,
         'api_extra_ids': {g['id']: r['extra_ids'] for g, r in zip(grids, responses) if r.get('extra_ids')},
+        **counters,
     }
 
     # 结果级健康判定（绝不把全部失败伪装成“待人工验收”）

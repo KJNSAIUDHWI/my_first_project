@@ -277,16 +277,93 @@ class WorkbenchState:
         return {"ok": True, "task_id": task_id}
 
     def _read_run_stats(self, rec_dir: Path) -> dict | None:
-        """读取识别目录的 results.json 摘要（用于结果级健康判定与工作台展示）。"""
+        """读取识别目录的 results.json 摘要（用于结果级健康判定与架构图各节点统计）。"""
         data = core.read_json(rec_dir / "results.json")
         if not isinstance(data, dict):
             return None
         pages = data.get("pages") or []
+        grids = data.get("grids") or []
         stats = dict(data.get("stats") or {})
         if "pages" not in stats:
             stats["pages"] = len(pages)
+        if "pages_total" not in stats:
+            stats["pages_total"] = len(pages)
         if "page_failures" not in stats:
             stats["page_failures"] = sum(bool(p.get("error")) for p in pages)
+        if "grids" not in stats:
+            stats["grids"] = len(grids)
+
+        # 若历史批次或旧 results.json 缺少分阶段节点统计，则按页面 boxes/items 精确反推
+        if "m1_boxes" not in stats or "choice_items" not in stats or "m2_ocr_done" not in stats:
+            orient_done = sum(1 for p in pages if not p.get("error"))
+            m1_boxes = m1_choice = m1_fill = m1_identity = 0
+            m2_boxes = m3_boxes = m2_ocr = m2_cnn = m3_ocr = 0
+            choice_items = fill_items = identity_items = 0
+            for p in pages:
+                if p.get("error"):
+                    continue
+                sc = p.get("stage_counts") if isinstance(p.get("stage_counts"), dict) else None
+                boxes = p.get("boxes") or []
+                items = p.get("items") or []
+                if sc:
+                    m1_boxes += int(sc.get("m1") or 0)
+                    m1_choice += int(sc.get("m1_choice") or sum(1 for b in boxes if b.get("cls") == 1))
+                    m1_fill += int(sc.get("m1_fill") or sum(1 for b in boxes if b.get("cls") == 4))
+                    m1_identity += int(sc.get("m1_identity") or sum(1 for b in boxes if b.get("cls") == 0))
+                    m2_boxes += int(sc.get("m2") or 0)
+                    m3_boxes += int(sc.get("m3") or 0)
+                else:
+                    for b in boxes:
+                        cls = b.get("cls")
+                        st = b.get("stage")
+                        if cls in (0, 1, 4) or st == "m1":
+                            m1_boxes += 1
+                            if cls == 1:
+                                m1_choice += 1
+                            elif cls == 4:
+                                m1_fill += 1
+                            elif cls == 0:
+                                m1_identity += 1
+                        elif cls in (2, 3) or st == "m2":
+                            m2_boxes += 1
+                        elif cls in (5, 6) or st == "m3":
+                            m3_boxes += 1
+                p_choices = [it for it in items if it.get("kind") == "choice"]
+                p_fills = [it for it in items if it.get("kind") == "fill"]
+                p_ids = [it for it in items if it.get("kind") == "identity"]
+                choice_items += len(p_choices)
+                fill_items += len(p_fills)
+                identity_items += len(p_ids)
+                if sc and "m2_ocr" in sc:
+                    m2_ocr += int(sc.get("m2_ocr") or 0)
+                    m2_cnn += int(sc.get("m2_cnn") or 0)
+                    m3_ocr += int(sc.get("m3_ocr") or 0)
+                else:
+                    m2_ocr += len(p_choices)
+                    m2_cnn += len(p_choices)
+                    m3_ocr += sum(1 for it in p_fills if it.get("number") is not None or it.get("number_detail"))
+
+            stats.setdefault("orient_done", orient_done)
+            stats.setdefault("m1_pages_done", orient_done)
+            stats.setdefault("m1_boxes", m1_boxes)
+            stats.setdefault("m1_choice_zones", m1_choice)
+            stats.setdefault("m1_fill_zones", m1_fill)
+            stats.setdefault("m1_identity_zones", m1_identity)
+            stats.setdefault("m2_zones_yolo_done", m1_choice)
+            stats.setdefault("m2_zones_done", m1_choice)
+            stats.setdefault("m2_boxes", m2_boxes)
+            stats.setdefault("m2_ocr_done", m2_ocr)
+            stats.setdefault("m2_cnn_done", m2_cnn)
+            stats.setdefault("m3_zones_yolo_done", m1_fill)
+            stats.setdefault("m3_zones_done", m1_fill)
+            stats.setdefault("m3_boxes", m3_boxes)
+            stats.setdefault("m3_ocr_done", m3_ocr)
+            stats.setdefault("ocr_numbers", m2_ocr + m3_ocr)
+            stats.setdefault("choice_items", choice_items)
+            stats.setdefault("fill_items", fill_items)
+            stats.setdefault("identity_items", identity_items)
+            stats.setdefault("tiles_queued", fill_items + identity_items)
+
         failed_items = sum(
             1
             for p in pages
@@ -390,12 +467,26 @@ class WorkbenchState:
                     "pages_done": 0,
                     "pages_total": int(active.get("total_images") or 0),
                     "page_failures": 0,
+                    "orient_done": 0,
+                    "m1_pages_done": 0,
                     "m1_boxes": 0,
+                    "m1_choice_zones": 0,
+                    "m1_fill_zones": 0,
+                    "m1_identity_zones": 0,
+                    "m2_zones_yolo_done": 0,
+                    "m2_zones_done": 0,
                     "m2_boxes": 0,
+                    "m2_ocr_done": 0,
+                    "m2_cnn_done": 0,
+                    "m3_zones_yolo_done": 0,
+                    "m3_zones_done": 0,
                     "m3_boxes": 0,
+                    "m3_ocr_done": 0,
                     "ocr_numbers": 0,
                     "choice_items": 0,
                     "fill_items": 0,
+                    "identity_items": 0,
+                    "tiles_queued": 0,
                     "grids_total": 0,
                     "api_done": 0,
                     "api_success": 0,
