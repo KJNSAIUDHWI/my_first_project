@@ -34,7 +34,15 @@
   .user-btn:hover{border-color:var(--primary)}
 
   /* 主机步骤导航 */
-  .stepper{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+  .stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+  .train-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:16px}
+  .train-mod{border:1.5px solid var(--line);border-radius:14px;padding:14px;background:#fcfbf8;cursor:pointer;transition:.18s;display:flex;flex-direction:column;gap:6px}
+  .train-mod:hover{border-color:var(--line-strong)}
+  .train-mod.active{border-color:var(--primary);background:var(--primary-soft)}
+  .train-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px;margin:12px 0 14px}
+  .train-table{width:100%;border-collapse:collapse;font-size:13px}
+  .train-table th,.train-table td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  .train-table th{color:var(--muted);font-weight:600;background:#faf8f3}
   .step-tab{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:.2s;text-align:left}
   .step-tab:hover{border-color:var(--line-strong)}
   .step-tab.active{border-color:var(--primary);background:var(--primary-soft)}
@@ -177,6 +185,10 @@
       <span class="step-num">3</span>
       <div><div class="step-title">审阅与协作</div><div class="step-desc" id="tabOverviewDesc">看进度、多人协同审阅</div></div>
     </button>
+    <button class="step-tab" data-view="train" id="tabTrain" type="button">
+      <span class="step-num">4</span>
+      <div><div class="step-title">模型训练</div><div class="step-desc" id="tabTrainDesc">同步标框、微调与换权重</div></div>
+    </button>
   </nav>
 
   <!-- 视图 1：环境自检（仅主机） -->
@@ -290,6 +302,11 @@
         <div id="taskGrid" class="task-grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))"></div>
         <details id="secondaryWrap" class="hidden" style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
           <summary class="muted" style="cursor:pointer;font-size:12.5px">更多工具：批量标框（平时改单张直接在「人工复审」里按 E 调框即可）</summary>
+          <div class="row" style="margin-top:10px">
+            <button class="btn sm" type="button" data-open-annotate="m1">打开 M1 版面标框</button>
+            <button class="btn sm" type="button" data-open-annotate="m2">打开 M2 选择题标框</button>
+            <button class="btn sm" type="button" data-open-annotate="m3">打开 M3 大题标框</button>
+          </div>
           <div id="secondaryTaskGrid" class="task-grid" style="margin-top:10px"></div>
         </details>
       </div>
@@ -308,6 +325,125 @@
           <div style="font-weight:600;font-size:13.5px;margin-bottom:6px">不同人做了多少（累计审阅）</div>
           <div id="leaderboard"><div class="muted">还没有人提交审阅记录</div></div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 视图 4：模型微调训练与权重切换（仅主机） -->
+  <section id="viewTrain" class="hidden">
+    <!-- 顶部：数据同步与快捷标注入口 -->
+    <div class="card">
+      <div class="between">
+        <div>
+          <h2>第四步：模型微调训练与权重管理</h2>
+          <p class="lead" style="margin-bottom:0">先在「审阅与协作」或下方标框工具中完成标注，再同步数据并一键启动微调训练（内置防 NaN 保护，训练完需手动点「启用」才切换线上权重）。</p>
+        </div>
+        <button class="btn sm" id="btnRefreshTrain" type="button">刷新状态</button>
+      </div>
+      <div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <button class="btn primary sm" id="btnSyncBatchTrain" type="button">① 同步当前批次已审页到训练集 (M1/M2/M3)</button>
+        <button class="btn sm" type="button" data-open-annotate="m1">打开 M1 标框</button>
+        <button class="btn sm" type="button" data-open-annotate="m2">打开 M2 标框</button>
+        <button class="btn sm" type="button" data-open-annotate="m3">打开 M3 标框</button>
+        <button class="btn sm" id="btnOpenChoiceFromTrain" type="button">打开涂卡审核</button>
+        <span id="trainSyncMsg" class="muted"></span>
+      </div>
+    </div>
+
+    <!-- 四个模块数据与当前权重卡片 -->
+    <div id="trainModuleGrid" class="train-grid"></div>
+
+    <!-- 训练参数与实时运行台 -->
+    <div class="card">
+      <div class="between">
+        <div>
+          <h2 id="trainFormTitle">启动微调训练</h2>
+          <div class="muted" id="trainHwInfo">正在检测显卡/CPU 设备...</div>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btnStartTrain" type="button">▶ 开始微调训练</button>
+          <button class="btn danger hidden" id="btnStopTrain" type="button">■ 停止训练</button>
+          <button class="btn sm" id="btnOpenMonitor" type="button">打开训练监控 (8901)</button>
+        </div>
+      </div>
+
+      <div class="train-form">
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">训练模块</label>
+          <select id="trainTaskSelect" class="input" style="padding:8px 10px">
+            <option value="m1">M1 版面分区</option>
+            <option value="m2">M2 选择题框</option>
+            <option value="m3">M3 填空/实验大题框</option>
+            <option value="choice">选择题涂卡 CNN</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">计算设备</label>
+          <select id="trainDeviceSelect" class="input" style="padding:8px 10px">
+            <option value="0">GPU (CUDA)</option>
+            <option value="cpu">CPU</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">训练轮数 (Epochs)</label>
+          <input id="trainEpochs" type="number" min="1" max="300" value="50" class="input" style="padding:8px 10px">
+        </div>
+        <div id="trainImgszWrap">
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">输入尺寸 (imgsz)</label>
+          <select id="trainImgsz" class="input" style="padding:8px 10px">
+            <option value="1024" selected>1024（推荐）</option>
+            <option value="640">640（更快）</option>
+            <option value="1280">1280（高精度）</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">批大小 (Batch)</label>
+          <input id="trainBatch" type="number" min="1" max="128" value="8" class="input" style="padding:8px 10px">
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">学习率 (LR)</label>
+          <input id="trainLr" type="text" value="0.0001" class="input" style="padding:8px 10px">
+        </div>
+        <div>
+          <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">本次训练备注</label>
+          <input id="trainPurpose" type="text" value="工作台微调" maxlength="24" class="input" style="padding:8px 10px" placeholder="如：新卷微调">
+        </div>
+      </div>
+
+      <div id="trainProgressWrap" class="hidden" style="margin-top:8px">
+        <div class="prog-nums" style="margin-bottom:6px">
+          <span id="trainProgLabel">训练准备中...</span>
+          <span id="trainProgMetrics" class="muted"></span>
+        </div>
+        <div class="prog-bar"><i id="trainProgBar" style="width:0%"></i></div>
+      </div>
+      <div id="trainLogBox" class="log-box hidden"></div>
+    </div>
+
+    <!-- 历史训练与候补权重部署表 -->
+    <div class="card">
+      <div class="between" style="margin-bottom:10px">
+        <div>
+          <h2>训练记录与权重切换</h2>
+          <div class="muted">所有训练产物永久保存在 <code>train/</code> 与 <code>models/</code>；启用新权重前会自动备份上一版，随时可回退。</div>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="train-table">
+          <thead>
+            <tr>
+              <th>模块</th>
+              <th>训练记录</th>
+              <th>样本 (train/val)</th>
+              <th>轮次与指标</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="trainRunsBody">
+            <tr><td colspan="6" class="muted">暂无训练记录</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -501,6 +637,7 @@ function setView(view) {
   $('viewCheck').classList.toggle('hidden', view !== 'check');
   $('viewIngest').classList.toggle('hidden', view !== 'ingest');
   $('viewOverview').classList.toggle('hidden', view !== 'overview');
+  $('viewTrain').classList.toggle('hidden', view !== 'train');
   document.querySelectorAll('.step-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.view === view);
   });
@@ -692,7 +829,7 @@ function renderOverview(data) {
   }
 }
 
-async function openTask(taskId, hostForLinks) {
+async function openTask(taskId, hostForLinks, extra = {}) {
   showBanner('gui', '正在准备审核页面，请稍候...', 6000);
   // 在用户点击的同步调用栈里先占位开窗，防止平板/手机/浏览器拦截异步后的 window.open
   const pendingWin = window.open('about:blank', '_blank');
@@ -703,7 +840,7 @@ async function openTask(taskId, hostForLinks) {
     } catch (_) {}
   }
   try {
-    const res = await api('/api/service/ensure', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
+    const res = await api('/api/service/ensure', { method: 'POST', body: JSON.stringify({ task_id: taskId, ...extra }) });
     const who = getUserName();
     const qs = who ? ('?reviewer=' + encodeURIComponent(who)) : '';
     const url = `http://${hostForLinks}:${res.port}/${qs}`;
@@ -748,6 +885,7 @@ function connectSSE() {
       if (ev.step === 'check') highlightElement('tabCheck');
       else if (ev.step === 'ingest') highlightElement('tabIngest');
       else if (ev.step === 'recognize') { highlightElement('batchCard'); refreshOverview(); }
+      else if (ev.step === 'train') { highlightElement('tabTrain'); if (CURRENT_VIEW === 'train' || TRAIN_DATA) refreshTrainOverview(); }
       else if (ev.step?.startsWith('service_')) {
         highlightElement('task_' + ev.step.replace('service_', ''));
         refreshOverview();
@@ -776,9 +914,16 @@ document.querySelectorAll('.step-tab').forEach(btn => {
     if (btn.dataset.view === 'check' && !CHECK) {
       const rep = await api('/api/check');
       renderCheck(rep);
+    } else if (btn.dataset.view === 'train') {
+      await refreshTrainOverview();
     }
   };
 });
+
+document.querySelectorAll('[data-open-annotate]').forEach(btn => {
+  btn.onclick = () => openTask('annotate', window.location.hostname || '127.0.0.1', { m: btn.dataset.openAnnotate });
+});
+$('btnOpenChoiceFromTrain').onclick = () => openTask('choice', window.location.hostname || '127.0.0.1');
 
 $('btnRecheck').onclick = async () => {
   $('btnRecheck').disabled = true;
@@ -1045,11 +1190,256 @@ $('btnSaveVlm').onclick = async () => {
   }
 };
 
+// ==================== 模型微调训练与权重切换 ====================
+let TRAIN_DATA = null;
+let SELECTED_TRAIN_TASK = 'm1';
+
+function applyTrainTaskDefaults(task) {
+  SELECTED_TRAIN_TASK = task;
+  $('trainTaskSelect').value = task;
+  const mod = (TRAIN_DATA?.modules || []).find(m => m.task === task);
+  const hw = TRAIN_DATA?.hardware || {};
+  const isCuda = $('trainDeviceSelect').value !== 'cpu' && !!hw.cuda;
+  if (mod) {
+    $('trainEpochs').value = mod.default_epochs || 50;
+    $('trainBatch').value = isCuda ? (mod.default_batch_gpu || 4) : (mod.default_batch_cpu || 2);
+    $('trainLr').value = String(mod.default_lr || 0.0001);
+    $('trainImgszWrap').classList.toggle('hidden', mod.kind !== 'yolo');
+  }
+  document.querySelectorAll('.train-mod').forEach(el => {
+    el.classList.toggle('active', el.dataset.task === task);
+  });
+}
+
+function renderTrainOverview(data) {
+  const firstLoad = !TRAIN_DATA;
+  TRAIN_DATA = data;
+  const hw = data.hardware || {};
+  $('trainHwInfo').textContent = hw.cuda
+    ? `检测到 GPU：${hw.gpu_name}（默认启用 CUDA + AMP 混合精度微调）`
+    : '未检测到 CUDA GPU，将使用 CPU 模式微调（建议适当调小轮数或图尺寸）';
+
+  if (firstLoad) {
+    const devSel = $('trainDeviceSelect');
+    devSel.innerHTML = hw.cuda
+      ? `<option value="0" selected>GPU: ${esc(hw.gpu_name)}</option><option value="cpu">CPU</option>`
+      : `<option value="cpu" selected>CPU（无 CUDA 显卡）</option>`;
+  }
+
+  // 四模块数据卡片
+  const mods = data.modules || [];
+  $('trainModuleGrid').innerHTML = mods.map(m => {
+    const ds = m.dataset || {};
+    const readyBadge = ds.ready
+      ? '<span class="badge ok">可训练</span>'
+      : '<span class="badge warn">样本不足</span>';
+    return `
+      <div class="train-mod ${m.task === SELECTED_TRAIN_TASK ? 'active' : ''}" data-task="${esc(m.task)}">
+        <div class="between">
+          <strong>${esc(m.name)}</strong>
+          ${readyBadge}
+        </div>
+        <div class="muted" style="font-size:12px">${esc(m.desc)}</div>
+        <div style="font-size:13px;font-weight:600;margin-top:4px">已审样本：${ds.reviewed || 0} / ${ds.total_images || 0}</div>
+        <div class="muted" style="font-size:12px">当前权重：<code>${esc(m.current_weight || '未就绪')}</code></div>
+        ${m.has_rollback ? `<div style="margin-top:4px"><button class="btn sm" type="button" data-rollback-task="${esc(m.task)}">↩ 回退上一版权重</button></div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  $('trainModuleGrid').querySelectorAll('.train-mod').forEach(card => {
+    card.onclick = (e) => {
+      if (e.target.closest('button')) return;
+      applyTrainTaskDefaults(card.dataset.task);
+    };
+  });
+  $('trainModuleGrid').querySelectorAll('[data-rollback-task]').forEach(btn => {
+    btn.onclick = async () => {
+      const task = btn.dataset.rollbackTask;
+      if (!confirm(`确认将 ${task.toUpperCase()} 回退到上一次部署前备份的权重吗？`)) return;
+      btn.disabled = true;
+      try {
+        const res = await api('/api/train/rollback', { method: 'POST', body: JSON.stringify({ task }) });
+        alert(res.message || '已回退');
+        await refreshTrainOverview();
+      } catch (err) { alert('回退失败：' + err.message); }
+      finally { btn.disabled = false; }
+    };
+  });
+
+  if (firstLoad) applyTrainTaskDefaults(SELECTED_TRAIN_TASK);
+
+  // 运行中的训练任务状态与实时日志
+  const job = data.train_job || {};
+  const running = !!job.running;
+  $('btnStartTrain').disabled = running;
+  $('btnStartTrain').textContent = running ? `训练中 (${job.task?.toUpperCase() || ''})...` : '▶ 开始微调训练';
+  $('btnStopTrain').classList.toggle('hidden', !running);
+  $('tabTrainDesc').textContent = running ? `正在训练 ${job.task?.toUpperCase() || ''}...` : '同步标框、微调与换权重';
+
+  if (running || (job.logs && job.logs.length)) {
+    $('trainProgressWrap').classList.remove('hidden');
+    const ep = job.completed_epochs || 0;
+    const totalEp = job.epochs || 1;
+    const pct = Math.min(100, Math.round((ep / Math.max(1, totalEp)) * 100));
+    $('trainProgBar').style.width = (running ? Math.max(3, pct) : pct) + '%';
+    $('trainProgLabel').textContent = `${job.run || ''} · 进度 ${ep} / ${totalEp} 轮 (${job.status || ''})`;
+    const mt = job.metrics || {};
+    const parts = [];
+    if (mt.mAP50 !== undefined) parts.push(`mAP50=${(mt.mAP50 * 100).toFixed(1)}%`);
+    if (mt.mAP50_95 !== undefined) parts.push(`mAP50-95=${(mt.mAP50_95 * 100).toFixed(1)}%`);
+    if (mt.exact !== undefined) parts.push(`整行准确率=${(mt.exact * 100).toFixed(2)}%`);
+    if (mt.box_loss !== undefined) parts.push(`box_loss=${mt.box_loss}`);
+    if (mt.loss !== undefined) parts.push(`loss=${mt.loss}`);
+    $('trainProgMetrics').textContent = parts.join(' · ');
+
+    $('trainLogBox').classList.remove('hidden');
+    $('trainLogBox').textContent = (job.logs || []).slice(-60).join('\n');
+    $('trainLogBox').scrollTop = $('trainLogBox').scrollHeight;
+  }
+
+  // 历史训练记录表
+  const runs = data.runs || [];
+  if (!runs.length) {
+    $('trainRunsBody').innerHTML = '<tr><td colspan="6" class="muted">暂无训练记录，点击上方「开始微调训练」创建第一轮微调</td></tr>';
+  } else {
+    $('trainRunsBody').innerHTML = runs.map(r => {
+      const cnt = r.counts || {};
+      const cntStr = (cnt.train || cnt.val) ? `${cnt.train || 0} / ${cnt.val || 0}` : '-';
+      const mt = r.metrics || {};
+      let metricStr = mt.completed_epochs ? `${mt.completed_epochs} 轮` : '-';
+      if (mt.mAP50 !== undefined) metricStr += ` · mAP50 ${(mt.mAP50 * 100).toFixed(1)}%`;
+      if (mt.exact !== undefined) metricStr += ` · 精确 ${(mt.exact * 100).toFixed(1)}%`;
+      const stBadge = r.is_deployed
+        ? '<span class="badge ok">当前使用中</span>'
+        : r.status === 'running'
+          ? '<span class="badge warn">训练中</span>'
+          : r.status === 'success'
+            ? '<span class="badge ok">已通过检查</span>'
+            : `<span class="badge err" title="${esc(r.error || '')}">未完成/失败</span>`;
+      const actionBtn = r.is_deployed
+        ? '<span class="muted">已部署</span>'
+        : r.can_deploy
+          ? `<button class="btn primary sm" type="button" data-deploy-task="${esc(r.task)}" data-deploy-run="${esc(r.run)}">启用此权重</button>`
+          : '<span class="muted">-</span>';
+      return `
+        <tr>
+          <td><strong>${esc(r.task_name)}</strong></td>
+          <td><div><code>${esc(r.run)}</code></div><div class="muted" style="font-size:11.5px">${esc(r.started || '')}</div></td>
+          <td>${esc(cntStr)}</td>
+          <td>${esc(metricStr)}</td>
+          <td>${stBadge}</td>
+          <td class="row">
+            ${actionBtn}
+            <button class="btn sm" type="button" data-monitor-run="${esc(r.run)}">监控</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    $('trainRunsBody').querySelectorAll('[data-deploy-run]').forEach(btn => {
+      btn.onclick = async () => {
+        const task = btn.dataset.deployTask;
+        const run = btn.dataset.deployRun;
+        if (!confirm(`确认将 ${task.toUpperCase()} 线上权重切换为 ${run} 吗？\n（切换前会自动备份当前权重，随时可一键回退）`)) return;
+        btn.disabled = true;
+        try {
+          const res = await api('/api/train/deploy', { method: 'POST', body: JSON.stringify({ task, run }) });
+          alert(res.message || '权重切换成功');
+          await refreshTrainOverview();
+        } catch (err) { alert('切换失败：' + err.message); }
+        finally { btn.disabled = false; }
+      };
+    });
+    $('trainRunsBody').querySelectorAll('[data-monitor-run]').forEach(btn => {
+      btn.onclick = () => openMonitor(btn.dataset.monitorRun);
+    });
+  }
+}
+
+async function refreshTrainOverview() {
+  if (!OVERVIEW?.is_host) return;
+  try {
+    const data = await api('/api/train/overview');
+    renderTrainOverview(data);
+  } catch (err) {
+    $('trainHwInfo').textContent = '读取训练状态失败：' + err.message;
+  }
+}
+
+async function openMonitor(runName = '') {
+  const pendingWin = window.open('about:blank', '_blank');
+  try {
+    const res = await api('/api/train/monitor', { method: 'POST', body: JSON.stringify({ run: runName }) });
+    const url = `http://${window.location.hostname || '127.0.0.1'}:${res.port}/`;
+    if (pendingWin && !pendingWin.closed) pendingWin.location.href = url;
+    else window.open(url, '_blank');
+  } catch (err) {
+    if (pendingWin && !pendingWin.closed) pendingWin.close();
+    alert('打开训练监控失败：' + err.message);
+  }
+}
+
+$('trainTaskSelect').onchange = () => applyTrainTaskDefaults($('trainTaskSelect').value);
+$('trainDeviceSelect').onchange = () => applyTrainTaskDefaults($('trainTaskSelect').value);
+$('btnRefreshTrain').onclick = refreshTrainOverview;
+$('btnOpenMonitor').onclick = () => openMonitor(TRAIN_DATA?.train_job?.run || '');
+
+$('btnSyncBatchTrain').onclick = async () => {
+  $('btnSyncBatchTrain').disabled = true;
+  $('trainSyncMsg').textContent = '正在同步当前批次已审页面的 M1/M2/M3 标框...';
+  try {
+    const res = await api('/api/train/sync-batch', { method: 'POST', body: '{}' });
+    $('trainSyncMsg').textContent = res.message;
+    await refreshTrainOverview();
+  } catch (err) {
+    $('trainSyncMsg').textContent = '同步失败：' + err.message;
+    alert(err.message);
+  } finally {
+    $('btnSyncBatchTrain').disabled = false;
+  }
+};
+
+$('btnStartTrain').onclick = async () => {
+  const task = $('trainTaskSelect').value;
+  const payload = {
+    task,
+    device: $('trainDeviceSelect').value,
+    epochs: Number($('trainEpochs').value) || 50,
+    imgsz: Number($('trainImgsz').value) || 1024,
+    batch: Number($('trainBatch').value) || 4,
+    lr: Number($('trainLr').value) || 0.0001,
+    purpose: $('trainPurpose').value.trim() || '工作台微调',
+  };
+  if (!confirm(`确认开始微调 ${task.toUpperCase()}（${payload.epochs} 轮，设备：${payload.device}）？\n训练完成后不会自动覆盖线上权重，需你核对后手动点击启用。`)) return;
+  $('btnStartTrain').disabled = true;
+  try {
+    const res = await api('/api/train/start', { method: 'POST', body: JSON.stringify(payload) });
+    showBanner('gui', `已启动训练：${res.run}`, 5000);
+    await refreshTrainOverview();
+  } catch (err) {
+    alert('启动训练失败：' + err.message);
+    $('btnStartTrain').disabled = false;
+  }
+};
+
+$('btnStopTrain').onclick = async () => {
+  if (!confirm('确认立即停止当前正在运行的训练任务吗？')) return;
+  $('btnStopTrain').disabled = true;
+  try {
+    const res = await api('/api/train/stop', { method: 'POST', body: '{}' });
+    showBanner('gui', res.message || '已停止训练', 4000);
+    await refreshTrainOverview();
+  } catch (err) { alert(err.message); }
+  finally { $('btnStopTrain').disabled = false; }
+};
+
 // 初始化
 refreshOverview().then(() => {
   pingPresence('总览');
   connectSSE();
   setInterval(refreshOverview, 5000);
+  setInterval(() => { if (CURRENT_VIEW === 'train' || TRAIN_DATA?.train_job?.running) refreshTrainOverview(); }, 3500);
   setInterval(() => pingPresence('总览'), 25000);
 });
 </script>

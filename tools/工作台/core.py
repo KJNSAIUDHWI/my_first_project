@@ -747,7 +747,8 @@ def _count_annotate_progress(root: Path, m_name: str) -> tuple[dict, Counter]:
     if prog.is_file():
         with prog.open("r", encoding="utf-8-sig", newline="") as fh:
             for r in csv.DictReader(fh):
-                if r.get("status") in ("已审", "特殊"):
+                st_str = (r.get("status") or "").strip()
+                if st_str.startswith("已审") or st_str == "特殊":
                     done += 1
                     who = (r.get("reviewer") or "").strip()
                     if who:

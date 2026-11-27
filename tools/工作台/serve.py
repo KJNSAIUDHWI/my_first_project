@@ -26,6 +26,7 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 
 import core  # noqa: E402
+import train_bridge  # noqa: E402
 
 
 class EventBus:
@@ -84,7 +85,26 @@ class WorkbenchState:
         self.presence: dict[str, dict] = {}
         self.pipeline_job: dict = {"running": False, "batch_id": "", "logs": [], "status": "idle", "returncode": None}
         self.repair_job: dict = {"running": False, "logs": [], "status": "idle", "result": None}
+        self.train_job: dict = {
+            "running": False,
+            "task": "",
+            "run": "",
+            "epochs": 0,
+            "completed_epochs": 0,
+            "metrics": {},
+            "logs": [],
+            "status": "idle",
+            "returncode": None,
+        }
+        self._train_proc: subprocess.Popen | None = None
         self.last_check: dict | None = None
+
+    def train_job_snapshot(self) -> dict:
+        with self._lock:
+            snap = dict(self.train_job)
+            snap["logs"] = list(self.train_job.get("logs") or [])
+            snap["metrics"] = dict(self.train_job.get("metrics") or {})
+        return snap
 
     def run_check(self) -> dict:
         self.bus.publish({"source": "gui", "step": "check", "status": "running", "message": "正在检查运行环境与模型权重..."})
@@ -103,7 +123,7 @@ class WorkbenchState:
 
     def service_snapshot(self) -> dict:
         out = {}
-        ports = {"review": 8904, "annotate": 8900, "choice": 8905, "digit": 8903}
+        ports = {"review": 8904, "annotate": 8900, "choice": 8905, "digit": 8903, "monitor": 8901}
         with self._lock:
             for tid, port in ports.items():
                 info = self.procs.get(tid)
@@ -111,21 +131,42 @@ class WorkbenchState:
                 if not alive:
                     # 也许外部手动启动了同一端口
                     alive = self._port_open(port, timeout=0.12)
-                out[tid] = {"running": alive, "port": port}
+                out[tid] = {"running": alive, "port": port, "extra": (info or {}).get("extra") or {}}
         return out
 
     def start_service(self, task_id: str, extra: dict | None = None) -> dict:
         extra = extra or {}
-        ports = {"review": 8904, "annotate": 8900, "choice": 8905, "digit": 8903}
+        ports = {"review": 8904, "annotate": 8900, "choice": 8905, "digit": 8903, "monitor": 8901}
         if task_id not in ports:
             raise ValueError(f"未知审核任务：{task_id}")
         port = ports[task_id]
 
         with self._lock:
             info = self.procs.get(task_id)
+            need_restart = False
+            if task_id == "annotate" and extra.get("m") and info:
+                prev_m = (info.get("extra") or {}).get("m")
+                if prev_m and prev_m != extra.get("m"):
+                    need_restart = True
+            if task_id == "monitor" and extra.get("run") and info:
+                prev_run = (info.get("extra") or {}).get("run")
+                if prev_run and prev_run != extra.get("run"):
+                    need_restart = True
+
+            if need_restart and info:
+                if info["proc"].poll() is None:
+                    info["proc"].terminate()
+                    try:
+                        info["proc"].wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        info["proc"].kill()
+                self.procs.pop(task_id, None)
+                time.sleep(0.25)
+                info = None
+
             if info and info["proc"].poll() is None and self._port_open(port, 0.2):
                 return {"ok": True, "task_id": task_id, "port": port, "already_running": True}
-            if self._port_open(port, 0.2):
+            if not need_restart and self._port_open(port, 0.2):
                 return {"ok": True, "task_id": task_id, "port": port, "already_running": True}
 
             if task_id == "review":
@@ -138,13 +179,23 @@ class WorkbenchState:
                 cmd = [sys.executable, str(self.root / "tools" / "识别验收.py"), "--dir", str(rec_dir), "--port", str(port), "--lan"]
             elif task_id == "annotate":
                 m = extra.get("m") or "m1"
+                if m not in ("m1", "m2", "m3"):
+                    m = "m1"
+                (self.root / "data" / m / "images").mkdir(parents=True, exist_ok=True)
                 cmd = [sys.executable, str(self.root / "tools" / "标注工具" / "serve.py"), "--m", m, "--port", str(port), "--lan", "--no-open"]
+                extra = {**extra, "m": m}
             elif task_id == "choice":
                 cmd = [sys.executable, str(self.root / "tools" / "涂黑审核" / "serve.py"), "--port", str(port), "--lan"]
+            elif task_id == "monitor":
+                run_name = str(extra.get("run") or "").strip()
+                cmd = [sys.executable, str(self.root / "tools" / "训练监控" / "serve.py"), "--port", str(port), "--no-open"]
+                if run_name:
+                    cmd += ["--run", str(self.root / "train" / run_name)]
+                extra = {**extra, "run": run_name}
             else:
                 cmd = [sys.executable, str(self.root / "tools" / "数字审核" / "serve.py"), "--port", str(port), "--lan"]
 
-            self.bus.publish({"source": "gui", "step": f"service_{task_id}", "status": "running", "message": f"正在启动 {task_id} 审核服务 (端口 {port})..."})
+            self.bus.publish({"source": "gui", "step": f"service_{task_id}", "status": "running", "message": f"正在启动 {task_id} 服务 (端口 {port})..."})
             creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             proc = subprocess.Popen(
                 cmd,
@@ -153,7 +204,7 @@ class WorkbenchState:
                 stderr=subprocess.DEVNULL,
                 creationflags=creation,
             )
-            self.procs[task_id] = {"proc": proc, "port": port, "cmd": cmd, "started_at": core.now_str()}
+            self.procs[task_id] = {"proc": proc, "port": port, "cmd": cmd, "extra": extra, "started_at": core.now_str()}
 
         # 等待端口监听就绪（最多 8 秒）
         deadline = time.time() + 8.0
@@ -241,7 +292,180 @@ class WorkbenchState:
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "batch_id": active["batch_id"]}
 
+    def start_training(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        if task not in train_bridge.ALL_TASKS:
+            return {"ok": False, "error": f"不支持的训练模块：{task}"}
+        meta = train_bridge.TASK_META[task]
+        hw = train_bridge.detect_hardware()
+        purpose = train_bridge._sanitize_purpose(str(payload.get("purpose") or "工作台微调"))
+        epochs = int(payload.get("epochs") or meta["default_epochs"])
+        imgsz = int(payload.get("imgsz") or meta["default_imgsz"] or 0)
+        device = str(payload.get("device") or hw["default_device"]).strip()
+        is_cuda = device.lower() != "cpu" and hw["cuda"]
+        batch = int(payload.get("batch") or (meta["default_batch_gpu"] if is_cuda else meta["default_batch_cpu"]))
+        lr = float(payload.get("lr") or meta["default_lr"])
+
+        from datetime import datetime
+        run_name = f"{task}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{purpose}"
+
+        with self._lock:
+            if self.train_job["running"]:
+                return {"ok": False, "error": f"已有训练任务正在运行：{self.train_job['run']}，请等待完成或先停止"}
+            self.train_job = {
+                "running": True,
+                "task": task,
+                "run": run_name,
+                "epochs": epochs,
+                "completed_epochs": 0,
+                "metrics": {},
+                "logs": [f"[{core.now_str()}] 启动 {meta['name']} 微调训练：{run_name}（epochs={epochs}, device={device}, batch={batch}）"],
+                "status": "running",
+                "returncode": None,
+            }
+
+        def worker():
+            run_dir = self.root / "train" / run_name
+            self.bus.publish({"source": "gui", "step": "train", "status": "running", "message": f"开始训练 {meta['name']} ({run_name})..."})
+            cmd = [
+                sys.executable, "-B", str(HERE / "train_bridge.py"), "run-train",
+                "--task", task,
+                "--run", run_name,
+                "--purpose", purpose,
+                "--epochs", str(epochs),
+                "--batch", str(batch),
+                "--device", device,
+                "--lr", str(lr),
+            ]
+            if imgsz > 0 and task in train_bridge.YOLO_TASKS:
+                cmd += ["--imgsz", str(imgsz)]
+
+            creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            stop_tail = threading.Event()
+
+            def tail_metrics_and_log():
+                log_file = run_dir / "train.log"
+                pos = 0
+                while not stop_tail.is_set():
+                    if log_file.is_file():
+                        try:
+                            with log_file.open("r", encoding="utf-8", errors="replace") as fh:
+                                fh.seek(pos)
+                                chunk = fh.read()
+                                pos = fh.tell()
+                            if chunk:
+                                new_lines = [ln.rstrip() for ln in chunk.splitlines() if ln.strip()]
+                                if new_lines:
+                                    with self._lock:
+                                        self.train_job["logs"].extend(new_lines)
+                                        if len(self.train_job["logs"]) > 240:
+                                            self.train_job["logs"] = self.train_job["logs"][-240:]
+                        except Exception:
+                            pass
+                    metrics = train_bridge._read_latest_metrics(run_dir)
+                    if metrics:
+                        with self._lock:
+                            self.train_job["metrics"] = metrics
+                            self.train_job["completed_epochs"] = int(metrics.get("completed_epochs") or 0)
+                    stop_tail.wait(2.0)
+
+            tail_thread = threading.Thread(target=tail_metrics_and_log, daemon=True)
+            tail_thread.start()
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(self.root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=creation,
+                )
+                with self._lock:
+                    self._train_proc = proc
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    text = line.rstrip()
+                    if not text:
+                        continue
+                    with self._lock:
+                        self.train_job["logs"].append(text)
+                        if len(self.train_job["logs"]) > 240:
+                            self.train_job["logs"] = self.train_job["logs"][-240:]
+                    self.bus.publish({"source": "gui", "step": "train", "status": "running", "message": text})
+                rc = proc.wait()
+                stop_tail.set()
+                tail_thread.join(timeout=1.5)
+                metrics = train_bridge._read_latest_metrics(run_dir)
+                with self._lock:
+                    was_stopped = self.train_job.get("status") == "stopped"
+                    self._train_proc = None
+                    self.train_job["running"] = False
+                    self.train_job["returncode"] = rc
+                    if metrics:
+                        self.train_job["metrics"] = metrics
+                        self.train_job["completed_epochs"] = int(metrics.get("completed_epochs") or 0)
+                    if not was_stopped:
+                        self.train_job["status"] = "done" if rc == 0 else "error"
+                msg = (
+                    f"{meta['name']} 训练已手动停止"
+                    if was_stopped
+                    else (f"{meta['name']} 训练完成！可在下方候补列表中点击「启用此权重」" if rc == 0 else f"{meta['name']} 训练退出异常（代码 {rc}），请查看日志")
+                )
+                self.bus.publish({"source": "gui", "step": "train", "status": "done" if rc == 0 else "error", "message": msg})
+            except Exception as exc:
+                stop_tail.set()
+                with self._lock:
+                    self._train_proc = None
+                    self.train_job["running"] = False
+                    self.train_job["status"] = "error"
+                    self.train_job["logs"].append(f"异常：{exc}")
+                self.bus.publish({"source": "gui", "step": "train", "status": "error", "message": f"启动训练失败：{exc}"})
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True, "run": run_name, "task": task}
+
+    def stop_training(self) -> dict:
+        with self._lock:
+            proc = self._train_proc
+            run_name = self.train_job.get("run") or ""
+            if not self.train_job.get("running"):
+                return {"ok": True, "message": "当前没有正在运行的训练任务"}
+            self.train_job["status"] = "stopped"
+            self.train_job["logs"].append(f"[{core.now_str()}] 收到停止指令，正在中止训练进程...")
+
+        # 先尝试温和停止子训练进程（launch.json 记录的 train_pid）
+        if run_name:
+            launch = core.read_json(self.root / "train" / run_name / "launch.json", {}) or {}
+            child_pid = launch.get("train_pid")
+            if child_pid:
+                try:
+                    if os.name == "nt":
+                        subprocess.run(["taskkill", "/PID", str(child_pid), "/T", "/F"], capture_output=True, timeout=5)
+                    else:
+                        os.kill(int(child_pid), 15)
+                except Exception:
+                    pass
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self.bus.publish({"source": "gui", "step": "train", "status": "stopped", "message": f"已停止训练任务：{run_name}"})
+        return {"ok": True, "message": f"已停止训练：{run_name}"}
+
     def shutdown_all(self) -> None:
+        if self.train_job.get("running"):
+            try:
+                self.stop_training()
+            except Exception:
+                pass
         with self._lock:
             ids = list(self.procs.keys())
         for tid in ids:
@@ -350,6 +574,19 @@ def make_handler(state: WorkbenchState):
                     return
                 rep = state.run_check()
                 self._send_json(200, rep)
+                return
+
+            if path == "/api/train/overview":
+                if not self._require_host():
+                    return
+                try:
+                    data = train_bridge.get_training_overview(state.root, state.batches_root)
+                    svcs = state.service_snapshot()
+                    data["train_job"] = state.train_job_snapshot()
+                    data["monitor_running"] = bool(svcs.get("monitor", {}).get("running"))
+                    self._send_json(200, data)
+                except Exception as exc:
+                    self._send_json(500, {"ok": False, "error": str(exc)})
                 return
 
             if path == "/api/overview":
@@ -580,6 +817,63 @@ def make_handler(state: WorkbenchState):
             if path == "/api/service/stop":
                 res = state.stop_service(str(body.get("task_id") or ""))
                 self._send_json(200, res)
+                return
+
+            if path == "/api/train/sync-batch":
+                try:
+                    res = train_bridge.sync_batch_to_training_data(
+                        root=state.root,
+                        batches_root=state.batches_root,
+                        batch_id=body.get("batch_id"),
+                    )
+                    state.bus.publish({"source": "gui", "step": "train", "status": "done", "message": res["message"]})
+                    self._send_json(200, res)
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            if path == "/api/train/start":
+                res = state.start_training(body)
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/train/stop":
+                res = state.stop_training()
+                self._send_json(200, res)
+                return
+
+            if path == "/api/train/deploy":
+                try:
+                    res = train_bridge.deploy_run(
+                        task=str(body.get("task") or "").strip(),
+                        run_name=str(body.get("run") or "").strip(),
+                        root=state.root,
+                    )
+                    state.bus.publish({"source": "gui", "step": "train", "status": "done", "message": res["message"]})
+                    self._send_json(200, res)
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            if path == "/api/train/rollback":
+                try:
+                    res = train_bridge.rollback_model(
+                        task=str(body.get("task") or "").strip(),
+                        root=state.root,
+                    )
+                    state.bus.publish({"source": "gui", "step": "train", "status": "done", "message": res["message"]})
+                    self._send_json(200, res)
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            if path == "/api/train/monitor":
+                try:
+                    run_name = str(body.get("run") or state.train_job.get("run") or "").strip()
+                    res = state.start_service("monitor", extra={"run": run_name})
+                    self._send_json(200, {**res, "run": run_name})
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
                 return
 
             self._send_json(404, {"ok": False, "error": "Not found"})
