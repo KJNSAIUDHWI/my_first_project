@@ -153,6 +153,7 @@
       </div>
     </div>
     <div class="row">
+      <button id="btnOpenVlm" class="btn sm hidden" type="button" title="配置豆包、小米 MiMo、DeepSeek 或自定义中转站">⚙ 大模型 API</button>
       <button id="btnOpenGuide" class="btn sm" type="button" title="30 秒看懂每个界面对应试卷的哪一部分">? 新手引导</button>
       <span id="rolePill" class="role-pill host" title="本机打开为主机，可导入试卷与管理服务；局域网其他电脑打开为协作者，只负责帮忙审阅"><i class="dot"></i><span>主机模式</span></span>
       <div class="user-box">
@@ -166,15 +167,15 @@
   <nav id="hostStepper" class="stepper hidden">
     <button class="step-tab" data-view="check" id="tabCheck" type="button">
       <span class="step-num">1</span>
-      <div><div class="step-title">环境自检</div><div class="step-desc" id="tabCheckDesc">检查 Python 与模型权重</div></div>
+      <div><div class="step-title">运行环境</div><div class="step-desc" id="tabCheckDesc">检查运行环境与识别模型</div></div>
     </button>
     <button class="step-tab" data-view="ingest" id="tabIngest" type="button">
       <span class="step-num">2</span>
-      <div><div class="step-title">录入新数据</div><div class="step-desc" id="tabIngestDesc">统一命名入库与自动识别</div></div>
+      <div><div class="step-title">导入试卷</div><div class="step-desc" id="tabIngestDesc">导入照片并自动识别</div></div>
     </button>
     <button class="step-tab" data-view="overview" id="tabOverview" type="button">
       <span class="step-num">3</span>
-      <div><div class="step-title">控制总览 &amp; 协作</div><div class="step-desc" id="tabOverviewDesc">看进度、拉家人一起审</div></div>
+      <div><div class="step-title">审阅与协作</div><div class="step-desc" id="tabOverviewDesc">看进度、拉家人一起审</div></div>
     </button>
   </nav>
 
@@ -195,7 +196,7 @@
       <strong style="color:var(--warn)">发现缺失项，选一种方式修复：</strong>
       <button class="btn primary sm hidden" id="btnRepairPip" type="button">① 自动测速并安装缺失依赖</button>
       <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">① 输入密码解压加密权重</button>
-      <button class="btn sm hidden" id="btnSetArkKey" type="button">填写豆包 API Key</button>
+      <button class="btn sm hidden" id="btnSetArkKey" type="button">配置大模型 API（豆包 / MiMo / DeepSeek / 中转站）</button>
       <button class="btn sm" id="btnAskAgent" type="button">② 复制诊断信息并唤起 AI 助手 (opencode)</button>
     </div>
 
@@ -265,7 +266,7 @@
       <div class="between">
         <div>
           <h2 id="activeBatchTitle">当前批次：尚未导入</h2>
-          <div class="muted" id="activeBatchMeta">请主机先在「录入新数据」中导入一批试卷</div>
+          <div class="muted" id="activeBatchMeta">请先在「导入试卷」中导入一批试卷</div>
         </div>
         <div class="row" id="hostBatchActions">
           <select id="batchSelect" class="input" style="width:auto;min-width:190px;padding:7px 10px"></select>
@@ -281,14 +282,14 @@
       <div class="card">
         <div class="between" style="margin-bottom:12px">
           <div>
-            <h2>当前审核任务 <span class="help-pill" title="平时只需点这两个入口：人工复审用于整页核对与单张改框，涂黑审核用于刷选择题填涂">?</span></h2>
-            <div class="muted">点「进去审」自动拉起对应审核页并带入你的称呼；看到错卷可在页内直接点「修改标框」</div>
+            <h2>当前审核任务 <span class="help-pill" title="平时主要点「人工复审」逐页核对答案；需要集中检查选择题涂卡时点右边">?</span></h2>
+            <div class="muted">点「进去审」直接开始核对，会自动记住你的称呼</div>
           </div>
           <button class="btn sm" id="btnRefreshOverview" type="button">刷新进度</button>
         </div>
         <div id="taskGrid" class="task-grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))"></div>
         <details id="secondaryWrap" class="hidden" style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)">
-          <summary class="muted" style="cursor:pointer;font-size:12.5px">高级维护：批量三合一标框入口（平时改单张请从「人工复审」点进具体试卷，无需点这里）</summary>
+          <summary class="muted" style="cursor:pointer;font-size:12.5px">更多工具：批量标框（平时改单张直接在「人工复审」里按 E 调框即可）</summary>
           <div id="secondaryTaskGrid" class="task-grid" style="margin-top:10px"></div>
         </details>
       </div>
@@ -360,16 +361,16 @@
 
     <div>
       <div class="guide-item active" data-zone="review">
-        <strong>① 人工复审（整页核对）— 日常主入口</strong>
-        <span>先看整批试卷缩略图（<b>按住 Ctrl + 滚轮</b>可放大缩小），点进具体试卷核对 AI 识别的答案。如果发现某题没看清，页内可勾选「显示置信度」看具体分数。</span>
+        <strong>① 人工复审（看答案 + 原地调框）— 日常主入口</strong>
+        <span>点击直接进入第一张待审原卷：原卷手写区<b>0% 遮挡</b>，识别出的答案以右侧水平齐平批注卡一一对应，点卡片或点题框就能原地改字；遇到低置信度项按 <b>L</b>（或点「⚠ 低置」）逐个跳转核对；多人局域网协作时左侧列表每 3 秒实时同步谁在审哪张。</span>
       </div>
       <div class="guide-item" data-zone="box">
-        <strong>② 单张标框修改 — 藏在具体试卷里的子功能</strong>
-        <span>不用单独找入口！在「人工复审」里点进某张试卷，如果发现框画歪了或漏框了，直接点顶部<b>「✎ 修改这张卷的标框」</b>，平滑弹出改完就能返回。</span>
+        <strong>② 原地调框 — 在审阅页按 E 一秒切换</strong>
+        <span>发现框画歪了或漏框了，直接在审阅页按 <b>E</b>（或点顶栏「✎ 调框」）就地调整：拖四边/四角缩放、空白拖画新框、<b>右键短按单击</b>删框、<b>中键/右键拖动</b>平移画布，按 <b>D</b> 保存修改并自动跳到下一张待审试卷。</span>
       </div>
       <div class="guide-item" data-zone="choice">
-        <strong>③ 涂黑答案审核 — 专刷选择题涂黑</strong>
-        <span>把全批选择题的填涂条按 A/B/C/D 分组平铺，鼠标划过去就确认，发现填涂识别错的直接点图改。</span>
+        <strong>③ 选择题涂卡审核 — 批量查涂卡</strong>
+        <span>把全批选择题的填涂条按 A/B/C/D 分组平铺，鼠标划过即确认，发现填涂识别错的直接点图修改。</span>
       </div>
       <div class="row" style="margin-top:12px">
         <button class="btn primary sm" id="btnStartTour" type="button">▶ 开始一步步手把手引导</button>
@@ -402,6 +403,43 @@
   <input id="nameInput" class="input" placeholder="输入你的称呼" maxlength="20">
   <div class="row" style="justify-content:flex-end;margin-top:16px">
     <button class="btn primary" id="btnSaveName" type="button">确定</button>
+  </div>
+</dialog>
+
+<!-- 多运营商 / 自定义中转站 大模型 API 设置弹窗 -->
+<dialog id="vlmDialog" style="width:min(520px,92vw);border-radius:16px;padding:22px">
+  <div class="between" style="margin-bottom:8px">
+    <h3 style="margin:0;font-size:17px">大模型视觉识别 API 配置</h3>
+    <button class="btn sm" id="btnCloseVlm" type="button">关闭</button>
+  </div>
+  <p class="muted" style="margin:0 0 14px;font-size:13px">支持豆包、小米 MiMo、DeepSeek、通义千问、智谱 GLM 及任意 OpenAI 兼容中转站。选常见运营商会自动填入官方网址。</p>
+
+  <div class="field" style="margin-bottom:12px">
+    <label style="display:block;font-weight:600;margin-bottom:4px">1. 运营商 / 接口类型</label>
+    <select id="vlmProvider" class="input"></select>
+    <div id="vlmNote" class="muted" style="font-size:12px;margin-top:4px"></div>
+  </div>
+
+  <div class="field" style="margin-bottom:12px">
+    <label style="display:block;font-weight:600;margin-bottom:4px">2. 站点地址（Base URL）</label>
+    <input id="vlmBaseUrl" class="input" placeholder="例如 https://api.xiaomimimo.com/v1 或中转站域名">
+  </div>
+
+  <div class="field" style="margin-bottom:12px">
+    <label style="display:block;font-weight:600;margin-bottom:4px">3. 模型名称（Model ID）</label>
+    <input id="vlmModel" class="input" placeholder="例如 doubao-seed-2-1-lite-260915 / mimo-v2.6-flash">
+  </div>
+
+  <div class="field" style="margin-bottom:12px">
+    <label style="display:block;font-weight:600;margin-bottom:4px">4. API Key <span id="vlmKeyHint" class="muted" style="font-weight:400;font-size:12px"></span></label>
+    <input id="vlmApiKey" type="password" class="input" placeholder="粘贴新的 API Key（留空则保留当前已保存的 Key）">
+  </div>
+
+  <div id="vlmStatus" style="font-size:13px;min-height:20px;margin-bottom:12px"></div>
+
+  <div class="row" style="justify-content:flex-end;gap:8px">
+    <button class="btn" id="btnTestVlm" type="button">测试连通性</button>
+    <button class="btn primary" id="btnSaveVlm" type="button">保存配置</button>
   </div>
 </dialog>
 
@@ -484,9 +522,9 @@ function renderCheck(rep) {
   const tab = $('tabCheck');
   tab.classList.toggle('ok', rep.ok);
   tab.classList.toggle('err', !rep.ok);
-  $('tabCheckDesc').textContent = rep.ok ? `全部通过 (${rep.elapsed_ms}ms)` : `${rep.error_count} 项需要修复`;
+  $('tabCheckDesc').textContent = rep.ok ? '全部就绪' : `${rep.error_count} 项需要修复`;
   $('checkSummary').textContent = rep.ok
-    ? `全部必需环境与模型权重均已就绪（耗时 ${rep.elapsed_ms}ms）。`
+    ? '各项运行环境与识别模型均已就绪。'
     : `发现 ${rep.error_count} 项缺失或异常，请使用下方一键修复或交给 AI 助手处理。`;
   $('btnToIngest').classList.toggle('hidden', !rep.ok);
 
@@ -541,6 +579,7 @@ function renderOverview(data) {
   $('hostStepper').classList.toggle('hidden', !isHost);
   $('inviteBar').classList.toggle('hidden', !isHost);
   $('hostBatchActions').classList.toggle('hidden', !isHost);
+  $('btnOpenVlm').classList.toggle('hidden', !isHost);
   $('lanUrlText').textContent = data.lan_url;
 
   if (isHost && data.config?.opencode_path) {
@@ -551,10 +590,10 @@ function renderOverview(data) {
   const ab = data.active_batch;
   if (ab) {
     $('activeBatchTitle').textContent = `当前批次：${ab.batch_id}（${ab.subject} · 共 ${ab.total_images} 张）`;
-    $('activeBatchMeta').textContent = `入库时间 ${ab.created_at} · ${ab.has_recognition ? '已完成自动识别，可进入识别验收' : '尚未运行自动识别'}`;
+    $('activeBatchMeta').textContent = `导入时间 ${ab.created_at} · ${ab.has_recognition ? '已识别完成，可以开始人工核对' : '尚未开始自动识别'}`;
   } else {
-    $('activeBatchTitle').textContent = '当前批次：尚未导入新试卷';
-    $('activeBatchMeta').textContent = isHost ? '点击右上角「+ 导入新一批」或切到「录入新数据」开始' : '等待主机导入新试卷，也可以直接参与下方已有的审核任务';
+    $('activeBatchTitle').textContent = '当前批次：尚未导入试卷';
+    $('activeBatchMeta').textContent = isHost ? '点击右上角「+ 导入新一批」或切到「导入试卷」开始' : '等待主机导入新试卷，也可以直接参与下方已有的审核任务';
   }
 
   // 批次切换下拉框
@@ -655,15 +694,28 @@ function renderOverview(data) {
 
 async function openTask(taskId, hostForLinks) {
   showBanner('gui', '正在准备审核页面，请稍候...', 6000);
+  // 在用户点击的同步调用栈里先占位开窗，防止平板/手机/浏览器拦截异步后的 window.open
+  const pendingWin = window.open('about:blank', '_blank');
+  if (pendingWin && pendingWin.document) {
+    try {
+      pendingWin.document.title = '正在打开审核页...';
+      pendingWin.document.body.innerHTML = '<div style="font-family:sans-serif;padding:40px;color:#475569;text-align:center;">正在准备审核页面，请稍候...</div>';
+    } catch (_) {}
+  }
   try {
     const res = await api('/api/service/ensure', { method: 'POST', body: JSON.stringify({ task_id: taskId }) });
     const who = getUserName();
     const qs = who ? ('?reviewer=' + encodeURIComponent(who)) : '';
     const url = `http://${hostForLinks}:${res.port}/${qs}`;
     pingPresence(taskId);
-    window.open(url, '_blank');
+    if (pendingWin && !pendingWin.closed) {
+      pendingWin.location.href = url;
+    } else {
+      window.location.href = url;
+    }
     await refreshOverview();
   } catch (err) {
+    if (pendingWin && !pendingWin.closed) pendingWin.close();
     alert(err.message);
   }
 }
@@ -769,15 +821,7 @@ $('btnAskAgent').onclick = async () => {
   } catch (err) { alert(err.message); }
 };
 
-$('btnSetArkKey').onclick = async () => {
-  const val = prompt('请粘贴豆包 API Key（将自动保存到本地 .env，不会上传）：', '');
-  if (!val || !val.trim()) return;
-  try {
-    const res = await api('/api/repair/env', { method: 'POST', body: JSON.stringify({ key: 'ARK_API_KEY', value: val.trim() }) });
-    showBanner('gui', res.message || 'API Key 已保存');
-    renderCheck(await api('/api/check'));
-  } catch (err) { alert(err.message); }
-};
+$('btnSetArkKey').onclick = () => openVlmDialog();
 
 $('btnSaveOpencode').onclick = async () => {
   await api('/api/config', { method: 'POST', body: JSON.stringify({ opencode_path: $('inputOpencode').value.trim() }) });
@@ -862,10 +906,10 @@ let TOUR_IDX = 0;
 function buildTourSteps() {
   if (OVERVIEW?.is_host) {
     return [
-      { view: 'overview', el: 'tabIngest', title: '第 1 步：录入新试卷（仅主机）', desc: '有新扫描的试卷时点这里：选文件夹 + 选学科，自动去重并统一按日期学科编号，绝不改动原图。' },
-      { view: 'overview', el: 'inviteBar', title: '第 2 步：拉家里人一起审', desc: '把这里的局域网网址发给另一台电脑或平板，浏览器打开就能连进来帮忙审，不用装任何软件。' },
-      { view: 'overview', el: 'task_review', title: '第 3 步：人工复审（整页核对）', desc: '平时改卷主要点这里！整批看图支持按住 Ctrl+滚轮缩放；点进具体试卷发现框歪了，可以直接点「修改这张卷的标框」。' },
-      { view: 'overview', el: 'task_choice', title: '第 4 步：涂黑答案审核', desc: '需要专门刷选择题填涂时点这里，鼠标划过即确认，点错图直接改。' },
+      { view: 'overview', el: 'tabIngest', title: '第 1 步：导入新试卷', desc: '有新扫描的试卷时点这里：选文件夹和学科，自动整理编号并识别，不会改动原图。' },
+      { view: 'overview', el: 'inviteBar', title: '第 2 步：拉家里人一起审', desc: '把这里的网址发给另一台电脑或平板，浏览器打开就能连进来帮忙审，不用装任何软件。' },
+      { view: 'overview', el: 'task_review', title: '第 3 步：人工复审（核对答案 + 调框）', desc: '平时改卷主要点这里：看原卷核对答案，点错字直接改，按 E 调框，按 D 保存并看下一张。' },
+      { view: 'overview', el: 'task_choice', title: '第 4 步：选择题涂卡审核', desc: '需要集中检查选择题填涂时点这里，鼠标划过即确认，发现认错的点一下就能改。' },
     ];
   }
   return [
@@ -912,6 +956,94 @@ $('btnStartTour').onclick = () => {
 };
 $('tourNext').onclick = () => showTourStep(TOUR_IDX + 1);
 $('tourSkip').onclick = endTour;
+
+// 多运营商 / 中转站 API 配置弹窗
+let VLM_PRESETS_MAP = {};
+async function openVlmDialog() {
+  $('vlmStatus').textContent = '';
+  $('vlmApiKey').value = '';
+  try {
+    const cfg = await api('/api/vlm/config');
+    VLM_PRESETS_MAP = {};
+    const sel = $('vlmProvider');
+    sel.innerHTML = (cfg.presets || []).map(p => {
+      VLM_PRESETS_MAP[p.id] = p;
+      return `<option value="${esc(p.id)}">${esc(p.label)}</option>`;
+    }).join('');
+    sel.value = cfg.provider || 'doubao';
+    $('vlmBaseUrl').value = cfg.base_url || '';
+    $('vlmModel').value = cfg.model || '';
+    $('vlmNote').textContent = (VLM_PRESETS_MAP[sel.value] && VLM_PRESETS_MAP[sel.value].note) || '';
+    $('vlmKeyHint').textContent = cfg.has_key ? `（当前已存：${cfg.api_key_masked}）` : '（尚未配置）';
+    $('vlmDialog').showModal();
+  } catch (err) {
+    alert('读取 API 配置失败：' + err.message);
+  }
+}
+$('btnOpenVlm').onclick = openVlmDialog;
+$('btnCloseVlm').onclick = () => $('vlmDialog').close();
+$('vlmProvider').onchange = () => {
+  const p = VLM_PRESETS_MAP[$('vlmProvider').value] || {};
+  $('vlmNote').textContent = p.note || '';
+  if (p.id !== 'custom') {
+    $('vlmBaseUrl').value = p.base_url || '';
+    $('vlmModel').value = p.model || '';
+  } else {
+    if (!$('vlmBaseUrl').value || Object.values(VLM_PRESETS_MAP).some(x => x.id !== 'custom' && x.base_url === $('vlmBaseUrl').value)) {
+      $('vlmBaseUrl').value = '';
+    }
+  }
+};
+$('btnTestVlm').onclick = async () => {
+  $('btnTestVlm').disabled = true;
+  $('vlmStatus').style.color = 'var(--muted)';
+  $('vlmStatus').textContent = '正在测试连通性...';
+  try {
+    const res = await api('/api/vlm/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: $('vlmProvider').value,
+        base_url: $('vlmBaseUrl').value.trim(),
+        model: $('vlmModel').value.trim(),
+        api_key: $('vlmApiKey').value.trim(),
+      }),
+    });
+    $('vlmStatus').style.color = 'var(--ok)';
+    $('vlmStatus').textContent = `✓ 连通成功！（耗时 ${res.latency_ms} ms，返回模型：${res.returned_model || ''}）`;
+  } catch (err) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ 连接失败：' + err.message;
+  } finally {
+    $('btnTestVlm').disabled = false;
+  }
+};
+$('btnSaveVlm').onclick = async () => {
+  $('btnSaveVlm').disabled = true;
+  $('vlmStatus').textContent = '';
+  try {
+    const res = await api('/api/vlm/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: $('vlmProvider').value,
+        base_url: $('vlmBaseUrl').value.trim(),
+        model: $('vlmModel').value.trim(),
+        api_key: $('vlmApiKey').value.trim(),
+      }),
+    });
+    $('vlmStatus').style.color = 'var(--ok)';
+    $('vlmStatus').textContent = '✓ ' + (res.message || '保存成功');
+    if (res.config) {
+      $('vlmKeyHint').textContent = res.config.has_key ? `（当前已存：${res.config.api_key_masked}）` : '（尚未配置）';
+    }
+    $('vlmApiKey').value = '';
+    if (CHECK) renderCheck(await api('/api/check'));
+  } catch (err) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ 保存失败：' + err.message;
+  } finally {
+    $('btnSaveVlm').disabled = false;
+  }
+};
 
 // 初始化
 refreshOverview().then(() => {

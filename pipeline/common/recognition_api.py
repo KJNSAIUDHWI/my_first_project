@@ -15,6 +15,182 @@ from PIL import Image, ImageDraw, ImageFont
 
 MODEL = 'doubao-seed-2-1-lite-260915'
 ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+
+VLM_PRESETS = {
+    'doubao': {
+        'id': 'doubao',
+        'label': '豆包（火山方舟）',
+        'base_url': 'https://ark.cn-beijing.volces.com/api/v3',
+        'model': 'doubao-seed-2-1-lite-260915',
+        'note': '默认推荐，兼容旧版 ARK_API_KEY。',
+    },
+    'mimo': {
+        'id': 'mimo',
+        'label': '小米 MiMo（按量付费）',
+        'base_url': 'https://api.xiaomimimo.com/v1',
+        'model': 'mimo-v2.6-flash',
+        'note': '支持全模态看图，也可改为 mimo-v2.6-pro。',
+    },
+    'mimo_token': {
+        'id': 'mimo_token',
+        'label': '小米 MiMo（Token Plan 订阅）',
+        'base_url': 'https://token-plan-cn.xiaomimimo.com/v1',
+        'model': 'mimo-v2.6-flash',
+        'note': '使用 tp- / ttp- 开头的订阅版 Key。',
+    },
+    'deepseek': {
+        'id': 'deepseek',
+        'label': 'DeepSeek 官方',
+        'base_url': 'https://api.deepseek.com/v1',
+        'model': 'deepseek-chat',
+        'note': '提示：需确认所选模型支持图片输入；若官方纯文本模型不支持看图，请选「自定义中转站」配合视觉模型。',
+    },
+    'qwen': {
+        'id': 'qwen',
+        'label': '通义千问（阿里云百炼）',
+        'base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'model': 'qwen-vl-max',
+        'note': '百炼 OpenAI 兼容接口，可选 qwen-vl-plus / qwen-vl-max。',
+    },
+    'zhipu': {
+        'id': 'zhipu',
+        'label': '智谱 GLM',
+        'base_url': 'https://open.bigmodel.cn/api/paas/v4',
+        'model': 'glm-4v-flash',
+        'note': '智谱开放平台视觉接口，可选 glm-4v-flash / glm-4v-plus。',
+    },
+    'custom': {
+        'id': 'custom',
+        'label': '自定义中转站（OpenAI 兼容）',
+        'base_url': '',
+        'model': '',
+        'note': '填写中转站站点网址（如 https://api.xxx.com）、API Key 与支持看图的模型名称。',
+    },
+}
+
+
+def normalize_chat_endpoint(base_url: str) -> str:
+    """将用户填写的站点地址规范化为 /chat/completions 完整接口地址。"""
+    url = (base_url or '').strip().rstrip('/')
+    if not url:
+        return ''
+    if url.endswith('/chat/completions'):
+        return url
+    if re.search(r'/v\d+(?:alpha|beta)?$', url) or url.endswith('/compatible-mode/v1'):
+        return url + '/chat/completions'
+    return url + '/v1/chat/completions'
+
+
+def _read_dotenv_map(root=None) -> dict:
+    base = Path(root) if root else Path(__file__).resolve().parents[2]
+    env_file = base / '.env'
+    out = {}
+    if not env_file.is_file():
+        return out
+    for line in env_file.read_text(encoding='utf-8-sig', errors='ignore').splitlines():
+        s = line.strip()
+        if not s or s.startswith('#') or '=' not in s:
+            continue
+        k, v = s.split('=', 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def load_vlm_config(root=None) -> dict:
+    """读取当前视觉大模型配置（优先环境变量，其次 .env，兼容旧 ARK_API_KEY）。"""
+    dotenv = _read_dotenv_map(root)
+
+    def get_val(name: str) -> str:
+        return (os.environ.get(name) or dotenv.get(name) or '').strip()
+
+    provider = get_val('VLM_PROVIDER') or 'doubao'
+    if provider not in VLM_PRESETS:
+        provider = 'custom'
+    preset = VLM_PRESETS[provider]
+    base_url = get_val('VLM_BASE_URL') or preset['base_url']
+    model = get_val('VLM_MODEL') or preset['model'] or MODEL
+    api_key = get_val('VLM_API_KEY') or get_val('ARK_API_KEY')
+    endpoint = normalize_chat_endpoint(base_url) or ENDPOINT
+    return {
+        'provider': provider,
+        'provider_label': preset['label'],
+        'base_url': base_url,
+        'endpoint': endpoint,
+        'model': model,
+        'api_key': api_key,
+    }
+
+
+def test_vlm_connection(provider: str = 'doubao', base_url: str = '', api_key: str = '', model: str = '', timeout: float = 15.0) -> dict:
+    """发送极简 OpenAI 兼容请求验证 API 站点、Key 和模型名是否可用。"""
+    preset = VLM_PRESETS.get(provider) or VLM_PRESETS['custom']
+    eff_base = (base_url or '').strip() or preset['base_url']
+    eff_model = (model or '').strip() or preset['model']
+    eff_key = (api_key or '').strip()
+    if not eff_base:
+        return {'ok': False, 'error': '请先填写站点地址（Base URL）'}
+    if not eff_key:
+        return {'ok': False, 'error': '请先填写 API Key'}
+    if not eff_model:
+        return {'ok': False, 'error': '请先填写模型名称'}
+    endpoint = normalize_chat_endpoint(eff_base)
+    payload = {
+        'model': eff_model,
+        'stream': False,
+        'max_tokens': 12,
+        'messages': [{'role': 'user', 'content': '请只回复 OK'}],
+    }
+    if provider == 'doubao' or 'volces.com' in endpoint:
+        payload['thinking'] = {'type': 'disabled'}
+    body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(
+        endpoint,
+        body,
+        {
+            'Authorization': 'Bearer ' + eff_key,
+            'Content-Type': 'application/json',
+            'User-Agent': 'AutoGradeWorkbench/2.0',
+        },
+    )
+    t0 = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='replace'))
+        ms = round((time.perf_counter() - t0) * 1000, 1)
+        reply_text = ''
+        try:
+            reply_text = str(data['choices'][0]['message'].get('content', '')).strip()[:60]
+        except Exception:
+            pass
+        return {
+            'ok': True,
+            'latency_ms': ms,
+            'endpoint': endpoint,
+            'returned_model': data.get('model') or eff_model,
+            'reply': reply_text,
+        }
+    except urllib.error.HTTPError as exc:
+        ms = round((time.perf_counter() - t0) * 1000, 1)
+        err_body = ''
+        try:
+            err_body = exc.read().decode('utf-8', errors='replace')[:300]
+        except Exception:
+            pass
+        return {
+            'ok': False,
+            'latency_ms': ms,
+            'endpoint': endpoint,
+            'status': exc.code,
+            'error': f'HTTP {exc.code}: {err_body or exc.reason}',
+        }
+    except Exception as exc:
+        ms = round((time.perf_counter() - t0) * 1000, 1)
+        return {
+            'ok': False,
+            'latency_ms': ms,
+            'endpoint': endpoint,
+            'error': str(exc),
+        }
 PROMPT = r'''你是答题卡忠实转录工具，不解题、不纠错、不评分。图片包含多个独立图块，每块上方的黑色标题为ID编号；白色间隔和标题不是试题。必须逐块处理，不得把不同图块的题号或答案合并。
 只返回一个合法JSON对象，结构为 {"图块ID":{"kind":"fill","question_number":"卷面大题号","answers":{"小题号":{"空序号":"最终手写答案"}}}}。姓名学号图块改为 {"kind":"identity","name":"姓名","sid":"学号"}。
 最高优先级的用户规则：只要某个填空/实验探究小题里出现任何图片、示意图、曲线图、坐标图或其他图形，整个小题一律舍弃，不读其中任何答案，即使它要求的是文字填空而不是作图。保留该小题号，固定输出 {"舍弃":"舍弃"}，这不是第1空，不表示空位数量。例如 {"2":{"舍弃":"舍弃"}}；同一道大题的其他无图小题继续按原规则识别。没有小题号的题出现图片，按"无小题号":{"舍弃":"舍弃"}输出。不要仅因为图片属于别的图块就舍弃本图块。不能遗漏被舍弃题目的题号，也不能把舍弃当作空白或看不清。
@@ -200,15 +376,17 @@ class SquarePacker:
 
 
 class DoubaoClient:
-    def __init__(self, out, key=None, transport=None):
+    """通用 OpenAI 兼容视觉识别客户端（默认豆包，兼容小米 MiMo / DeepSeek / 通义 / 智谱 / 自定义中转站）。"""
+
+    def __init__(self, out, key=None, transport=None, provider=None, base_url=None, model=None):
         self.out = Path(out)
-        self.key = key or os.environ.get('ARK_API_KEY', '')
-        if not self.key:
-            local = Path(__file__).resolve().parents[2]/'.env'
-            if local.is_file():
-                for line in local.read_text(encoding='utf-8-sig').splitlines():
-                    if line.strip().startswith('ARK_API_KEY='):
-                        self.key = line.strip().split('=', 1)[1].strip().strip('\"\x27')
+        cfg = load_vlm_config()
+        self.provider = (provider or cfg['provider'] or 'doubao').strip()
+        self.base_url = (base_url or cfg['base_url'] or '').strip()
+        self.endpoint = normalize_chat_endpoint(self.base_url) or cfg['endpoint'] or ENDPOINT
+        self.model = (model or cfg['model'] or MODEL).strip()
+        self.key = (key or cfg['api_key'] or '').strip()
+        self.is_doubao = self.provider == 'doubao' or 'volces.com' in self.endpoint
         self.transport = transport
         self.stop = threading.Event()
         self.stop_reason = '凭据或权限失败，已停止后续请求'
@@ -218,15 +396,29 @@ class DoubaoClient:
     def call(self, grid, refresh=False):
         content = PROMPT + '\n本次图块清单（只标明来源，不含参考答案）：\n' + json.dumps(
             [{'id': i['id'], 'kind': i['kind']} for i in grid['items']], ensure_ascii=False)
-        request = {'model': MODEL, 'thinking': {'type': 'disabled'}, 'stream': False,
-                   'max_completion_tokens': 16384,
-                   'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': content},
-                       {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + base64.b64encode((self.out/grid['image']).read_bytes()).decode(), 'detail': 'high'}}]}]}
-        legacy_fingerprint = digest(json.dumps({'body': request, 'endpoint': ENDPOINT}, sort_keys=True).encode())
+        image_url_obj = {
+            'url': 'data:image/png;base64,' + base64.b64encode((self.out/grid['image']).read_bytes()).decode(),
+        }
+        if self.is_doubao:
+            image_url_obj['detail'] = 'high'
+        request = {
+            'model': self.model,
+            'stream': False,
+            'messages': [{'role': 'user', 'content': [
+                {'type': 'text', 'text': content},
+                {'type': 'image_url', 'image_url': image_url_obj},
+            ]}],
+        }
+        if self.is_doubao:
+            request['thinking'] = {'type': 'disabled'}
+            request['max_completion_tokens'] = 16384
+        else:
+            request['max_tokens'] = 8192
+        legacy_fingerprint = digest(json.dumps({'body': request, 'endpoint': self.endpoint}, sort_keys=True).encode())
         request['response_format'] = {'type': 'json_object'}
         request['messages'][0]['content'][0]['text'] += '''\n严格格式示例：{"p000_000":{"kind":"fill","question_number":"20","answers":{"1":{"1":"答案一","2":""},"2":{"1":"看不清"}}}}。
 小题键用数字字符串1、2，不加括号；若存在(1)下面的①②子层级，则分别用1.1、1.2，不得把子层级和普通空混合或输出重复键。每小题多个空统一放在同一个对象中，空序号1、2、3连续。不得新增无小题号来装本应属于某小题的后续空位。回答前检查所有大括号平衡、每块ID独立闭合，空字符串不是空对象。'''
-        fingerprint = digest(json.dumps({'body': request, 'endpoint': ENDPOINT}, sort_keys=True).encode())
+        fingerprint = digest(json.dumps({'body': request, 'endpoint': self.endpoint}, sort_keys=True).encode())
         path = self.out / 'api' / (grid['id'] + '_' + fingerprint[:16] + '.json')
         legacy_path = self.out / 'api' / (grid['id'] + '_' + legacy_fingerprint[:16] + '.json')
         if not refresh:
@@ -238,12 +430,14 @@ class DoubaoClient:
                     parse_record(cached, grid)
                     save_json(cached_path, cached)
                     return {**cached, 'reused': True, 'compatible_legacy_cache': cached_path == legacy_path}
-        record = {'grid': grid['id'], 'fingerprint': fingerprint, 'ok': False, 'model': MODEL,
-                  'detail': 'high', 'thinking': 'disabled', 'attempts': [], 'items': {}, 'errors': {},
+        record = {'grid': grid['id'], 'fingerprint': fingerprint, 'ok': False, 'model': self.model,
+                  'provider': self.provider, 'endpoint': self.endpoint,
+                  'detail': 'high', 'thinking': 'disabled' if self.is_doubao else 'default',
+                  'attempts': [], 'items': {}, 'errors': {},
                   'image_sha256': grid['sha256']}
         start = time.monotonic()
         if not self.key and self.transport is None:
-            record['error'] = '缺少ARK_API_KEY，尚未调用豆包'
+            record['error'] = '缺少大模型 API Key（请在工作台配置 VLM_API_KEY 或 ARK_API_KEY）'
         else:
             for attempt in range(3):
                 if self.stop.is_set():
@@ -257,7 +451,7 @@ class DoubaoClient:
                             raise PermissionError(self.stop_reason)
                         if self.transport:
                             return self.transport(request)
-                        req = urllib.request.Request(ENDPOINT, body, {'Authorization': 'Bearer ' + self.key, 'Content-Type': 'application/json'})
+                        req = urllib.request.Request(self.endpoint, body, {'Authorization': 'Bearer ' + self.key, 'Content-Type': 'application/json'})
                         with urllib.request.urlopen(req, timeout=180) as response:
                             return json.loads(response.read())
                     if self.throttled.is_set():

@@ -35,7 +35,21 @@
   <span id="prog"></span>
   <div id="bar"><div id="barfill"></div></div>
   <span>跳到 <input id="jump" type="number" min="1" placeholder="#"> 张</span>
+  <button id="btnHelp" style="margin-left:auto;background:#3a3a44;color:#e6e6e6;border:1px solid #555;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12.5px;">? 新手教程</button>
 </div>
+<dialog id="helpDlg" style="background:#26262c;color:#e6e6e6;border:1px solid #4a4a56;border-radius:12px;padding:18px 20px;max-width:460px;line-height:1.7;font-size:13px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <b style="font-size:15px;">📘 方向确认 · 新手教程</b>
+    <button onclick="document.getElementById('helpDlg').close()" style="background:#3a3a44;color:#e6e6e6;border:1px solid #555;border-radius:6px;padding:3px 9px;cursor:pointer;">关闭</button>
+  </div>
+  <div>
+    • <b>干嘛用的</b>：快速核对扫描答题卡有没有拍歪/倒置，供方向模型训练使用。<br>
+    • <b>图本来就是正的</b>：直接按 <kbd>空格</kbd> 保存 0° 并跳下一张。<br>
+    • <b>图是歪的或倒的</b>：按 <kbd>R</kbd> 每次顺时针转 90°，转正后再按 <kbd>空格</kbd>。<br>
+    • <b>改错了怎么办</b>：按 <kbd>←</kbd> 退回上一张重新转好再按 <kbd>空格</kbd> 覆盖保存。<br>
+    • <b>废图/模糊看不清</b>：按 <kbd>X</kbd> 标为异常，不会混入训练数据。
+  </div>
+</dialog>
 <div id="stage"><canvas id="cv"></canvas></div>
 <div id="bottom">
   <kbd>R</kbd> 转 90° &nbsp;<kbd>空格</kbd> 确认并下一张 &nbsp;<kbd>←</kbd><kbd>→</kbd> 上/下一张
@@ -153,6 +167,7 @@ $('jump').addEventListener('change', e => {
   e.target.value = '';
 });
 
+$('btnHelp').addEventListener('click', () => $('helpDlg').showModal());
 window.addEventListener('resize', draw);
 init();
 </script>

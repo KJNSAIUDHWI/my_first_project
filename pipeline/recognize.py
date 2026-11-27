@@ -142,7 +142,7 @@ class Recognizer:
                          (b['box'][1]+b['box'][3])/2/local_image.height,
                          (b['box'][2]-b['box'][0])/local_image.width, (b['box'][3]-b['box'][1])/local_image.height] for b in local]
                 if task == 'm2':
-                    rows = read_choice_zone(bgr, norm, self.numbers, self.choices, fix_no=False)
+                    rows = read_choice_zone(bgr, norm, self.numbers, self.choices, fix_no=True)
                     paired_num, paired_opt = set(), set()
                     for row in rows:
                         ob, nb = row['opt_box'], row['num_box']

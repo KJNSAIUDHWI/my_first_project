@@ -339,6 +339,12 @@ def make_handler(state: WorkbenchState):
                 self._send_json(200, {"ok": True, "port": state.port, "ts": core.now_str()})
                 return
 
+            if path == "/api/vlm/config":
+                if not self._require_host():
+                    return
+                self._send_json(200, {"ok": True, **core.get_vlm_settings(state.root)})
+                return
+
             if path == "/api/check":
                 if not self._require_host():
                     return
@@ -485,6 +491,29 @@ def make_handler(state: WorkbenchState):
                 res = core.unpack_weights(pwd, root=state.root)
                 state.bus.publish({"source": "gui", "step": "repair_weights", "status": "done" if res["ok"] else "error", "message": res.get("message") or res.get("error") or ""})
                 self._send_json(200 if res["ok"] else 400, res)
+                return
+
+            if path == "/api/vlm/config":
+                res = core.save_vlm_settings(
+                    provider=str(body.get("provider") or "doubao"),
+                    base_url=str(body.get("base_url") or ""),
+                    api_key=str(body.get("api_key") or ""),
+                    model=str(body.get("model") or ""),
+                    root=state.root,
+                )
+                state.bus.publish({"source": "gui", "step": "check", "status": "done" if res.get("ok") else "error", "message": res.get("message") or res.get("error") or ""})
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/vlm/test":
+                res = core.test_vlm_settings(
+                    provider=str(body.get("provider") or "doubao"),
+                    base_url=str(body.get("base_url") or ""),
+                    api_key=str(body.get("api_key") or ""),
+                    model=str(body.get("model") or ""),
+                    root=state.root,
+                )
+                self._send_json(200 if res.get("ok") else 400, res)
                 return
 
             if path == "/api/repair/env":

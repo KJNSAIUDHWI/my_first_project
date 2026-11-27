@@ -230,15 +230,17 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
             "path": str(wp),
         })
 
-    # 5. API Key (.env ARK_API_KEY) — 仅在跑豆包识别时需要，缺失标为 warning
-    ark_key = _read_env_key(root, "ARK_API_KEY")
+    # 5. 大模型视觉 API 配置（豆包 / 小米 MiMo / DeepSeek / 通义 / 智谱 / 自定义中转站）
+    vlm_cfg = get_vlm_settings(root)
+    has_key = bool(vlm_cfg.get("has_key"))
+    masked = vlm_cfg.get("api_key_masked") or ""
     items.append({
         "id": "ark_key",
         "category": "config",
-        "name": "豆包识别密钥 (ARK_API_KEY)",
-        "ok": bool(ark_key),
-        "severity": "ok" if ark_key else "warn",
-        "detail": f"已配置 ({ark_key[:4]}****{ark_key[-4:]})" if len(ark_key) >= 8 else ("已配置" if ark_key else "未在 .env 中配置 ARK_API_KEY（仅影响大题自动识别）"),
+        "name": f"大模型视觉 API ({vlm_cfg.get('provider_label') or vlm_cfg.get('provider')})",
+        "ok": has_key,
+        "severity": "ok" if has_key else "warn",
+        "detail": f"已配置 {vlm_cfg.get('model')} ({masked})" if has_key else "尚未配置 API Key（点击「大模型 API 设置」配置豆包/MiMo/DeepSeek/中转站）",
     })
 
     # 6. 加密权重分卷与 7z / opencode 探测（辅助信息）
@@ -584,40 +586,120 @@ def get_active_batch(batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict | None:
     return batches[0] if batches else None
 
 
+def _load_vlm_module(root: Path = ROOT):
+    pipe_dir = str(root / "pipeline")
+    if pipe_dir not in sys.path:
+        sys.path.insert(0, pipe_dir)
+    from common import recognition_api as rec_api  # noqa: E402
+    return rec_api
+
+
+def get_vlm_settings(root: Path = ROOT) -> dict:
+    """获取当前大模型视觉 API 配置（对前端脱敏返回 Key）及所有运营商预设。"""
+    rec_api = _load_vlm_module(root)
+    cfg = rec_api.load_vlm_config(root)
+    key = cfg.get("api_key") or ""
+    masked = f"{key[:4]}****{key[-4:]}" if len(key) >= 8 else ("已配置" if key else "")
+    return {
+        "provider": cfg["provider"],
+        "provider_label": cfg["provider_label"],
+        "base_url": cfg["base_url"],
+        "endpoint": cfg["endpoint"],
+        "model": cfg["model"],
+        "has_key": bool(key),
+        "api_key_masked": masked,
+        "presets": list(rec_api.VLM_PRESETS.values()),
+    }
+
+
+def save_vlm_settings(
+    provider: str = "doubao",
+    base_url: str = "",
+    api_key: str = "",
+    model: str = "",
+    root: Path = ROOT,
+) -> dict:
+    """保存多运营商/自定义中转站视觉 API 配置到项目 .env（留空 api_key 则保留原 Key）。"""
+    rec_api = _load_vlm_module(root)
+    prov = (provider or "doubao").strip()
+    if prov not in rec_api.VLM_PRESETS:
+        prov = "custom"
+    preset = rec_api.VLM_PRESETS[prov]
+    eff_base = (base_url or "").strip() or preset["base_url"]
+    eff_model = (model or "").strip() or preset["model"]
+    if not eff_base:
+        return {"ok": False, "error": "请填写站点地址（Base URL）"}
+    if not eff_model:
+        return {"ok": False, "error": "请填写模型名称"}
+
+    save_env_key("VLM_PROVIDER", prov, root=root)
+    save_env_key("VLM_BASE_URL", eff_base, root=root)
+    save_env_key("VLM_MODEL", eff_model, root=root)
+    new_key = (api_key or "").strip()
+    if new_key:
+        save_env_key("VLM_API_KEY", new_key, root=root)
+        if prov == "doubao":
+            save_env_key("ARK_API_KEY", new_key, root=root)
+
+    return {"ok": True, "message": f"已保存 {preset['label']} 配置（模型：{eff_model}）", "config": get_vlm_settings(root)}
+
+
+def test_vlm_settings(
+    provider: str = "doubao",
+    base_url: str = "",
+    api_key: str = "",
+    model: str = "",
+    root: Path = ROOT,
+) -> dict:
+    """测试当前或表单填写的视觉 API 连通性（未传 api_key 时自动使用已保存 Key）。"""
+    rec_api = _load_vlm_module(root)
+    eff_key = (api_key or "").strip()
+    if not eff_key:
+        eff_key = rec_api.load_vlm_config(root).get("api_key", "")
+    return rec_api.test_vlm_connection(
+        provider=provider,
+        base_url=base_url,
+        api_key=eff_key,
+        model=model,
+    )
+
+
 def _count_recognition_progress(rec_dir: Path) -> tuple[dict, Counter]:
-    """统计某次识别结果目录的审阅进度与人员贡献。"""
+    """统计某次识别结果目录的审阅进度（按整页确认计数）与人员贡献。"""
     contributors = Counter()
     results = read_json(rec_dir / "results.json")
     if not isinstance(results, dict):
-        return {"available": False, "total": 0, "done": 0, "remaining": 0, "pages": 0, "done_pages": 0}, contributors
+        return {"available": False, "total": 0, "done": 0, "remaining": 0, "pages": 0, "done_pages": 0, "total_items": 0}, contributors
     pages = results.get("pages") or []
     fb = read_json(rec_dir / "feedback.json", {}) or {}
     fb_items = fb.get("items") or {}
 
     total_items = 0
-    done_items = 0
     done_pages = 0
     for p in pages:
         p_items = p.get("items") or []
         total_items += len(p_items)
-        p_done = 0
-        for it in p_items:
-            rec = fb_items.get(it["id"])
-            if rec and rec.get("label"):
-                done_items += 1
-                p_done += 1
-                who = (rec.get("reviewer") or "未署名").strip()
-                contributors[who] += 1
-        if p_items and p_done == len(p_items):
+        page_rec = fb_items.get(p["id"])
+        if page_rec and page_rec.get("label"):
             done_pages += 1
+            who = (page_rec.get("reviewer") or "未署名").strip()
+            contributors[who] += 1
+        elif p_items and all(bool((fb_items.get(it["id"]) or {}).get("label")) for it in p_items):
+            # 兼容旧版逐题打卡记录
+            done_pages += 1
+            first_rec = fb_items.get(p_items[0]["id"]) or {}
+            who = (first_rec.get("reviewer") or "未署名").strip()
+            contributors[who] += 1
+    total_pages = len(pages)
     return {
         "available": True,
         "dir": str(rec_dir),
-        "total": total_items,
-        "done": done_items,
-        "remaining": max(0, total_items - done_items),
-        "pages": len(pages),
+        "total": total_pages,
+        "done": done_pages,
+        "remaining": max(0, total_pages - done_pages),
+        "pages": total_pages,
         "done_pages": done_pages,
+        "total_items": total_items,
     }, contributors
 
 
@@ -731,46 +813,46 @@ def collect_tasks_and_leaderboard(
         {
             "id": "review",
             "tier": "primary",
-            "name": "人工复审（整页核对）",
-            "desc": "整批看图核对选择题与大题结果；点进具体试卷可直接修改单张标框",
-            "guide": "日常改卷 90% 的时间只点这一个。先在整批缩略图墙扫一遍（按住 Ctrl + 滚轮可放大缩小），点进有问题的试卷，可改答案也可直接进单张标框修改。",
+            "name": "人工复审（核对答案 + 调框）",
+            "desc": "逐张核对识别结果，点错字直接改，按 E 调框，按 D 保存翻下一页",
+            "guide": "",
             "port": 8904,
             "available": rec_stat["available"],
             "total": rec_stat["total"],
             "done": rec_stat["done"],
             "remaining": rec_stat["remaining"],
-            "unit": "题",
-            "extra": f"{rec_stat.get('done_pages', 0)}/{rec_stat.get('pages', 0)} 页" if rec_stat["available"] else "请先在主机导入试卷并跑自动识别",
+            "unit": "页",
+            "extra": f"共 {rec_stat.get('total_items', 0)} 道题" if rec_stat["available"] else "请先导入试卷并完成自动识别",
             "running": bool(services.get("review", {}).get("running")),
         },
         {
             "id": "choice",
             "tier": "primary",
-            "name": "涂黑答案审核",
-            "desc": "整批平铺刷选择题填涂 A-F，划过即确认、点错图直接改",
-            "guide": "专门检查选择题填涂识别。按答案分组整批浏览，鼠标划过即确认正确，发现错的直接点图修改。",
+            "name": "选择题涂卡审核",
+            "desc": "按选项分组批量检查选择题填涂，划过即确认，认错的点一下修改",
+            "guide": "",
             "port": 8905,
             "available": choice_stat["available"],
             "total": choice_stat["total"],
             "done": choice_stat["done"],
             "remaining": choice_stat["remaining"],
             "unit": "条",
-            "extra": "data/choice" if choice_stat["available"] else "暂无涂黑审核库",
+            "extra": "选择题涂卡题库" if choice_stat["available"] else "暂无涂卡审核数据",
             "running": bool(services.get("choice", {}).get("running")),
         },
         {
             "id": "annotate",
             "tier": "secondary",
-            "name": "三合一标框审核 (M1/M2/M3)",
-            "desc": "批量修正版面/选择/大题框（平时作为人工复审单张子功能进入）",
-            "guide": "平时在「人工复审」里点进具体试卷即可修改单张标框；仅在需要批量标框训练时才直接进这里。",
+            "name": "批量标框工具",
+            "desc": "集中批量修改版面、选择题和大题区域框（平时改单张请在「人工复审」里按 E 调框）",
+            "guide": "",
             "port": 8900,
             "available": m_total > 0,
             "total": m_total,
             "done": m_done,
             "remaining": max(0, m_total - m_done),
             "unit": "张",
-            "extra": f"M1 {m_stats['m1']['done']}/{m_stats['m1']['total']} · M2 {m_stats['m2']['done']}/{m_stats['m2']['total']} · M3 {m_stats['m3']['done']}/{m_stats['m3']['total']}",
+            "extra": f"版面 {m_stats['m1']['done']}/{m_stats['m1']['total']} · 选择题 {m_stats['m2']['done']}/{m_stats['m2']['total']} · 大题 {m_stats['m3']['done']}/{m_stats['m3']['total']}",
             "running": bool(services.get("annotate", {}).get("running")),
         },
     ]

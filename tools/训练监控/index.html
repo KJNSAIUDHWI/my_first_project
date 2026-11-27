@@ -144,7 +144,22 @@
     <span id="run"></span>
     <span class="spacer"></span>
     <span class="tag">最近刷新 <span id="updated">—</span> · 每轮指标 <span id="age">—</span></span>
+    <button id="btnMonHelp" type="button" style="background:#172938;color:#d8e6f3;border:1px solid #354a5e;border-radius:8px;padding:5px 10px;font:12px 'Microsoft YaHei';cursor:pointer">? 新手教程</button>
   </div>
+  <dialog id="monHelpDlg" style="background:#111d29;color:#e8edf5;border:1px solid #2b3e52;border-radius:14px;padding:20px 22px;max-width:520px;line-height:1.75;font-size:13px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <b style="font-size:15px;">📘 训练监控 · 指标通俗说明</b>
+      <button type="button" onclick="document.getElementById('monHelpDlg').close()" style="background:#172938;color:#d8e6f3;border:1px solid #354a5e;border-radius:6px;padding:4px 10px;cursor:pointer">关闭</button>
+    </div>
+    <div>
+      • <b>这个页面干嘛用</b>：训练模型时实时盯着进度、准确率和显卡温度，不需要你手动操作。<br>
+      • <b>mAP50 / mAP50-95</b>：越高越好（越接近 100% 说明找框越准）。<br>
+      • <b>recall（召回率）</b>：越接近 100% 说明越不容易漏框。<br>
+      • <b>train loss（损失曲线）</b>：整体往下走且趋于平稳就是正常；如果暴涨或出现红色「数值故障」告警，点下方「复制错误原文」发给助手排查即可。<br>
+      • <b>显存 / 温度</b>：显卡温度长期超过 85°C 需注意机箱散热。
+    </div>
+  </dialog>
+  <script>document.getElementById('btnMonHelp').onclick=()=>document.getElementById('monHelpDlg').showModal();</script>
   <div id="msg" style="display:none"></div>
   <div class="intro">
     <div><div class="eyebrow">TRAINING OBSERVATORY</div><h2>每一轮，都有迹可循。</h2><p>批次进度实时读取 · 验证曲线每轮更新 · 错误原文直接追溯</p></div>
