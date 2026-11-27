@@ -242,9 +242,16 @@ def score_rows(truth, predictions):
     return dict(totals)
 
 
+def _load_font(path, size):
+    try:
+        return ImageFont.truetype(path, size)
+    except OSError:
+        return ImageFont.load_default()
+
+
 def render_assets(out, pi, page, gt1, pred1, zones, rows):
-    font = ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 19)
-    small = ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 16)
+    font = _load_font('C:/Windows/Fonts/msyh.ttc', 19)
+    small = _load_font('C:/Windows/Fonts/msyh.ttc', 16)
     im = Image.fromarray(cv2.cvtColor(page, cv2.COLOR_BGR2RGB))
     scale = min(1, 1100/im.width)
     overlay = im.resize((round(im.width*scale), round(im.height*scale)))
@@ -334,8 +341,8 @@ def summarize(pages):
 def make_findings(out, data):
     """保留真实候选输入的错误图集；不改人工答案或生产纠错规则。"""
     from stages.choice import _box_px, crop_option_row
-    font = ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 18)
-    small = ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 16)
+    font = _load_font('C:/Windows/Fonts/msyh.ttc', 18)
+    small = _load_font('C:/Windows/Fonts/msyh.ttc', 16)
     issues, categories, cards = [], Counter(), []
     unknown = 0
     for page in data['pages']:

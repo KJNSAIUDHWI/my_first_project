@@ -259,6 +259,11 @@ def run(args):
     if args.input:
         sources = sorted(p for p in args.input.iterdir() if p.suffix.lower() in ('.jpg', '.jpeg', '.png'))
     else:
+        if not args.selection.is_file():
+            raise FileNotFoundError(
+                f'未提供 --input 且默认清单不存在：{args.selection}\n'
+                '请通过 --input 指定待识别的试卷图片目录，或通过 --selection 指定有效的清单 JSON。'
+            )
         selected = json.loads(args.selection.read_text(encoding='utf-8'))['selected']
         sources = [DATA/'m1/images'/(r['new_name']+'.jpg') for r in selected]
     if not sources:

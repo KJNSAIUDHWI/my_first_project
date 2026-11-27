@@ -175,7 +175,7 @@
     </button>
     <button class="step-tab" data-view="overview" id="tabOverview" type="button">
       <span class="step-num">3</span>
-      <div><div class="step-title">审阅与协作</div><div class="step-desc" id="tabOverviewDesc">看进度、拉家人一起审</div></div>
+      <div><div class="step-title">审阅与协作</div><div class="step-desc" id="tabOverviewDesc">看进度、多人协同审阅</div></div>
     </button>
   </nav>
 
@@ -252,7 +252,7 @@
     <!-- 主机专属：邀请协作者 -->
     <div id="inviteBar" class="invite-bar hidden">
       <div>
-        <div style="font-weight:700;font-size:15px">邀请家里人一起审（另一台电脑/平板直接用浏览器打开即可，不用装软件）</div>
+        <div style="font-weight:700;font-size:15px">邀请同伴一起审（另一台电脑/平板直接用浏览器打开即可，不用装软件）</div>
         <div class="muted" style="margin-top:2px">打开后输入称呼就能看到实时进度，点任务自动领下一张图，不会撞车</div>
       </div>
       <div class="row">
@@ -399,7 +399,7 @@
 <!-- 称呼弹窗 -->
 <dialog id="nameDialog">
   <h3 style="margin:0 0 8px">怎么称呼你？</h3>
-  <p class="muted" style="margin:0 0 14px">填个名字（比如“妈妈”“爸爸”），这样控制总览能统计每个人审了多少张，进入审核页也不用重复填写。</p>
+  <p class="muted" style="margin:0 0 14px">填个名字（比如你的姓名或昵称），这样控制总览能统计每个人审了多少张，进入审核页也不用重复填写。</p>
   <input id="nameInput" class="input" placeholder="输入你的称呼" maxlength="20">
   <div class="row" style="justify-content:flex-end;margin-top:16px">
     <button class="btn primary" id="btnSaveName" type="button">确定</button>
@@ -880,7 +880,7 @@ $('batchSelect').onchange = async () => {
 $('btnCopyLan').onclick = async () => {
   const txt = $('lanUrlText').textContent;
   try { await navigator.clipboard.writeText(txt); showBanner('gui', '已复制局域网网址：' + txt); }
-  catch (_) { prompt('请手动复制此网址发给家里另一台电脑：', txt); }
+  catch (_) { prompt('请手动复制此网址发给局域网内另一台电脑：', txt); }
 };
 
 // 新手引导：试卷解剖图交互 + 手游式聚光灯分步引导
@@ -907,14 +907,14 @@ function buildTourSteps() {
   if (OVERVIEW?.is_host) {
     return [
       { view: 'overview', el: 'tabIngest', title: '第 1 步：导入新试卷', desc: '有新扫描的试卷时点这里：选文件夹和学科，自动整理编号并识别，不会改动原图。' },
-      { view: 'overview', el: 'inviteBar', title: '第 2 步：拉家里人一起审', desc: '把这里的网址发给另一台电脑或平板，浏览器打开就能连进来帮忙审，不用装任何软件。' },
+      { view: 'overview', el: 'inviteBar', title: '第 2 步：拉协作者一起审', desc: '把这里的网址发给同局域网的另一台电脑或平板，浏览器打开就能连进来帮忙审，不用装任何软件。' },
       { view: 'overview', el: 'task_review', title: '第 3 步：人工复审（核对答案 + 调框）', desc: '平时改卷主要点这里：看原卷核对答案，点错字直接改，按 E 调框，按 D 保存并看下一张。' },
       { view: 'overview', el: 'task_choice', title: '第 4 步：选择题涂卡审核', desc: '需要集中检查选择题填涂时点这里，鼠标划过即确认，发现认错的点一下就能改。' },
     ];
   }
   return [
     { view: 'overview', el: 'btnUser', title: '第 1 步：确认你的称呼', desc: '填好称呼后，控制总览会自动统计每个人审了多少，进入审核页也不用重复填。' },
-    { view: 'overview', el: 'task_review', title: '第 2 步：点「进去审」自动领卷', desc: '直接点任务卡片进入审核，系统会自动分配没人抢的试卷，绝不会和家人撞车。' },
+    { view: 'overview', el: 'task_review', title: '第 2 步：点「进去审」自动领卷', desc: '直接点任务卡片进入审核，系统会自动分配没人抢的试卷，绝不会和其他协作者撞车。' },
   ];
 }
 function showTourStep(idx) {

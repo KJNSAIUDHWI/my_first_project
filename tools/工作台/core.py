@@ -43,6 +43,8 @@ REQUIRED_PACKAGES = [
     {"import": "cv2", "pip": "opencv-python", "label": "OpenCV 图像处理"},
     {"import": "PIL", "pip": "Pillow", "label": "Pillow 图像库"},
     {"import": "numpy", "pip": "numpy", "label": "NumPy 数值计算"},
+    {"import": "scipy", "pip": "scipy", "label": "SciPy 匈牙利匹配算法"},
+    {"import": "yaml", "pip": "PyYAML", "label": "PyYAML 配置文件解析"},
     {"import": "onnxruntime", "pip": "onnxruntime", "label": "ONNX Runtime (PaddleOCR 题号)"},
     {"import": "requests", "pip": "requests", "label": "Requests 网络请求"},
 ]

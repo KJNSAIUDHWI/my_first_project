@@ -36,7 +36,11 @@ PROMPT = ('Read the filled answer options in EACH independent cell. Blue numbers
 def sheet(base, rows):
     width, height, columns = 440, 130, 4
     canvas = Image.new('RGB', (width * columns, height * ((len(rows) + columns - 1) // columns)), '#e8e8e8')
-    draw = ImageDraw.Draw(canvas); font = ImageFont.truetype('C:/Windows/Fonts/arial.ttf', 20)
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.truetype('C:/Windows/Fonts/arial.ttf', 20)
+    except OSError:
+        font = ImageFont.load_default()
     for i, row in enumerate(rows):
         x, y = i % columns * width, i // columns * height
         draw.rectangle((x+3, y+3, x+width-4, y+height-4), fill='white')

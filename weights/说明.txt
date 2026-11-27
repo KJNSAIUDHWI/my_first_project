@@ -10,7 +10,7 @@
      * models/m3/m3.pt (20.08 MB)
      * models/cnn/choice.pt (1.39 MB)
      * models/cnn/digit_cnn_20261022_02_v4补多选区.pt (3.23 MB)
-   - 解压密码由项目持有人单独提供，不保存在仓库中。
+   - 解压密码不保存在仓库中；自训权重暂不随代码开源，如需密码请联系维护者邮箱：lkqxsdggyx@gmail.com。
 
 2. 官方印刷题号模型（PP-OCRv6_medium_rec ONNX，约 73 MB）
    - 直接由脚本从百度飞桨官方源自动下载并校验 SHA256：

@@ -12,6 +12,7 @@ import csv
 import json
 import os
 import sys
+import tempfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -234,7 +235,8 @@ def main():
             path.unlink(missing_ok=True)
         raise
 
-    report_dir = Path(args.report_dir) if args.report_dir else Path("D:/temp") / (
+    default_temp_root = Path("D:/temp") if Path("D:/temp").is_dir() else Path(tempfile.gettempdir())
+    report_dir = Path(args.report_dir) if args.report_dir else default_temp_root / (
         datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d-%H-%M") +
         "_codex_m2_stage%d裁图" % args.stage)
     report_dir.mkdir(parents=True, exist_ok=True)

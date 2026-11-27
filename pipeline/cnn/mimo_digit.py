@@ -21,7 +21,10 @@ from common.records import read_csv, write_json
 def sheet(base, rows):
     canvas=Image.new('RGB',(1200,((len(rows)+5)//6)*130),'#e8e8e8')
     draw=ImageDraw.Draw(canvas)
-    font=ImageFont.truetype('C:/Windows/Fonts/arial.ttf',20)
+    try:
+        font = ImageFont.truetype('C:/Windows/Fonts/arial.ttf', 20)
+    except OSError:
+        font = ImageFont.load_default()
     for i,r in enumerate(rows):
         x,y=(i%6)*200,(i//6)*130
         draw.rectangle((x+3,y+3,x+196,y+126),fill='white')
