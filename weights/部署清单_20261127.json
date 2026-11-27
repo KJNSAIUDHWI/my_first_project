@@ -1,0 +1,72 @@
+{
+  "created": "2026-11-27",
+  "release_tag": "v2026.11.27",
+  "archive": "autograde_weights_v20261127.7z",
+  "encryption": "7zAES / AES-256, encrypted headers (-mhe=on)",
+  "notes": "仅包含6个自训纯推理权重（m3已剥离optimizer并转为FP16，无重复别名副本）；官方PP-OCRv6印刷题号模型由脚本直接从百度飞桨官方源下载。",
+  "deployment": {
+    "orient": {
+      "path": "models/orient/orient_page.pt",
+      "sha256": "59c110ae79bbd26365c89325b9a00213297199cde7d40edb7cbea8287944f40c"
+    },
+    "m1": {
+      "path": "models/m1/m1.pt",
+      "sha256": "d78324eedd59a415a808de820deef1867367fc23f4640e698c164a10f1e81503"
+    },
+    "m2": {
+      "path": "models/m2/m2.pt",
+      "sha256": "6f005694746eb6c2fcd0e7c70f2ad1b5ca3c345a795755b901c73f3556d9fc99"
+    },
+    "m3": {
+      "path": "models/m3/m3.pt",
+      "sha256": "db6ff2458e3eaddae4452528641ce9da345a84648e7561be9d898de6fe5f9bc6"
+    },
+    "choice": {
+      "path": "models/cnn/choice.pt",
+      "sha256": "37103f1fbb6b388d18212166e4b79987cf341c7e33a34d6c0688ea4654d568bf"
+    },
+    "digit": {
+      "path": "models/cnn/digit_cnn_20261022_02_v4补多选区.pt",
+      "sha256": "93583af8c8700da0c0ea9c8f9398f12432af4e105260ccd511b061fc96687bea"
+    }
+  },
+  "files": {
+    "models/orient/orient_page.pt": {
+      "sha256": "59c110ae79bbd26365c89325b9a00213297199cde7d40edb7cbea8287944f40c",
+      "bytes": 3203540
+    },
+    "models/m1/m1.pt": {
+      "sha256": "d78324eedd59a415a808de820deef1867367fc23f4640e698c164a10f1e81503",
+      "bytes": 5535620
+    },
+    "models/m2/m2.pt": {
+      "sha256": "6f005694746eb6c2fcd0e7c70f2ad1b5ca3c345a795755b901c73f3556d9fc99",
+      "bytes": 19204292
+    },
+    "models/m3/m3.pt": {
+      "sha256": "db6ff2458e3eaddae4452528641ce9da345a84648e7561be9d898de6fe5f9bc6",
+      "bytes": 21050288
+    },
+    "models/cnn/choice.pt": {
+      "sha256": "37103f1fbb6b388d18212166e4b79987cf341c7e33a34d6c0688ea4654d568bf",
+      "bytes": 1456139
+    },
+    "models/cnn/digit_cnn_20261022_02_v4补多选区.pt": {
+      "sha256": "93583af8c8700da0c0ea9c8f9398f12432af4e105260ccd511b061fc96687bea",
+      "bytes": 3388947
+    }
+  },
+  "official_pretrained": {
+    "paddle_ocr": {
+      "model": "PP-OCRv6_medium_rec",
+      "source": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv6_medium_rec_onnx_infer.tar",
+      "target_dir": "models/pretrained/PP-OCRv6_medium_rec_onnx",
+      "sha256": {
+        "inference.onnx": "9c09abf0957f7968c7586464b7397b84ad2387a0497a351af40e9acc71b673ba",
+        "inference.yml": "991b700facf5b50a7de193468207d5f4255b538dde0d312ae3b7c7a9b6873129"
+      }
+    }
+  },
+  "archive_sha256": "79a91ac256ee5ff48f66225eeecc8d17bbbf5595bc7bb3da9c1c25190b677f2c",
+  "archive_bytes": 47924449
+}

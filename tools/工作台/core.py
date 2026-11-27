@@ -243,8 +243,8 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
         "detail": f"已配置 {vlm_cfg.get('model')} ({masked})" if has_key else "尚未配置 API Key（点击「大模型 API 设置」配置豆包/MiMo/DeepSeek/中转站）",
     })
 
-    # 6. 加密权重分卷与 7z / opencode 探测（辅助信息）
-    archive_001 = next((root / "weights").glob("*.7z.001"), None) if (root / "weights").is_dir() else None
+    # 6. 加密权重包与 7z / opencode 探测（辅助信息）
+    archive_001 = find_weight_archive(root)
     seven_zip = find_7z()
     opencode_path = find_opencode(cfg)
 
@@ -341,21 +341,50 @@ def save_env_key(key: str, value: str, root: Path = ROOT) -> dict:
     return {"ok": True, "message": f"已保存 {k} 到 .env"}
 
 
+def find_weight_archive(root: Path = ROOT) -> Path | None:
+    """查找 weights/ 目录下的加密权重压缩包（优先单文件 .7z，兼容旧版 .7z.001 分卷）。"""
+    wdir = root / "weights"
+    if not wdir.is_dir():
+        return None
+    single = sorted(wdir.glob("*.7z"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if single:
+        return single[0]
+    parts = sorted(wdir.glob("*.7z.001"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return parts[0] if parts else None
+
+
 def unpack_weights(password: str, root: Path = ROOT) -> dict:
-    """用本机 7-Zip 解压加密权重分卷到项目根目录。"""
+    """用本机 7-Zip 解压加密权重包到项目根目录，并按需自动拉取百度官方 PP-OCRv6。"""
     if not password:
         return {"ok": False, "error": "请输入解压密码"}
     seven_zip = find_7z()
     if not seven_zip:
         return {"ok": False, "error": "未找到 7-Zip，请先安装 7-Zip 或求助 AI"}
-    archive = next((root / "weights").glob("*.7z.001"), None) if (root / "weights").is_dir() else None
+    archive = find_weight_archive(root)
     if not archive:
-        return {"ok": False, "error": "weights/ 目录下未找到加密权重分卷 (.7z.001)"}
+        return {"ok": False, "error": "weights/ 目录下未找到加密权重包 (.7z)，请先运行 python tools/下载权重.py 或从 GitHub Releases 下载"}
     cmd = [seven_zip, "x", str(archive), f"-o{root}", f"-p{password}", "-y"]
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         return {"ok": False, "error": "解压失败（请检查密码是否正确）", "detail": (proc.stderr or proc.stdout)[-1500:]}
-    return {"ok": True, "message": "模型权重已解压就绪"}
+
+    # 若缺少官方 PP-OCRv6 权重，尝试自动从百度飞桨官方源补齐
+    paddle_missing = [rel for rel in PADDLE_FILES if not (root / rel).is_file()]
+    if paddle_missing:
+        try:
+            import importlib.util
+            dl_script = root / "tools" / "下载权重.py"
+            if dl_script.is_file():
+                spec = importlib.util.spec_from_file_location("_dl_weights", str(dl_script))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.ensure_paddle_ocr(root)
+        except Exception as exc:
+            return {
+                "ok": True,
+                "message": f"自训推理权重已解压就绪；官方 PP-OCRv6 自动下载失败（{exc}），请稍后运行 python tools/下载权重.py --only-paddle",
+            }
+    return {"ok": True, "message": "模型权重已全部就绪"}
 
 
 def build_agent_prompt(report: dict, root: Path = ROOT, extra_note: str = "") -> str:

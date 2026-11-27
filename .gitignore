@@ -8,6 +8,8 @@ raw/
 *.pth
 *.onnx
 *.zip
+*.7z
+*.7z.*
 
 # Python
 __pycache__/

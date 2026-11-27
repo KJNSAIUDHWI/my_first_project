@@ -10,7 +10,23 @@
 
 - **母后与家人从这里开始：** [图文交互教程（浏览器直接打开）](docs/父母使用图文教程.html) · [母后使用指南](docs/母后使用指南.md) · [模型怎么越用越好](docs/迭代指南.md)
 - **AI / 维护者接手：** 先读 [AGENTS.md](AGENTS.md) 与 [Agent 维护指南](docs/Agent维护指南.md)
-- **整套下载：** 点击页面右上角 **Code → Download ZIP**（含源码、工具、文档与加密权重分卷），解压后按 [权重恢复说明](weights/说明.txt) 还原权重。
+- **代码仓库与权重分离：** 本仓库仅托管源码与文档（约 **2 MB**，秒级克隆）；自训纯推理权重包（**45.7 MB** 单文件，AES-256 加密）作为附件托管在 [GitHub Releases](https://github.com/KJNSAIUDHWI/my_first_project/releases/tag/v2026.11.27)，官方 `PP-OCRv6` 印刷题号模型由脚本直接从百度飞桨官方源拉取。
+
+---
+
+## CMD 一键下载代码与权重
+
+打开 Windows **CMD（命令提示符）**，直接复制粘贴以下 3 行命令即可完成代码拉取与权重准备：
+
+```bat
+git clone https://github.com/KJNSAIUDHWI/my_first_project.git 自动改卷
+cd 自动改卷
+python tools\下载权重.py
+```
+
+- 第 1 行：克隆全部代码与工具（约 2 MB，几秒完成）。
+- 第 3 行：自动从百度飞桨官方源拉取 `PP-OCRv6`（约 73 MB），并从 [GitHub Releases](https://github.com/KJNSAIUDHWI/my_first_project/releases/tag/v2026.11.27) 下载精简纯推理权重包 `autograde_weights_v20261127.7z`（45.7 MB）；输入密码后自动解压到 `models/`。
+- 如未安装 Git 或 GitHub 命令行下载较慢，也可直接点击右上角 **Code → Download ZIP** 下载源码，再手动从 [Releases](https://github.com/KJNSAIUDHWI/my_first_project/releases/tag/v2026.11.27) 下载 `autograde_weights_v20261127.7z` 放到 `weights/` 目录后运行 `python tools\下载权重.py`（详见 [权重恢复说明](weights/说明.txt)）。
 
 ---
 
@@ -46,11 +62,11 @@ flowchart LR
 
 ### 方式一：一键桌面工作台（推荐父母与日常使用）
 
-1. 下载或克隆 [my_first_project](https://github.com/KJNSAIUDHWI/my_first_project) 后，直接双击根目录的 **`自动改卷工作台.exe`**（首次如弹出 Windows SmartScreen 提示，点「更多信息 → 仍要运行」；也可运行 `tools\工作台\创建桌面快捷方式.ps1` 本机编译并生成桌面快捷方式）。
+1. 按上方 CMD 命令克隆代码并拉取权重后，直接双击根目录的 **`自动改卷工作台.exe`**（首次如弹出 Windows SmartScreen 提示，点「更多信息 → 仍要运行」；也可运行 `tools\工作台\创建桌面快捷方式.ps1` 本机编译并生成桌面快捷方式）。
 2. 启动后自动进入**环境自检**：
    - 缺 Python 依赖 → 一键自动测速对比 PyPI 官方源与清华/阿里云镜像并安装；
-   - 缺模型权重 → 直接在页面输入密码解压 [weights/](weights/) 中的加密分卷；
-   - 缺豆包密钥 → 直接在页面填写 `ARK_API_KEY` 写入本地 `.env`；
+   - 缺模型权重 → 将 [Releases](https://github.com/KJNSAIUDHWI/my_first_project/releases/tag/v2026.11.27) 的 `autograde_weights_v20261127.7z` 放入 `weights/` 后，直接在页面输入密码解压（并自动从百度官方源补齐 `PP-OCRv6`）；
+   - 缺大模型密钥 → 直接在页面点击「⚙ 大模型 API」配置豆包 / MiMo / DeepSeek / 通义千问 / 自定义中转站，自动写入本地 `.env`；
    - 遇到疑难问题 → 一键复制结构化诊断提示词并唤起本机 `opencode` 等 AI 助手。
 3. 随后按页面引导完成 **录入新试卷（非破坏性复制、SHA256 去重、`日期_学科_序号.jpg` 统一命名）→ 控制总览 & 局域网多人协作**（右上角内置 `? 新手引导` 交互式试卷解剖图与聚光灯导览）：
    - **人工复审（整页核对）**：整批缩略图墙支持 **按住 `Ctrl + 滚轮` 缩放**；点进具体试卷可核对答案、可选开关查看具体置信度数值，发现框画歪可直接点 **「✎ 修改这张卷的标框」** 弹出单张标框子界面修改；
