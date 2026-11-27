@@ -1,0 +1,3701 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动改卷 · 审阅与调框工作台</title>
+<link rel="stylesheet" href="/asset/vendor/katex/katex.min.css">
+<style>
+  :root {
+    --bg: #f4f6f4;
+    --panel: #ffffff;
+    --line: #dfe5e0;
+    --line-soft: #edf1ee;
+    --text: #1c2420;
+    --muted: #66736c;
+    --brand: #1f6f50;
+    --brand-hover: #18583f;
+    --brand-soft: #e6f4ed;
+    --warn: #c45d12;
+    --warn-soft: #fff4e8;
+    --danger: #c63636;
+    --danger-soft: #fdecec;
+    --blue: #2563eb;
+    --blue-soft: #eff6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 13px;
+  }
+  button {
+    font-family: inherit; cursor: pointer; border: 1px solid var(--line);
+    background: #fff; color: var(--text); border-radius: 8px;
+    padding: 5px 9px; font-size: 12px; line-height: 1.25; white-space: nowrap; flex-shrink: 0;
+    transition: all 0.14s ease;
+  }
+  button:hover:not(:disabled) { border-color: #b7c4bc; background: #f8faf9; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--brand); color: #fff; border-color: var(--brand); font-weight: 600;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .btn-warn { background: var(--warn-soft); color: var(--warn); border-color: #f3c89e; font-weight: 600; }
+  .btn-danger { background: var(--danger-soft); color: var(--danger); border-color: #f2bcbc; }
+  .btn-ai {
+    background: linear-gradient(135deg, #2563eb, #4f46e5);
+    color: #fff; border-color: #2563eb; font-weight: 600;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.22);
+  }
+  .btn-ai:hover:not(:disabled) { background: linear-gradient(135deg, #1d4ed8, #4338ca); border-color: #1d4ed8; }
+  .btn-ai-soft {
+    background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; font-weight: 600;
+  }
+  .btn-ai-soft:hover:not(:disabled) { background: #dbeafe; border-color: #93c5fd; }
+
+  /* 调框模式选中框浮动快捷操作条（自动避让不遮挡框内手写） */
+  .edit-box-bar {
+    position: absolute; z-index: 52; pointer-events: auto;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(8px);
+    border: 1px solid #cbd5e1; border-radius: 99px;
+    padding: 3px 6px; box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16);
+    white-space: nowrap;
+  }
+  .edit-box-bar button {
+    padding: 3px 9px; border-radius: 99px; font-size: 11.5px; line-height: 1.3;
+  }
+  .recog-preview-box {
+    margin-top: 8px; padding: 8px 9px; border-radius: 8px;
+    background: #fff; border: 1px solid #dbeafe;
+    font-size: 12px; line-height: 1.5; color: var(--text);
+  }
+  .recog-preview-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11.5px; font-weight: 700; color: #1d4ed8; margin-bottom: 5px;
+  }
+
+  /* 顶栏 */
+  .topbar {
+    height: 52px; background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; gap: 10px; user-select: none; position: relative; z-index: 70;
+  }
+  .top-left, .top-center, .top-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .top-center, .top-right { flex-shrink: 0; }
+  .page-title { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  .workload-bar {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #f4f7f5; border: 1px solid var(--line-soft);
+    border-radius: 99px; padding: 3px 9px; font-size: 11.5px; color: var(--muted);
+    white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums;
+  }
+  .workload-bar b { color: var(--text); font-weight: 700; }
+  .workload-bar .w-sep { color: #cbd5cf; }
+  .wl-edit-part { display: none; align-items: center; gap: 6px; }
+  .wl-edit-part.show { display: inline-flex; }
+  /* 顶栏「更多」精简下拉菜单 */
+  .more-wrap { position: relative; }
+  .more-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); min-width: 178px;
+    background: #fff; border: 1px solid var(--line); border-radius: 11px;
+    padding: 6px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+    display: none; flex-direction: column; gap: 2px; z-index: 95;
+  }
+  .more-menu.open { display: flex; }
+  .more-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 9px; border-radius: 7px; font-size: 12.5px; color: var(--text);
+    cursor: pointer; border: none; background: transparent; text-align: left; width: 100%;
+  }
+  .more-item:hover { background: #f2f5f3; }
+  .more-sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
+
+  /* 模式切换胶囊 */
+  .mode-switch {
+    display: inline-flex; background: #edf1ee; padding: 3px; border-radius: 10px; gap: 2px;
+  }
+  .mode-btn {
+    border: none; background: transparent; padding: 5px 11px; border-radius: 7px;
+    font-weight: 600; color: var(--muted); font-size: 12.5px; white-space: nowrap;
+  }
+  .mode-btn.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .mode-btn.edit-active { background: #1f6f50; color: #fff; box-shadow: 0 1px 4px rgba(31,111,80,0.28); }
+
+  .chk-label {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted);
+    cursor: pointer; white-space: nowrap; padding: 4px 5px; border-radius: 6px;
+  }
+  .chk-label:hover { background: #f2f5f3; color: var(--text); }
+  .dirty-pill {
+    display: none; font-size: 11.5px; padding: 2px 8px; border-radius: 99px;
+    background: var(--warn-soft); color: var(--warn); font-weight: 600; white-space: nowrap;
+  }
+  .dirty-pill.show { display: inline-flex; align-items: center; }
+
+  /* 主体三栏 */
+  .workspace {
+    display: flex; height: calc(100vh - 52px); width: 100%; overflow: hidden;
+  }
+
+  /* 左栏：极简页码列表 */
+  .sidebar-left {
+    width: 204px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; transition: width 0.18s ease;
+  }
+  .sidebar-left.collapsed { width: 0; border-right: none; overflow: hidden; }
+  .side-head {
+    padding: 9px 11px; border-bottom: 1px solid var(--line-soft);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: var(--muted); font-weight: 600;
+  }
+  .page-list { flex: 1; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .page-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 7px 8px; border-radius: 8px; cursor: pointer; border: 1px solid transparent;
+    transition: background 0.12s ease;
+  }
+  .page-row:hover { background: #f4f7f5; }
+  .page-row.active { background: var(--brand-soft); border-color: #b7dfc9; }
+  .page-row-main { min-width: 0; flex: 1; }
+  .page-row-name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .page-row-sub { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; overflow: hidden; }
+  .page-row-sub > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 10.5px; padding: 1px 6px; border-radius: 99px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .badge-done { background: #dcfce7; color: #166534; }
+  .badge-todo { background: #eef1ef; color: #5b6861; }
+  .badge-lock { background: #fef3c7; color: #92400e; }
+
+  /* 中栏：绝对主视觉原卷画布 + 透明 DOM 答案贴条层 */
+  .stage-wrap {
+    flex: 1; min-width: 0; position: relative; background: #e6ebe7;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .canvas-host {
+    flex: 1; position: relative; overflow: hidden; cursor: grab;
+  }
+  .canvas-host.panning { cursor: grabbing !important; }
+  #paperCanvas { display: block; width: 100%; height: 100%; }
+
+  /* 同步缩放的卷面答案层（方案 A：手写框内 0% 遮挡 + 右侧水平齐平外挂批注卡 + SVG 引导线） */
+  .overlay-layer {
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+    transition: opacity 0.1s ease;
+  }
+  .overlay-layer.peek-hide { opacity: 0 !important; pointer-events: none !important; }
+  .connector-svg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
+  }
+  .overlay-chip {
+    position: absolute; pointer-events: auto;
+    border-radius: 4px; line-height: 1.25;
+    transition: box-shadow 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+    cursor: pointer; user-select: none;
+  }
+  /* 左右双侧就近批注卡（左栏贴左、右栏贴右，零跨卷连线、零遮挡原手写） */
+  .margin-card {
+    position: absolute; pointer-events: auto;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(6px);
+    border: 1px solid #cbd5e1;
+    border-left: 3px solid #2563eb;
+    border-radius: 8px;
+    padding: 6px 9px;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+    color: #16243a;
+    font-size: 12.5px;
+    line-height: 1.45;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    user-select: text;
+  }
+  .margin-card.side-left {
+    border-left: 1px solid #cbd5e1;
+    border-right: 3px solid #2563eb;
+  }
+  .margin-card:hover, .margin-card.active {
+    border-color: #2563eb;
+    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.2);
+    background: #fff;
+    z-index: 25;
+  }
+  .margin-card.edited {
+    border-left-color: #16a34a;
+    background: rgba(240, 253, 244, 0.96);
+  }
+  .margin-card.side-left.edited {
+    border-left-color: #bbf7d0;
+    border-right-color: #16a34a;
+  }
+  .margin-item {
+    cursor: pointer; padding: 2px 4px; border-radius: 5px;
+    transition: background 0.1s ease;
+  }
+  .margin-item:hover { background: #eff6ff; }
+  .margin-item + .margin-item {
+    margin-top: 4px; padding-top: 4px; border-top: 1px dashed #e2e8f0;
+  }
+  .margin-qno {
+    display: inline-block; font-weight: 700; font-size: 11.5px;
+    color: #2563eb; background: #eff6ff; border-radius: 4px;
+    padding: 0 5px; margin-right: 5px; vertical-align: baseline;
+  }
+  .margin-item.edited .margin-qno { color: #15803d; background: #dcfce7; }
+  .margin-ans {
+    font-size: 12.5px; font-weight: 500; color: #1e293b;
+    word-break: break-word;
+    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 7px;
+  }
+  .margin-ans .sub-seg {
+    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  }
+  .margin-ans .sub-lbl {
+    font-size: 11.5px; font-weight: 700; color: #64748b; margin-right: 1px;
+  }
+  .margin-ans .blank-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(241, 245, 249, 0.92); border: 1px solid #e2e8f0; border-radius: 5px;
+    padding: 0 6px; line-height: 1.5; color: #0f172a; font-weight: 600;
+  }
+  .margin-ans .blank-pill.unanswered {
+    background: rgba(241, 245, 249, 0.62);
+    border: 1px dashed #94a3b8;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .margin-ans .blank-pill.discarded {
+    background: rgba(248, 250, 252, 0.85);
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .margin-ans .blank-pill.pending {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    color: #b45309;
+    font-weight: 600;
+  }
+  .margin-ans .blank-pill.failed {
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    color: #b91c1c;
+    font-weight: 600;
+  }
+  .margin-ans .blank-idx {
+    font-size: 10.5px; font-weight: 700; color: #64748b;
+  }
+  /* 填空题悬停模式：题框右上角内嵌紧凑微徽章（绝不压到上一题）+ 就近弹出答案气泡 */
+  .fill-mini-tag {
+    position: absolute; pointer-events: auto; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 3px;
+    background: rgba(37, 99, 235, 0.78); color: #fff;
+    backdrop-filter: blur(2px);
+    font-size: 10.5px; font-weight: 700; line-height: 1;
+    padding: 2px 6px; border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+    white-space: nowrap; user-select: none; z-index: 18;
+    transition: transform 0.1s ease, background 0.12s ease, opacity 0.12s ease;
+  }
+  .fill-mini-tag:hover, .fill-mini-tag.active {
+    background: #1d4ed8; transform: scale(1.05); z-index: 26;
+  }
+  .fill-mini-tag.edited { background: rgba(22, 163, 74, 0.92); }
+  .fill-mini-tag.pending { background: rgba(217, 119, 6, 0.92); }
+  .fill-mini-tag.failed { background: rgba(185, 28, 28, 0.92); }
+  .fill-mini-tag .mini-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #fde68a; display: inline-block;
+  }
+  .fill-hover-pop {
+    position: absolute; z-index: 48; pointer-events: auto;
+    min-width: 220px; max-width: min(460px, 86vw);
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #2563eb;
+    border-radius: 10px;
+    padding: 8px 11px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+    color: #16243a;
+    font-size: 12.5px; line-height: 1.5;
+    cursor: pointer;
+  }
+  .fill-hover-pop.edited { border-color: #16a34a; background: rgba(240, 253, 244, 0.98); }
+  .fill-hover-pop-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px dashed #e2e8f0;
+  }
+  .fill-hover-pop-hint { font-size: 11px; color: #64748b; font-weight: 500; }
+  /* 后台识别进行中运行态横幅 */
+  .live-run-banner {
+    display: none; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 14px; font-size: 12.5px; font-weight: 600;
+    background: #fffbeb; color: #92400e; border-bottom: 1px solid #fcd34d;
+    z-index: 20;
+  }
+  .live-run-banner.show { display: flex; }
+  .live-run-banner.err { background: #fef2f2; color: #991b1b; border-bottom-color: #fca5a5; }
+  /* 姓名学号竖框外挂紧凑胶囊：贴在框顶部上方，不侵入正文 */
+  .overlay-identity {
+    background: rgba(254, 242, 242, 0.94);
+    border: 1px solid rgba(220, 38, 38, 0.45);
+    color: #7f1d1d;
+    font-weight: 700;
+    font-size: 11.5px;
+    padding: 2px 7px;
+    white-space: nowrap;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  }
+  .overlay-identity.edited {
+    background: rgba(236, 253, 245, 0.94);
+    border-color: #16a34a;
+    color: #14532d;
+  }
+  /* 选择题：严格压在各自题行高度内的紧凑左贴徽章，不跨行重叠，右边涂卡区 100% 露出 */
+  .overlay-choice {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(21, 128, 61, 0.9);
+    color: #fff; font-weight: 700;
+    padding: 0 4px; white-space: nowrap; line-height: 1;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .overlay-choice.low-conf { background: rgba(217, 119, 6, 0.95); }
+  .overlay-choice.edited { background: rgba(37, 99, 235, 0.95); }
+  .overlay-choice:hover { filter: brightness(1.08); z-index: 25; }
+
+  /* 低置信度一键定位脉冲框（全模式可见，精准锁定具体框） */
+  @keyframes lowConfPulse {
+    0%   { box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.95), 0 0 0 6px rgba(234, 88, 12, 0.35); }
+    100% { box-shadow: 0 0 0 3px rgba(234, 88, 12, 1),    0 0 0 14px rgba(234, 88, 12, 0); }
+  }
+  .lowconf-focus-box {
+    position: absolute; z-index: 55; pointer-events: none;
+    border: 2.5px solid #ea580c; border-radius: 4px;
+    background: rgba(234, 88, 12, 0.08);
+    animation: lowConfPulse 1.05s ease-out infinite;
+  }
+  .lowconf-focus-tag {
+    position: absolute; left: -2px; bottom: calc(100% + 5px);
+    pointer-events: auto; cursor: pointer;
+    background: #ea580c; color: #fff; font-size: 11.5px; font-weight: 700;
+    padding: 3px 6px 3px 9px; border-radius: 99px; white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(234, 88, 12, 0.35);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .lowconf-focus-tag:hover { background: #c2410c; }
+  .lowconf-trust-btn {
+    border: none; border-radius: 99px; padding: 2px 8px;
+    background: #15803d; color: #fff; font-size: 11px; font-weight: 700;
+    cursor: pointer; line-height: 1.3;
+  }
+  .lowconf-trust-btn:hover { background: #166534; }
+  .lowconf-pill-btn {
+    display: inline-flex; align-items: center; padding: 0 5px; border-radius: 99px;
+    background: var(--warn-soft); color: #b45309; font-weight: 700; cursor: pointer;
+    border: 1px solid #f5cba0; transition: background 0.12s;
+  }
+  .lowconf-pill-btn:hover { background: #fde3c3; }
+
+  /* 卷面原地编辑弹框（点击手写框或选择框时紧贴该框浮出） */
+  .inline-pop {
+    position: absolute; z-index: 60; pointer-events: auto;
+    background: #fff; border: 1.5px solid var(--brand); border-radius: 10px;
+    padding: 10px 12px; width: 320px; max-width: 90vw;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  }
+  .inline-pop-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px; font-weight: 700; font-size: 12.5px; color: var(--brand);
+  }
+  .inline-pop textarea, .inline-pop input {
+    width: 100%; border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 9px; font-family: inherit; font-size: 13px; line-height: 1.5; outline: none;
+  }
+  .inline-pop textarea:focus, .inline-pop input:focus { border-color: var(--brand); }
+  .inline-pop-foot {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 8px;
+    font-size: 11.5px; color: var(--muted);
+  }
+
+  /* 画布底部浮条 */
+  .canvas-float-bar {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(10px);
+    border: 1px solid rgba(0,0,0,0.08); border-radius: 99px;
+    padding: 4px 12px; display: flex; align-items: center; gap: 7px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08); font-size: 12px; color: var(--muted);
+    user-select: none; z-index: 30; white-space: nowrap;
+  }
+  .canvas-float-bar button { padding: 3px 8px; border-radius: 99px; font-size: 12px; }
+  .zoom-val { min-width: 42px; text-align: center; font-weight: 600; color: var(--text); }
+
+  /* 右栏：看答案模式默认收起，调框模式自动展开 */
+  .sidebar-right {
+    width: 310px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden; transition: width 0.18s ease;
+  }
+  .sidebar-right.collapsed { width: 0; border-left: none; }
+  .right-scroll { flex: 1; overflow-y: auto; padding: 11px; display: flex; flex-direction: column; gap: 10px; }
+
+  .sec-card { border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px; background: #fbfcfb; }
+  .sec-title {
+    font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  /* 调框模式右侧工具栏 */
+  .cls-list { display: flex; flex-direction: column; gap: 5px; }
+  .cls-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: #fff;
+    text-align: left; font-size: 12.5px;
+  }
+  .cls-btn.active { border-color: var(--brand); background: var(--brand-soft); font-weight: 700; }
+  .cls-left { display: flex; align-items: center; gap: 8px; }
+  .cls-dot { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+  .cls-key { font-size: 11px; color: var(--muted); background: #f0f3f1; padding: 1px 6px; border-radius: 4px; }
+  .layer-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* 选择题与手写紧凑汇总（右栏展开时可见） */
+  .choice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .choice-chip {
+    background: #fff; border: 1px solid var(--line); border-radius: 7px;
+    padding: 5px 6px; cursor: pointer;
+  }
+  .choice-chip.low-conf { border-color: #f0b174; background: var(--warn-soft); }
+  .choice-chip.edited { border-color: var(--blue); background: var(--blue-soft); }
+  .choice-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .choice-no { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .choice-ans { font-size: 13.5px; font-weight: 700; }
+  .choice-conf { font-size: 10px; color: var(--muted); margin-top: 2px; display: none; }
+  body.show-conf .choice-conf { display: block; }
+
+  /* 游戏风键位设置弹窗（支持主/副双键位） */
+  dialog.kb-dlg {
+    border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px;
+    width: min(560px, 94vw); box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+  }
+  dialog.kb-dlg::backdrop { background: rgba(15, 23, 20, 0.35); backdrop-filter: blur(4px); }
+  .kb-mouse-tip {
+    margin-top: 8px; padding: 8px 11px; border-radius: 8px;
+    background: var(--brand-soft); border: 1px solid #c5e3d3;
+    font-size: 12px; color: #164e39; line-height: 1.6;
+  }
+  .kb-list { display: flex; flex-direction: column; gap: 6px; margin: 11px 0; max-height: 52vh; overflow-y: auto; }
+  .kb-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 7px 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: #fafcfa;
+  }
+  .kb-slots { display: flex; gap: 6px; flex-shrink: 0; }
+  .kb-btn {
+    min-width: 78px; text-align: center; font-weight: 700; font-family: ui-monospace, Consolas, monospace;
+    background: #fff; border: 1px solid #cbd5cf; padding: 4px 8px; border-radius: 7px; font-size: 12px;
+  }
+  .kb-btn.empty { color: #9ca7a1; font-weight: 500; border-style: dashed; }
+  .kb-btn.listening {
+    background: var(--brand); color: #fff; border-color: var(--brand);
+    animation: kbPulse 0.9s infinite alternate;
+  }
+  @keyframes kbPulse { from { opacity: 1; } to { opacity: 0.65; } }
+
+  /* Toast */
+  .toast {
+    position: fixed; top: 62px; left: 50%; transform: translateX(-50%) translateY(-10px);
+    background: rgba(24, 34, 29, 0.92); color: #fff; padding: 7px 15px; border-radius: 99px;
+    font-size: 12.5px; opacity: 0; pointer-events: none; transition: all 0.2s ease; z-index: 999;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 交互式同步聚光灯新手引导（不阻断高亮目标操作） */
+  .tour-spotlight {
+    position: fixed; z-index: 950; pointer-events: none;
+    border-radius: 10px; border: 2.5px solid #10b981;
+    box-shadow: 0 0 0 9999px rgba(15, 23, 20, 0.52), 0 0 0 4px rgba(16, 185, 129, 0.28);
+    transition: left 0.22s ease, top 0.22s ease, width 0.22s ease, height 0.22s ease;
+    display: none;
+  }
+  .tour-pop {
+    position: fixed; z-index: 960; width: 345px; max-width: 92vw;
+    background: #fff; border: 1.5px solid var(--brand); border-radius: 12px;
+    padding: 13px 15px; box-shadow: 0 16px 40px rgba(0,0,0,0.25);
+    display: none;
+  }
+  .tour-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+  }
+  .tour-step-badge {
+    font-size: 11px; font-weight: 700; color: var(--brand);
+    background: var(--brand-soft); padding: 2px 8px; border-radius: 99px;
+  }
+  .tour-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
+  .tour-desc { font-size: 12.5px; line-height: 1.62; color: #334155; margin-bottom: 10px; }
+  .tour-try-row { margin-bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tour-try-btn {
+    background: #fff7ed; color: #c2410c; border: 1px solid #fdba74;
+    border-radius: 7px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .tour-try-btn:hover { background: #ffedd5; }
+  .tour-foot {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding-top: 8px; border-top: 1px solid var(--line-soft);
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="top-left">
+      <button id="btnToggleLeft" title="收起/展开页码栏">☰</button>
+      <span class="page-title" id="topPageTitle">加载中...</span>
+      <div class="workload-bar" id="workloadBar" title="审阅进度">
+        <span>已审 <b id="wlPages">0/0</b>（我 <b id="wlMine">0</b>）</span>
+        <span class="wl-edit-part" id="wlEditPart">
+          <span class="w-sep">|</span>
+          <span>移<b id="wlMove">0</b> 增<b id="wlAdd">0</b> 删<b id="wlDel">0</b></span>
+        </span>
+      </div>
+      <span class="dirty-pill" id="dirtyPill">● 未保存</span>
+    </div>
+
+    <div class="top-center">
+      <div class="mode-switch">
+        <button class="mode-btn active" id="btnModeView">👁 看答案</button>
+        <button class="mode-btn" id="btnModeEdit">✎ 调框 (E)</button>
+      </div>
+    </div>
+
+    <div class="top-right">
+      <button class="btn-warn" id="btnLowConf" style="display:none;" title="循环定位低置信度项 (L)">⚠ 低置</button>
+      <button id="btnFillDisplayMode" title="切换填空题展示：悬停气泡（默认） / 左右双侧总览">💬 悬停</button>
+      <button id="btnPrev">← 上一张</button>
+      <button class="btn-primary" id="btnSubmitNext">✓ 确认并下一张 (D)</button>
+      <div class="more-wrap">
+        <button id="btnMoreMenu" title="显示选项、快捷键与教程">⚙ 更多 ▾</button>
+        <div class="more-menu" id="moreMenu">
+          <label class="more-item"><span>显示答案叠加</span><input type="checkbox" id="chkOverlay" checked></label>
+          <label class="more-item"><span>显示置信度</span><input type="checkbox" id="chkConf"></label>
+          <button class="more-item" id="btnToggleRight" type="button"><span>◨ 展开/收起右侧栏</span></button>
+          <div class="more-sep"></div>
+          <button class="more-item" id="btnKeybinds" type="button"><span>⌨ 自定义快捷键</span></button>
+          <button class="more-item" id="btnGuide" type="button"><span>? 操作教程</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <!-- 左栏：多人实时同步完整试卷列表 -->
+    <aside class="sidebar-left" id="sidebarLeft">
+      <div class="side-head">
+        <span>本批试卷 <span id="liveSyncDot" title="每 3 秒自动同步多人审阅进度与锁定状态" style="color:#16a34a;font-size:10px;">● 实时</span></span>
+        <span id="leftSummary">0/0</span>
+      </div>
+      <div class="page-list" id="pageList"></div>
+    </aside>
+
+    <!-- 中栏：绝对主视觉原卷画布 + 框内答案贴条叠层 -->
+    <main class="stage-wrap">
+      <div class="live-run-banner" id="liveRunBanner">
+        <span id="liveRunBannerText">后台正在识别中...</span>
+        <button id="btnRefreshNow" style="padding:2px 9px;font-size:11.5px;">立即刷新结果</button>
+      </div>
+      <div class="canvas-host" id="canvasHost">
+        <canvas id="paperCanvas"></canvas>
+        <div class="overlay-layer" id="overlayLayer"></div>
+      </div>
+      <div class="canvas-float-bar">
+        <button id="btnZoomOut" title="缩小">－</button>
+        <span class="zoom-val" id="zoomLabel">100%</span>
+        <button id="btnZoomIn" title="放大">＋</button>
+        <button id="btnFit">适配 (F)</button>
+        <span id="canvasHint"></span>
+      </div>
+    </main>
+
+    <!-- 右栏：看答案模式默认收起，调框模式自动展开 -->
+    <aside class="sidebar-right collapsed" id="sidebarRight">
+      <div class="right-scroll" id="rightBody"></div>
+    </aside>
+  </div>
+
+  <!-- 游戏风键位设置弹窗（支持主/副双键位 + 鼠标手势说明） -->
+  <dialog class="kb-dlg" id="kbDialog">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;font-size:16px;">⌨ 自定义快捷键（主/副双键位）</h3>
+      <button id="btnCloseKb">关闭</button>
+    </div>
+    <div class="kb-mouse-tip">
+      <b>鼠标手势（全模式自动兼容，与标注工具手感一致）：</b><br>
+      • <b>调框画新框 / 选中</b>：<b>左键长按拖动</b>直接画新框（在大框内部也能直接划）；<b>左键单击</b>选中框，选中后拖边/角缩放、拖框内移动（Esc 取消选中）<br>
+      • <b>平移画布</b>：鼠标<b>中键拖动</b>（CAD 习惯）或 <b>右键拖动</b> 或 <b>空格+左键拖动</b><br>
+      • <b>删框（调框模式）</b>：<b>右键短按单击</b>框直接删除并消卡（拖动则平移，互不冲突）<br>
+      • <b>临时透视原图</b>：按住 <b>Alt</b> 暂时隐藏答案浮层，松开恢复
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;">左键点击任意槽位后按新键盘键绑定；<b>右键点击槽位</b>可清空该键位（每个操作可同时绑主/副两个键）。</div>
+    <div class="kb-list" id="kbList"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <button id="btnResetKb">恢复默认键位</button>
+      <button class="btn-primary" id="btnDoneKb">完成</button>
+    </div>
+  </dialog>
+
+  <!-- 交互式同步聚光灯新手引导 -->
+  <div class="tour-spotlight" id="tourSpot"></div>
+  <div class="tour-pop" id="tourPop">
+    <div class="tour-head">
+      <span class="tour-step-badge" id="tourStepBadge">1 / 6</span>
+      <button id="tourClose" style="padding:2px 8px;font-size:11.5px;">跳过 ✕</button>
+    </div>
+    <div class="tour-title" id="tourTitle"></div>
+    <div class="tour-desc" id="tourDesc"></div>
+    <div class="tour-try-row" id="tourTryRow" style="display:none;"></div>
+    <div class="tour-foot">
+      <button id="tourPrev" style="padding:4px 10px;font-size:12px;">← 上一步</button>
+      <button class="btn-primary" id="tourNext" style="padding:4px 12px;font-size:12px;">下一步 →</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script src="/asset/vendor/katex/katex.min.js"></script>
+<script>
+const TOKEN='__TOKEN__';
+const CLIENT_ID = "c_" + Math.random().toString(36).slice(2, 10);
+const URL_PARAMS = new URLSearchParams(location.search);
+let REVIEWER = (URL_PARAMS.get("reviewer") || localStorage.getItem("reviewUserName") || "").trim();
+if (REVIEWER) localStorage.setItem("reviewUserName", REVIEWER);
+
+/* ==================== 游戏风自定义键位（支持主/副双键位） ==================== */
+const DEFAULT_KEYBINDS = {
+  nextSubmit: ["d", "arrowright"],
+  prevPage:   ["a", "arrowleft"],
+  toggleMode: ["e", ""],
+  fitCanvas:  ["f", ""],
+  toggleAns:  ["q", ""],
+  nextLowConf:["l", ""],
+  deleteBox:  ["delete", "backspace"],
+  recognizeBox:["r", ""],
+  cls_0:      ["1", ""],
+  cls_1:      ["2", ""],
+  cls_4:      ["3", ""],
+  cls_2:      ["4", ""],
+  cls_3:      ["5", ""],
+  cls_5:      ["6", ""],
+  cls_6:      ["7", ""],
+};
+const KEYBIND_LABELS = [
+  ["nextSubmit", "保存并看下一张试卷"],
+  ["prevPage",   "上一张试卷"],
+  ["toggleMode", "切换「看答案 / 调框模式」"],
+  ["fitCanvas",  "原卷适配窗口（复位缩放）"],
+  ["toggleAns",  "开关「显示答案」"],
+  ["nextLowConf","一键定位下一个低置信度项"],
+  ["deleteBox",  "删除选中框（调框模式，也可右键单击删）"],
+  ["recognizeBox","调用 API 识别选中框（调框模式大题/姓名框）"],
+  ["cls_0",      "调框类别：姓名学号 (M1)"],
+  ["cls_1",      "调框类别：选择题区 (M1)"],
+  ["cls_4",      "调框类别：非选择题区 (M1)"],
+  ["cls_2",      "调框类别：选择-题号 (M2)"],
+  ["cls_3",      "调框类别：选择-选项 (M2)"],
+  ["cls_5",      "调框类别：大题-框 (M3)"],
+  ["cls_6",      "调框类别：大题-题号 (M3)"],
+];
+
+function cloneDefaultKeybinds() {
+  const out = {};
+  for (const [k, v] of Object.entries(DEFAULT_KEYBINDS)) out[k] = [v[0] || "", v[1] || ""];
+  return out;
+}
+function loadKeybinds() {
+  const base = cloneDefaultKeybinds();
+  try {
+    const raw2 = localStorage.getItem("reviewKeybinds_v2");
+    if (raw2) {
+      const saved = JSON.parse(raw2);
+      for (const k of Object.keys(base)) {
+        if (Array.isArray(saved[k])) base[k] = [saved[k][0] || "", saved[k][1] || ""];
+        else if (typeof saved[k] === "string") base[k] = [saved[k], ""];
+      }
+      return base;
+    }
+    const raw1 = localStorage.getItem("reviewKeybinds_v1");
+    if (raw1) {
+      const old = JSON.parse(raw1);
+      for (const k of Object.keys(base)) {
+        if (typeof old[k] === "string") base[k][0] = old[k];
+      }
+    }
+  } catch {}
+  return base;
+}
+function saveKeybinds(kb) {
+  localStorage.setItem("reviewKeybinds_v2", JSON.stringify(kb));
+}
+function fmtKey(k) {
+  if (!k) return "未设";
+  if (k === " ") return "Space";
+  if (k === "delete") return "Del";
+  if (k === "backspace") return "Bksp";
+  if (k === "arrowright") return "→";
+  if (k === "arrowleft") return "←";
+  if (k === "arrowup") return "↑";
+  if (k === "arrowdown") return "↓";
+  return k.length === 1 ? k.toUpperCase() : k;
+}
+function primaryKeyLabel(act) {
+  const pair = state.keybinds[act] || ["", ""];
+  return fmtKey(pair[0] || pair[1] || "");
+}
+function matchActionKey(act, keyLower) {
+  if (!keyLower) return false;
+  const pair = state.keybinds[act] || ["", ""];
+  return pair[0] === keyLower || pair[1] === keyLower;
+}
+
+const BOX_META = {
+  0: { name: "姓名学号", stage: "m1", color: "#dc2626" },
+  1: { name: "选择题区", stage: "m1", color: "#16a34a" },
+  4: { name: "非选择题区", stage: "m1", color: "#2563eb" },
+  2: { name: "选择-题号", stage: "m2", color: "#0d9488" },
+  3: { name: "选择-选项", stage: "m2", color: "#059669" },
+  5: { name: "大题-框",   stage: "m3", color: "#7c3aed" },
+  6: { name: "大题-题号", stage: "m3", color: "#d97706" },
+};
+const CLS_ORDER = [0, 1, 4, 2, 3, 5, 6];
+
+const state = {
+  keybinds: loadKeybinds(),
+  listeningAction: null,
+  listeningSlot: 0,
+  result: null,
+  feedback: { revision: 0, items: {} },
+  locks: {},
+  pages: [],
+  pageIdx: 0,
+  mode: "view",          // "view" | "edit"
+  activeCls: 4,
+  showLayers: { m1: true, m2: false, m3: true },
+  showOverlay: true,
+  fillDisplayMode: localStorage.getItem("reviewFillDisplayMode") || "hover", // "hover" | "margin"
+  showConf: false,
+  selectedItemId: null,
+  selectedBoxIdx: -1,
+  workingBoxes: [],
+  workingItems: [],
+  boxesModified: false,
+  itemsModified: false,
+  recognizingUids: {},
+  recognizingBusy: false,
+  undoStack: [],
+  itemEdits: {},
+  editingPopItemId: null,
+  hoverItemId: null,
+  hoverInPopover: false,
+  resultsMtime: 0,
+  lowConfCursor: -1,
+  focusedLowConf: null,
+  // 本次会话改框工作量统计
+  workload: { moved: 0, added: 0, deleted: 0 },
+  // 画布视图变换
+  img: null,
+  imgKey: "",
+  scale: 1,
+  tx: 0,
+  ty: 0,
+  drag: null,
+  saving: false,
+};
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("paperCanvas");
+const ctx = canvas.getContext("2d");
+const host = $("canvasHost");
+const overlayLayer = $("overlayLayer");
+
+function toast(msg, ms = 2100) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), ms);
+}
+
+async function api(path, body = null) {
+  const opts = body === null
+    ? { method: "GET" }
+    : {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Review-Token": TOKEN },
+        body: JSON.stringify(body),
+      };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+function currentPage() { return state.pages[state.pageIdx] || null; }
+function isPageDone(p) {
+  if (!p) return false;
+  const rec = (state.feedback.items || {})[p.id];
+  return Boolean(rec && rec.label);
+}
+function getChoiceConfs(it) {
+  const r = it.recognition || {};
+  const nc = typeof r.number_conf === "number" ? r.number_conf
+    : (typeof r.digit_conf === "number" ? r.digit_conf
+    : (typeof r.num_conf === "number" ? r.num_conf
+    : (typeof r.number_confidence === "number" ? r.number_confidence : null)));
+  const oc = typeof r.choice_conf === "number" ? r.choice_conf
+    : (typeof r.opt_conf === "number" ? r.opt_conf
+    : (typeof r.confidence === "number" ? r.confidence : null));
+  return { nc, oc };
+}
+function isItemTrusted(it) {
+  if (!it) return false;
+  const edit = state.itemEdits[it.id];
+  if (edit && (edit.trusted || edit.label === "已订正" || edit.answer !== undefined || edit.correction !== undefined)) return true;
+  const fb = (state.feedback.items || {})[it.id];
+  if (fb && (fb.trusted || fb.label === "已订正" || fb.answer !== undefined || (fb.correction && fb.correction.length > 0))) return true;
+  return false;
+}
+function isChoiceRuleInferred(it) {
+  return Boolean(it && it.kind === "choice" && it.recognition && it.recognition.no_source === "sequence");
+}
+function isLowConfChoice(it) {
+  if (isItemTrusted(it)) return false;
+  if (isChoiceRuleInferred(it)) return true;
+  const { nc, oc } = getChoiceConfs(it);
+  if (nc !== null && nc < 0.7) return true;
+  if (oc !== null && oc < 0.7) return true;
+  return Boolean(it.issues && it.issues.length > 0);
+}
+function choiceConfText(it) {
+  const { nc, oc } = getChoiceConfs(it);
+  const parts = [];
+  if (isChoiceRuleInferred(it)) parts.push("规则补号");
+  else if (nc !== null) parts.push("号" + Math.round(nc * 100) + "%");
+  if (oc !== null) parts.push("涂" + Math.round(oc * 100) + "%");
+  return parts.join(" ");
+}
+function describeLowConfChoice(it) {
+  const { nc, oc } = getChoiceConfs(it);
+  const r = it.recognition || {};
+  const qno = (it.number && it.number !== "?") ? `第${it.number}题` : "题号未认出";
+  const reasons = [];
+  if (r.no_source === "sequence") {
+    const rawStr = (r.no_raw && r.no_raw > 0) ? r.no_raw : "?";
+    reasons.push(`几何连续性规则推算补全（非OCR识别，PP-OCRv6原读${rawStr}）`);
+  } else if (nc !== null && nc < 0.7) {
+    reasons.push(`题号OCR(PP-OCRv6) ${Math.round(nc * 100)}%`);
+  }
+  if (oc !== null && oc < 0.7) {
+    reasons.push(`涂卡识别模型(CNN) ${Math.round(oc * 100)}%`);
+  }
+  if (!reasons.length && it.issues && it.issues.length) {
+    reasons.push(`选择题识别模型：${it.issues.join("；")}`);
+  }
+  const okParts = [];
+  if (nc !== null && nc >= 0.7 && r.no_source !== "sequence") okParts.push(`题号${Math.round(nc * 100)}%`);
+  if (oc !== null && oc >= 0.7) okParts.push(`涂卡${Math.round(oc * 100)}%`);
+  return `${qno} · ${reasons.join(" + ")}${okParts.length ? `（${okParts.join(" ")}正常）` : ""}`;
+}
+function trustLowConfTarget(target) {
+  if (!target) return;
+  if (target.kind === "box") {
+    if (state.workingBoxes[target.idx]) {
+      state.workingBoxes[target.idx].trusted = true;
+      state.boxesModified = true;
+    }
+  } else if (target.item) {
+    const it = target.item;
+    state.itemEdits[it.id] = { ...(state.itemEdits[it.id] || {}), trusted: true, label: "已确认" };
+  }
+  state.focusedLowConf = null;
+  state.editingPopItemId = null;
+  state.selectedItemId = null;
+  state.lowConfCursor = -1;
+  updateDirtyBadge();
+  renderLeftList();
+  updateTopbar();
+  renderRightPanel();
+  draw();
+  toast("已标记为信任，低置信度提醒已清除（按 D 保存）", 1900);
+}
+function getChoiceDisplayAnswer(it) {
+  if (state.itemEdits[it.id] && state.itemEdits[it.id].answer !== undefined) return state.itemEdits[it.id].answer;
+  const fb = (state.feedback.items || {})[it.id];
+  if (fb && fb.answer !== undefined) return fb.answer;
+  if (fb && fb.correction) return fb.correction;
+  return it.answer || "—";
+}
+function formatFillAnswers(it) {
+  if (it.kind === "identity") {
+    return it.transcription ? `姓名：${it.transcription.name || "未作答"}  学号：${it.transcription.sid || "未作答"}` : "";
+  }
+  const ans = it.transcription && it.transcription.answers;
+  if (!ans || typeof ans !== "object") {
+    if (it.status === "等待视觉转录" || it.status === "等待豆包") return "";
+    return it.error ? "[识别异常] " + it.error : "";
+  }
+  const lines = [];
+  for (const [sub, blanks] of Object.entries(ans)) {
+    if (blanks && typeof blanks === "object") {
+      if (blanks["舍弃"] === "舍弃") lines.push(`(${sub}) [含图舍弃]`);
+      else {
+        const vals = Object.entries(blanks).map(([k, v]) => {
+          const text = String(v == null ? "" : v).trim();
+          return `${k}:${text || "未作答"}`;
+        }).join("  ");
+        lines.push(sub === "无小题号" ? vals : `(${sub}) ${vals}`);
+      }
+    } else lines.push(`(${sub}) ${String(blanks)}`);
+  }
+  return lines.join("\n");
+}
+function getFillDisplayText(it) {
+  if (state.itemEdits[it.id] && state.itemEdits[it.id].correction !== undefined) return state.itemEdits[it.id].correction;
+  const fb = (state.feedback.items || {})[it.id];
+  if (fb && typeof fb.correction === "string" && fb.correction.length > 0) return fb.correction;
+  return formatFillAnswers(it);
+}
+function renderLatexInto(el, rawText) {
+  el.innerHTML = "";
+  const lines = String(rawText || "").split("\n");
+  lines.forEach((line, idx) => {
+    if (idx > 0) el.appendChild(document.createElement("br"));
+    const parts = line.split(/(\$[^$]+\$)/g);
+    for (const part of parts) {
+      if (part.startsWith("$") && part.endsWith("$") && part.length > 2 && window.katex) {
+        const span = document.createElement("span");
+        try { window.katex.render(part.slice(1, -1), span, { throwOnError: false }); }
+        catch { span.textContent = part; }
+        el.appendChild(span);
+      } else {
+        el.appendChild(document.createTextNode(part));
+      }
+    }
+  });
+}
+
+function updateDirtyBadge() {
+  const dirty = state.boxesModified || state.itemsModified || Object.keys(state.itemEdits).length > 0;
+  $("dirtyPill").classList.toggle("show", dirty);
+}
+
+function updateWorkloadBar() {
+  const donePages = state.pages.filter(isPageDone);
+  const mineCnt = donePages.filter(p => {
+    const rec = (state.feedback.items || {})[p.id];
+    if (!REVIEWER) return true;
+    return rec && (rec.reviewer || "") === REVIEWER;
+  }).length;
+  $("wlPages").textContent = `${donePages.length}/${state.pages.length}`;
+  $("wlMine").textContent = String(mineCnt);
+  $("wlMove").textContent = String(state.workload.moved);
+  $("wlAdd").textContent = String(state.workload.added);
+  $("wlDel").textContent = String(state.workload.deleted);
+  const hasEdits = (state.workload.moved + state.workload.added + state.workload.deleted) > 0;
+  const editPart = $("wlEditPart");
+  if (editPart) editPart.classList.toggle("show", state.mode === "edit" || hasEdits);
+}
+
+function isResultInProgress(res) {
+  if (!res) return false;
+  const st = String(res.status || "");
+  if (st.includes("处理中") || st.includes("转录中") || st.includes("合并中")) return true;
+  const pages = res.pages || [];
+  return pages.some(p => (p.items || []).some(it => it.status === "等待视觉转录" || it.status === "等待豆包"));
+}
+
+function updateLiveRunBanner() {
+  const banner = $("liveRunBanner");
+  const txt = $("liveRunBannerText");
+  if (!banner || !txt || !state.result) return;
+  const res = state.result;
+  const st = String(res.status || "");
+  const stats = res.stats || {};
+  const pagesN = (res.pages || []).length;
+  const transN = stats.items_with_transcription !== undefined
+    ? stats.items_with_transcription
+    : (res.pages || []).reduce((acc, p) => acc + (p.items || []).filter(i => i.transcription).length, 0);
+
+  if (st.includes("识别失败")) {
+    banner.className = "live-run-banner show err";
+    txt.textContent = `⚠ ${st}（共 ${pagesN} 页，其中 ${stats.page_failures || 0} 页失败）。请返回工作台查看中文错误诊断与修复建议。`;
+  } else if (isResultInProgress(res)) {
+    banner.className = "live-run-banner show";
+    txt.textContent = `⚡ 后台自动识别与实时合并进行中（当前已检出 ${pagesN} 页，已出转录 ${transN} 处）… 新出答案会自动刷新，建议等本页答案完整后再点「确认」。`;
+  } else if (st.includes("待补跑")) {
+    banner.className = "live-run-banner show";
+    txt.textContent = `⚠ 当前批次状态：${st}（可返回工作台点击「补跑失败图块」仅重试失败项，不重复扣费）。`;
+  } else {
+    banner.className = "live-run-banner";
+  }
+}
+
+let _boxUidSeq = 1;
+function nextBoxUid() { return "bx_" + (_boxUidSeq++); }
+function isVlmRecogCls(cls) { return cls === 0 || cls === 5; }
+function boxIoU(a, b) {
+  if (!a || !b || a.length !== 4 || b.length !== 4) return 0;
+  const ix1 = Math.max(a[0], b[0]), iy1 = Math.max(a[1], b[1]);
+  const ix2 = Math.min(a[2], b[2]), iy2 = Math.min(a[3], b[3]);
+  const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+  if (inter <= 0) return 0;
+  const areaA = Math.max(0, a[2] - a[0]) * Math.max(0, a[3] - a[1]);
+  const areaB = Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+  const u = areaA + areaB - inter;
+  return u > 0 ? inter / u : 0;
+}
+
+function getPageBoxes(p) {
+  if (!p) return [];
+  const fbRec = (state.feedback.items || {})[p.id];
+  if (fbRec && Array.isArray(fbRec.boxes)) return fbRec.boxes;
+  return p.boxes || [];
+}
+
+function getRawPageItems(p) {
+  if (!p) return [];
+  const list = p.items || [];
+  const fbRec = (state.feedback.items || {})[p.id];
+  if (fbRec && Array.isArray(fbRec.deleted_item_ids) && fbRec.deleted_item_ids.length) {
+    const delSet = new Set(fbRec.deleted_item_ids);
+    return list.filter(it => !delSet.has(it.id));
+  }
+  return list;
+}
+
+function getPageItems(p) {
+  if (!p) return [];
+  if (p === currentPage()) return state.workingItems;
+  return getRawPageItems(p);
+}
+
+function bindBoxesAndItems(boxes, items) {
+  const itemById = new Map();
+  (items || []).forEach(it => { if (it && it.id) itemById.set(it.id, it); });
+  const claimedIds = new Set();
+
+  (boxes || []).forEach(b => {
+    if (!b._uid) b._uid = nextBoxUid();
+    if (b.item_id && itemById.has(b.item_id) && !claimedIds.has(b.item_id)) {
+      claimedIds.add(b.item_id);
+    } else if (b.item_id && !itemById.has(b.item_id)) {
+      delete b.item_id;
+    }
+  });
+
+  // 为尚未绑定的 fill(cls=5)、identity(cls=0)、unmatched(cls=2/3/6) 按最高 IoU 精准 1:1 绑定
+  const pairKind = (kind, allowedCls, minIoU) => {
+    const candidates = [];
+    (items || []).forEach(it => {
+      if (!it || it.kind !== kind || claimedIds.has(it.id) || !it.box || it.box.length !== 4) return;
+      (boxes || []).forEach((b, bi) => {
+        if (b.item_id || !allowedCls.includes(b.cls) || !b.box || b.box.length !== 4) return;
+        const ov = boxIoU(b.box, it.box);
+        if (ov >= minIoU) candidates.push({ ov, bi, it });
+      });
+    });
+    candidates.sort((a, b) => b.ov - a.ov);
+    candidates.forEach(({ bi, it }) => {
+      const b = boxes[bi];
+      if (!b || b.item_id || claimedIds.has(it.id)) return;
+      b.item_id = it.id;
+      claimedIds.add(it.id);
+    });
+  };
+  pairKind("fill", [5], 0.50);
+  pairKind("identity", [0], 0.50);
+  pairKind("unmatched", [2, 3, 6], 0.65);
+}
+
+function findBoundItemForBox(b) {
+  if (!b || !b.item_id) return null;
+  return state.workingItems.find(it => it.id === b.item_id) || null;
+}
+
+function getPendingRecogBoxIndices() {
+  const out = [];
+  state.workingBoxes.forEach((b, idx) => {
+    if (!isVlmRecogCls(b.cls)) return;
+    if (b._uid && state.recognizingUids[b._uid]) return;
+    const bound = findBoundItemForBox(b);
+    if (b._needsRecog || !bound || (!bound.transcription && bound.status !== "等待视觉转录" && bound.status !== "等待豆包")) {
+      out.push(idx);
+    }
+  });
+  return out;
+}
+
+async function hotReloadResults(showToast = false) {
+  try {
+    const data = await api("/api/state");
+    if (!data || !data.result) return;
+    const prevId = currentPage() ? currentPage().id : null;
+    state.result = data.result;
+    if (data.results_mtime) state.resultsMtime = data.results_mtime;
+    if (data.feedback) state.feedback = data.feedback;
+    if (data.locks) state.locks = data.locks;
+    state.pages = (data.result && data.result.pages) || [];
+    if (prevId) {
+      const idx = state.pages.findIndex(p => p.id === prevId);
+      if (idx >= 0) state.pageIdx = idx;
+    }
+    const cur = currentPage();
+    if (cur && !state.boxesModified && !state.itemsModified) {
+      state.workingBoxes = JSON.parse(JSON.stringify(getPageBoxes(cur)));
+      state.workingItems = JSON.parse(JSON.stringify(getRawPageItems(cur)));
+      bindBoxesAndItems(state.workingBoxes, state.workingItems);
+    }
+    updateLiveRunBanner();
+    updateTopbar();
+    renderLeftList();
+    renderRightPanel();
+    draw();
+    if (showToast) toast("已同步最新识别结果", 1400);
+  } catch {}
+}
+
+/* ==================== 页面加载与切换 ==================== */
+async function loadAll() {
+  const data = await api("/api/state");
+  state.result = data.result;
+  state.resultsMtime = data.results_mtime || 0;
+  state.feedback = data.feedback || { revision: 0, items: {} };
+  state.locks = data.locks || {};
+  state.pages = (data.result && data.result.pages) || [];
+  updateLiveRunBanner();
+
+  // 优先找第一张「未审且未被他人锁定」的试卷，避免多人进入时撞车
+  let startIdx = state.pages.findIndex(p => {
+    const lk = state.locks[p.id];
+    const lockedOther = lk && lk.client_id !== CLIENT_ID;
+    return !isPageDone(p) && !lockedOther;
+  });
+  if (startIdx < 0) startIdx = state.pages.findIndex(p => !isPageDone(p));
+  if (startIdx < 0) startIdx = 0;
+  await openPage(startIdx, true, true);
+}
+
+async function openPage(idx, skipDirtyWarn = false, skipLockWarn = false) {
+  if (!state.pages.length) return;
+  idx = Math.max(0, Math.min(state.pages.length - 1, idx));
+  const targetPage = state.pages[idx];
+  if (!skipLockWarn && targetPage) {
+    const lk = state.locks[targetPage.id];
+    if (lk && lk.client_id !== CLIENT_ID) {
+      if (!confirm(`【${lk.user || "其他成员"}】当前正在审阅「${targetPage.name}」。\n继续进入会接管该页编辑权，确定要打开吗？`)) {
+        return;
+      }
+    }
+  }
+  if (!skipDirtyWarn && (state.boxesModified || state.itemsModified || Object.keys(state.itemEdits).length > 0)) {
+    if (!confirm(`当前页有未保存改动，切换将丢弃。确认切换吗？\n（提示：按 ${primaryKeyLabel("nextSubmit")} 可直接保存并下一张）`)) {
+      return;
+    }
+  }
+  const prev = currentPage();
+  if (prev && prev.id && prev.id !== targetPage.id) {
+    api("/api/release", { client_id: CLIENT_ID, page_id: prev.id }).catch(() => {});
+  }
+
+  state.pageIdx = idx;
+  const p = currentPage();
+  state.workingBoxes = JSON.parse(JSON.stringify(getPageBoxes(p)));
+  state.workingItems = JSON.parse(JSON.stringify(getRawPageItems(p)));
+  bindBoxesAndItems(state.workingBoxes, state.workingItems);
+  state.boxesModified = false;
+  state.itemsModified = false;
+  state.recognizingUids = {};
+  state.recognizingBusy = false;
+  state.undoStack = [];
+  state.itemEdits = {};
+  state.selectedItemId = null;
+  state.selectedBoxIdx = -1;
+  state.editingPopItemId = null;
+  state.lowConfCursor = -1;
+  state.focusedLowConf = null;
+
+  api("/api/acquire", { page_id: p.id, client_id: CLIENT_ID, user: REVIEWER || "成员", force: true })
+    .then(r => { if (r.locks) state.locks = r.locks; renderLeftList(); })
+    .catch(() => {});
+
+  updateTopbar();
+  renderLeftList();
+  renderRightPanel();
+  updateDirtyBadge();
+  await loadPageImage(p);
+}
+
+function loadPageImage(p) {
+  return new Promise((resolve) => {
+    const src = "/asset/" + p.image;
+    if (state.img && state.imgKey === src && state.img.complete) {
+      fitCanvas(); draw(); resolve(); return;
+    }
+    const im = new Image();
+    im.onload = () => { state.img = im; state.imgKey = src; fitCanvas(); draw(); resolve(); };
+    im.onerror = () => { toast("原卷图片加载失败"); resolve(); };
+    im.src = src;
+  });
+}
+
+function updateTopbar() {
+  const p = currentPage();
+  $("topPageTitle").textContent = p ? `${state.pageIdx + 1}/${state.pages.length} · ${p.name}` : "无试卷";
+  $("leftSummary").textContent = `${state.pages.filter(isPageDone).length}/${state.pages.length}`;
+  $("btnPrev").disabled = state.pageIdx <= 0;
+  $("btnPrev").textContent = `← 上一张 (${primaryKeyLabel("prevPage")})`;
+  $("btnSubmitNext").textContent = state.pageIdx < state.pages.length - 1
+    ? `✓ 确认并下一张 (${primaryKeyLabel("nextSubmit")})`
+    : `✓ 确认并保存 (${primaryKeyLabel("nextSubmit")})`;
+  $("btnModeEdit").textContent = `✎ 调框 (${primaryKeyLabel("toggleMode")})`;
+  $("btnFit").textContent = `适配 (${primaryKeyLabel("fitCanvas")})`;
+
+  $("btnModeView").className = "mode-btn" + (state.mode === "view" ? " active" : "");
+  $("btnModeEdit").className = "mode-btn" + (state.mode === "edit" ? " edit-active" : "");
+  const fillBtn = $("btnFillDisplayMode");
+  if (fillBtn) {
+    fillBtn.textContent = state.fillDisplayMode === "hover" ? "💬 悬停" : "⇄ 双侧总览";
+    fillBtn.style.display = state.mode === "view" ? "" : "none";
+  }
+  $("canvasHint").textContent = state.mode === "edit"
+    ? `左键长按拖画新框 · 单击选中后缩放/移动 · 右键删框 · ${primaryKeyLabel("recognizeBox")} 识别选中框 · Ctrl+Z 撤销`
+    : (state.fillDisplayMode === "hover"
+        ? `悬停看答案 · 点击改字 · Alt 透视 · ${primaryKeyLabel("toggleMode")} 调框`
+        : `左右就近总览 · 悬停高亮 · 点击改字 · Alt 透视 · ${primaryKeyLabel("toggleMode")} 调框`);
+  updateWorkloadBar();
+  updateLowConfButton();
+  updateLiveRunBanner();
+}
+
+/* ==================== 多低置信度项一键循环定位（精确到具体框） ==================== */
+function getLowConfTargetsForPage(p, useWorkingBoxes = false) {
+  if (!p) return [];
+  const targets = [];
+  const itemList = useWorkingBoxes ? state.workingItems : getRawPageItems(p);
+  itemList.forEach(it => {
+    if (isItemTrusted(it)) return;
+    if ((it.kind === "choice" && isLowConfChoice(it)) || it.error || (it.issues && it.issues.length > 0)) {
+      let desc;
+      if (it.kind === "choice") {
+        desc = describeLowConfChoice(it);
+      } else if (it.kind === "unmatched") {
+        desc = `M2选择题标框模型(YOLO) · ${(it.issues || []).join("；") || "未配对框"}`;
+      } else {
+        desc = `第${it.number || "?"}题 · 手写转写大模型(VLM)：${it.error || (it.issues || []).join("；") || "待核对"}`;
+      }
+      if (it.box && it.box.length === 4) {
+        targets.push({ kind: "item", item: it, box: it.box, label: desc });
+      }
+    }
+  });
+  const STAGE_MODEL_NAME = {
+    m1: "M1版面标框模型(YOLO)",
+    m2: "M2选择题标框模型(YOLO)",
+    m3: "M3大题标框模型(YOLO)",
+  };
+  const boxList = useWorkingBoxes ? state.workingBoxes : (p.boxes || []);
+  boxList.forEach((b, idx) => {
+    if (b.trusted) return;
+    const c = typeof b.confidence === "number" ? b.confidence : (typeof b.conf === "number" ? b.conf : null);
+    if (c !== null && c < 0.70 && b.box && b.box.length === 4) {
+      const meta = BOX_META[b.cls] || { name: String(b.cls), stage: "m1" };
+      const modelName = STAGE_MODEL_NAME[meta.stage] || "YOLO标框模型";
+      targets.push({ kind: "box", idx, box: b.box, stage: meta.stage, label: `${modelName} · ${meta.name} ${Math.round(c * 100)}%` });
+    }
+  });
+  // 按原卷从上到下、从左到右排序，符合审阅顺序
+  targets.sort((a, b) => (a.box[1] - b.box[1]) || (a.box[0] - b.box[0]));
+  return targets;
+}
+
+function countPageLowConf(p) {
+  return getLowConfTargetsForPage(p, p === currentPage()).length;
+}
+
+function getLowConfTargets() {
+  return getLowConfTargetsForPage(currentPage(), true);
+}
+
+function findNextLowConfPageIdx() {
+  if (!state.pages.length) return -1;
+  for (let step = 1; step < state.pages.length; step++) {
+    const idx = (state.pageIdx + step) % state.pages.length;
+    if (countPageLowConf(state.pages[idx]) > 0) return idx;
+  }
+  return -1;
+}
+
+function updateLowConfButton() {
+  const btn = $("btnLowConf");
+  if (!btn) return;
+  const targets = getLowConfTargets();
+  const keyTag = primaryKeyLabel("nextLowConf");
+  if (targets.length > 0) {
+    const cur = state.lowConfCursor >= 0 ? ((state.lowConfCursor % targets.length) + 1) : 0;
+    btn.style.display = "";
+    btn.textContent = cur > 0 ? `⚠ 低置 ${cur}/${targets.length} (${keyTag})` : `⚠ 低置 (${targets.length}) (${keyTag})`;
+  } else if (findNextLowConfPageIdx() >= 0) {
+    btn.style.display = "";
+    btn.textContent = `⚠ 下页低置 (${keyTag})`;
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+function getMarginSidesForPage(p) {
+  let hasLeft = false, hasRight = false;
+  if (!p || !state.img || !state.img.width) return { hasLeft, hasRight };
+  const midX = state.img.width * 0.5;
+  getPageItems(p).forEach(it => {
+    if (it.kind !== "fill" || !it.box || it.box.length !== 4) return;
+    const [x1, y1, x2, y2] = it.box;
+    const bw = x2 - x1, bh = y2 - y1;
+    if (bh > bw * 1.4 && bw < 95) return;
+    if ((x1 + x2) * 0.5 < midX) hasLeft = true;
+    else hasRight = true;
+  });
+  return { hasLeft, hasRight };
+}
+
+function focusBoxOnCanvas(box) {
+  if (!state.img || !box || box.length !== 4) return;
+  const rect = host.getBoundingClientRect();
+  const [x1, y1, x2, y2] = box;
+  const bw = Math.max(40, x2 - x1);
+  const bh = Math.max(24, y2 - y1);
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  // 按目标框尺寸智能计算特写比例：小框（如选择题）放大到清晰可辨，大框保持完整可见
+  const idealScale = Math.min((rect.width * 0.38) / bw, (rect.height * 0.34) / bh);
+  state.scale = Math.max(0.55, Math.min(2.2, idealScale));
+  let centerRatioX = 0.5;
+  if (state.mode === "view" && state.fillDisplayMode === "margin") {
+    const sides = getMarginSidesForPage(currentPage());
+    if (sides.hasLeft && !sides.hasRight) centerRatioX = 0.60;
+    else if (!sides.hasLeft && sides.hasRight) centerRatioX = 0.40;
+  }
+  state.tx = rect.width * centerRatioX - cx * state.scale;
+  state.ty = rect.height * 0.48 - cy * state.scale;
+  $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+}
+
+function focusTargetAt(targets, cursorIdx) {
+  const t = targets[cursorIdx];
+  if (!t) return;
+  state.lowConfCursor = cursorIdx;
+  state.focusedLowConf = {
+    ...t,
+    index: cursorIdx + 1,
+    total: targets.length,
+  };
+  if (t.kind === "box") {
+    state.showLayers[t.stage] = true;
+    state.showConf = true;
+    $("chkConf").checked = true;
+    document.body.classList.add("show-conf");
+    state.selectedBoxIdx = t.idx;
+    state.selectedItemId = null;
+    state.editingPopItemId = null;
+    if (state.mode === "edit") renderRightPanel();
+  } else {
+    state.selectedItemId = t.item.id;
+    state.selectedBoxIdx = -1;
+    state.editingPopItemId = null;
+  }
+  focusBoxOnCanvas(t.box);
+  updateLowConfButton();
+  draw();
+  toast(`已定位低置信度框 ${cursorIdx + 1}/${targets.length}：${t.label}`, 2400);
+}
+
+function jumpNextLowConf() {
+  const targets = getLowConfTargets();
+  if (!targets.length) {
+    const nextIdx = findNextLowConfPageIdx();
+    if (nextIdx >= 0) {
+      openPage(nextIdx).then(() => {
+        const nextTargets = getLowConfTargets();
+        if (nextTargets.length) focusTargetAt(nextTargets, 0);
+      });
+    } else {
+      toast("本批试卷没有待排查的低置信度框", 1800);
+    }
+    return;
+  }
+  // 本页已经定位到最后一个低置框时，如果还有其他页含低置框，直接串联跳到下一页的第 1 个低置框
+  if (state.lowConfCursor >= targets.length - 1) {
+    const nextIdx = findNextLowConfPageIdx();
+    if (nextIdx >= 0) {
+      openPage(nextIdx).then(() => {
+        const nextTargets = getLowConfTargets();
+        if (nextTargets.length) focusTargetAt(nextTargets, 0);
+      });
+      return;
+    }
+  }
+  const nextCur = (state.lowConfCursor + 1) % targets.length;
+  focusTargetAt(targets, nextCur);
+}
+
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderLeftList() {
+  const list = $("pageList");
+  list.innerHTML = "";
+  state.pages.forEach((p, idx) => {
+    const done = isPageDone(p);
+    const doneRec = (state.feedback.items || {})[p.id] || null;
+    const lowCnt = countPageLowConf(p);
+    const itemsCnt = getPageItems(p).length;
+    const lk = state.locks[p.id];
+    const lockedOther = lk && lk.client_id !== CLIENT_ID;
+    const lockedMine = lk && lk.client_id === CLIENT_ID;
+
+    const row = document.createElement("div");
+    row.className = "page-row" + (idx === state.pageIdx ? " active" : "");
+    row.onclick = () => openPage(idx);
+
+    const shortName = p.name.length > 15 ? p.name.slice(-13) : p.name;
+    let badgeHtml = done ? `<span class="badge badge-done">✓ 已审</span>` : `<span class="badge badge-todo">待审</span>`;
+    if (lockedOther) badgeHtml = `<span class="badge badge-lock" title="${escHtml(lk.user)} 正在审阅此页">🔒 ${escHtml(lk.user)}</span>`;
+    else if (lockedMine && idx === state.pageIdx && !done) badgeHtml = `<span class="badge" style="background:#dbeafe;color:#1d4ed8;">✎ 审阅中</span>`;
+
+    const subParts = [itemsCnt > 0 ? `${itemsCnt}题` : "无答题区"];
+    if (done && doneRec && doneRec.reviewer) subParts.push(`${doneRec.reviewer}审`);
+
+    row.innerHTML = `
+      <div class="page-row-main">
+        <div class="page-row-name">${String(idx + 1).padStart(2, "0")} · ${escHtml(shortName)}</div>
+        <div class="page-row-sub"><span>${escHtml(subParts.join(" · "))}</span></div>
+      </div>
+      ${badgeHtml}
+    `;
+    if (lowCnt > 0) {
+      const subEl = row.querySelector(".page-row-sub");
+      const pill = document.createElement("span");
+      pill.className = "lowconf-pill-btn";
+      pill.textContent = `⚠ ${lowCnt}低置`;
+      pill.title = "点击直接定位并放大到该页第 1 个低置信度框";
+      pill.onclick = (e) => {
+        e.stopPropagation();
+        if (idx === state.pageIdx) {
+          jumpNextLowConf();
+        } else {
+          openPage(idx).then(() => {
+            const nextTargets = getLowConfTargets();
+            if (nextTargets.length) focusTargetAt(nextTargets, 0);
+          });
+        }
+      };
+      subEl.appendChild(pill);
+    }
+    list.appendChild(row);
+  });
+}
+
+/* ==================== 卷面答案层（手写框内 0% 遮挡 + 右侧水平齐平外挂批注卡） ==================== */
+function getIdentityCompactText(it) {
+  const edited = getFillDisplayText(it);
+  if (state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction) return edited;
+  if (it.transcription) {
+    const nm = it.transcription.name || "";
+    const sid = it.transcription.sid || "";
+    if (nm || sid) return [nm, sid].filter(Boolean).join(" · ");
+  }
+  return edited || "姓名学号";
+}
+
+const CIRCLED_NUMS = ["", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
+function fmtBlankIdx(k) {
+  const n = Number(k);
+  if (Number.isInteger(n) && n >= 1 && n < CIRCLED_NUMS.length) return CIRCLED_NUMS[n];
+  return `[${k}]`;
+}
+
+function appendLatexText(parent, text) {
+  const parts = String(text || "").split(/(\$[^$]+\$)/g);
+  for (const part of parts) {
+    if (part.startsWith("$") && part.endsWith("$") && part.length > 2 && window.katex) {
+      const kspan = document.createElement("span");
+      try { window.katex.render(part.slice(1, -1), kspan, { throwOnError: false }); }
+      catch { kspan.textContent = part; }
+      parent.appendChild(kspan);
+    } else {
+      parent.appendChild(document.createTextNode(part));
+    }
+  }
+}
+
+function hasUnansweredBlank(it) {
+  const ans = it && it.transcription && it.transcription.answers;
+  if (!ans || typeof ans !== "object") return false;
+  for (const blanks of Object.values(ans)) {
+    if (blanks && typeof blanks === "object" && blanks["舍弃"] !== "舍弃") {
+      for (const v of Object.values(blanks)) {
+        if (!String(v == null ? "" : v).trim()) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function compareSubKey(a, b) {
+  if (a === b) return 0;
+  if (a === "无小题号") return -1;
+  if (b === "无小题号") return 1;
+  const pa = String(a).split(/[^0-9]+/).filter(Boolean).map(Number);
+  const pb = String(b).split(/[^0-9]+/).filter(Boolean).map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    if (pa[i] === undefined) return -1;
+    if (pb[i] === undefined) return 1;
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return String(a).localeCompare(String(b), "zh-CN");
+}
+
+function renderFillMarginInto(el, it) {
+  el.innerHTML = "";
+  const hasManualEdit = Boolean(
+    (state.itemEdits[it.id] && state.itemEdits[it.id].correction !== undefined) ||
+    (((state.feedback.items || {})[it.id] || {}).correction)
+  );
+  const ans = it.transcription && it.transcription.answers;
+  if (!hasManualEdit && ans && typeof ans === "object" && Object.keys(ans).length > 0) {
+    const entries = Object.entries(ans).sort((a, b) => compareSubKey(a[0], b[0]));
+    entries.forEach(([sub, blanks]) => {
+      const seg = document.createElement("span");
+      seg.className = "sub-seg";
+      if (sub !== "无小题号") {
+        const lbl = document.createElement("span");
+        lbl.className = "sub-lbl";
+        lbl.textContent = `(${sub})`;
+        seg.appendChild(lbl);
+      }
+      if (blanks && typeof blanks === "object") {
+        if (blanks["舍弃"] === "舍弃") {
+          const pill = document.createElement("span");
+          pill.className = "blank-pill discarded";
+          pill.textContent = "含图舍弃";
+          seg.appendChild(pill);
+        } else {
+          Object.entries(blanks).forEach(([k, v]) => {
+            const rawStr = String(v == null ? "" : v).trim();
+            const isBlank = rawStr.length === 0;
+            const pill = document.createElement("span");
+            pill.className = "blank-pill" + (isBlank ? " unanswered" : "");
+            const idx = document.createElement("span");
+            idx.className = "blank-idx";
+            idx.textContent = fmtBlankIdx(k);
+            pill.appendChild(idx);
+            const val = document.createElement("span");
+            if (isBlank) {
+              val.textContent = "未作答";
+              pill.title = "此空位学生未填写答案";
+            } else {
+              appendLatexText(val, rawStr);
+            }
+            pill.appendChild(val);
+            seg.appendChild(pill);
+          });
+        }
+      } else {
+        const rawStr = String(blanks == null ? "" : blanks).trim();
+        const pill = document.createElement("span");
+        pill.className = "blank-pill" + (rawStr ? "" : " unanswered");
+        appendLatexText(pill, rawStr || "未作答");
+        seg.appendChild(pill);
+      }
+      el.appendChild(seg);
+    });
+    return;
+  }
+  if (!hasManualEdit && !ans) {
+    if (it.status === "等待视觉转录" || it.status === "等待豆包") {
+      const pill = document.createElement("span");
+      pill.className = "blank-pill pending";
+      pill.textContent = "⏳ 正在识别中…";
+      el.appendChild(pill);
+      return;
+    }
+    if (it.status === "调用失败" || it.status === "结构异常" || it.error) {
+      const pill = document.createElement("span");
+      pill.className = "blank-pill failed";
+      const reason = it.error || (it.issues && it.issues[0]) || it.status || "识别失败";
+      pill.textContent = `⚠ ${reason}`;
+      el.appendChild(pill);
+      return;
+    }
+  }
+  const lines = String(getFillDisplayText(it) || "").split("\n").map(s => s.trim()).filter(Boolean);
+  if (!lines.length) {
+    const pill = document.createElement("span");
+    pill.className = "blank-pill unanswered";
+    pill.textContent = "未作答";
+    el.appendChild(pill);
+    return;
+  }
+  lines.forEach((line) => {
+    const seg = document.createElement("span");
+    seg.className = "sub-seg";
+    const pill = document.createElement("span");
+    pill.className = "blank-pill";
+    appendLatexText(pill, line);
+    seg.appendChild(pill);
+    el.appendChild(seg);
+  });
+}
+
+function renderLowConfFocusOverlay() {
+  const f = state.focusedLowConf;
+  if (!f || !state.img || !f.box || f.box.length !== 4) return;
+  const [x1, y1, x2, y2] = f.box;
+  const sx1 = x1 * state.scale + state.tx;
+  const sy1 = y1 * state.scale + state.ty;
+  const sx2 = x2 * state.scale + state.tx;
+  const sy2 = y2 * state.scale + state.ty;
+
+  const boxEl = document.createElement("div");
+  boxEl.className = "lowconf-focus-box";
+  boxEl.style.left = Math.round(sx1 - 3) + "px";
+  boxEl.style.top = Math.round(sy1 - 3) + "px";
+  boxEl.style.width = Math.max(16, Math.round(sx2 - sx1 + 6)) + "px";
+  boxEl.style.height = Math.max(16, Math.round(sy2 - sy1 + 6)) + "px";
+
+  const tag = document.createElement("div");
+  tag.className = "lowconf-focus-tag";
+  const actionHint = f.kind === "box"
+    ? (state.mode === "edit" ? "已选中可调" : "点文字调框")
+    : "点文字改答案";
+  const txt = document.createElement("span");
+  txt.textContent = `⚠ 低置 ${f.index}/${f.total} · ${f.label} · ${actionHint}`;
+  tag.appendChild(txt);
+
+  const trustBtn = document.createElement("button");
+  trustBtn.className = "lowconf-trust-btn";
+  trustBtn.textContent = "✓ 信任无误";
+  trustBtn.title = "确认此处识别无误，立即清除低置信度橙色警告";
+  trustBtn.onmousedown = (e) => { e.stopPropagation(); };
+  trustBtn.onclick = (e) => {
+    e.stopPropagation();
+    trustLowConfTarget(f);
+  };
+  tag.appendChild(trustBtn);
+  // 如果靠近画布顶部，把标签移到框下方，避免被顶栏裁切
+  if (sy1 < 36) {
+    tag.style.bottom = "auto";
+    tag.style.top = "calc(100% + 5px)";
+  }
+  tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+  tag.onclick = (e) => {
+    e.stopPropagation();
+    if (f.kind === "box") {
+      if (state.mode !== "edit") {
+        setMode("edit");
+      }
+      state.showLayers[f.stage] = true;
+      state.showConf = true;
+      $("chkConf").checked = true;
+      document.body.classList.add("show-conf");
+      state.selectedBoxIdx = f.idx;
+      renderRightPanel();
+      draw();
+    } else if (f.item) {
+      if (state.mode !== "view") setMode("view");
+      openInlineEditor(f.item);
+    }
+  };
+  boxEl.appendChild(tag);
+  overlayLayer.appendChild(boxEl);
+}
+
+let hoverHideTimer = null;
+function scheduleHoverClear() {
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = setTimeout(() => {
+    if (!state.hoverInPopover && state.hoverItemId) {
+      state.hoverItemId = null;
+      syncHoverPopoverOnly();
+    }
+  }, 180);
+}
+function setHoverFillItem(itemId) {
+  clearTimeout(hoverHideTimer);
+  if (state.hoverItemId !== itemId) {
+    state.hoverItemId = itemId;
+    syncHoverPopoverOnly();
+  }
+}
+function syncHoverPopoverOnly() {
+  drawCanvasOnly();
+  overlayLayer.querySelectorAll(".fill-hover-pop").forEach(el => el.remove());
+  overlayLayer.querySelectorAll(".fill-mini-tag").forEach(el => {
+    const id = el.dataset.itemId;
+    const isAct = id && (id === state.hoverItemId || id === state.selectedItemId);
+    el.classList.toggle("active", Boolean(isAct));
+  });
+  const p = currentPage();
+  if (!p || !state.img || state.mode !== "view" || !state.showOverlay || state.fillDisplayMode !== "hover" || state.editingPopItemId) return;
+  const activeId = state.hoverItemId || state.selectedItemId;
+  if (!activeId) return;
+  const it = getPageItems(p).find(x => x.id === activeId && x.kind === "fill");
+  if (!it || !it.box || it.box.length !== 4) return;
+  const [x1, y1, x2, y2] = it.box;
+  const rect = host.getBoundingClientRect();
+  renderFillHoverPopover({
+    it,
+    sx1: x1 * state.scale + state.tx,
+    sy1: y1 * state.scale + state.ty,
+    sx2: x2 * state.scale + state.tx,
+    sy2: y2 * state.scale + state.ty,
+  }, rect);
+}
+
+function syncMarginHighlightOnly() {
+  drawCanvasOnly();
+  const activeId = state.hoverItemId || state.selectedItemId || "";
+  overlayLayer.querySelectorAll(".margin-card").forEach(card => {
+    const ids = (card.dataset.itemIds || "").split(",");
+    card.classList.toggle("active", Boolean(activeId && ids.includes(activeId)));
+  });
+  overlayLayer.querySelectorAll(".margin-connector").forEach(path => {
+    const ids = (path.dataset.itemIds || "").split(",");
+    const on = Boolean(activeId && ids.includes(activeId));
+    path.setAttribute("stroke", on ? "#2563eb" : "rgba(37, 99, 235, 0.34)");
+    path.setAttribute("stroke-width", on ? "2.2" : "1.25");
+    path.setAttribute("stroke-dasharray", on ? "" : "4 3");
+  });
+  overlayLayer.querySelectorAll(".margin-anchor-dot").forEach(dot => {
+    const ids = (dot.dataset.itemIds || "").split(",");
+    const on = Boolean(activeId && ids.includes(activeId));
+    dot.setAttribute("fill", on ? "#2563eb" : "rgba(37, 99, 235, 0.55)");
+    dot.setAttribute("r", on ? "4" : "2.8");
+  });
+}
+
+function renderFillHoverPopover(row, rect) {
+  const { it, sx1, sy1, sx2, sy2 } = row;
+  const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+  const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+
+  const pop = document.createElement("div");
+  pop.className = "fill-hover-pop" + (edited ? " edited" : "");
+  const head = document.createElement("div");
+  head.className = "fill-hover-pop-head";
+  const badge = document.createElement("span");
+  badge.className = "margin-qno";
+  badge.textContent = `第 ${qno} 题`;
+  const hint = document.createElement("span");
+  hint.className = "fill-hover-pop-hint";
+  hint.textContent = edited ? "已订正 · 点击修改" : "点击原地修改";
+  head.appendChild(badge);
+  head.appendChild(hint);
+  pop.appendChild(head);
+
+  const ansEl = document.createElement("div");
+  ansEl.className = "margin-ans";
+  renderFillMarginInto(ansEl, it);
+  pop.appendChild(ansEl);
+
+  pop.onmouseenter = () => {
+    clearTimeout(hoverHideTimer);
+    state.hoverInPopover = true;
+  };
+  pop.onmouseleave = () => {
+    state.hoverInPopover = false;
+    scheduleHoverClear();
+  };
+  pop.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+  pop.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+
+  // 先挂载测宽高，再精准贴靠到题框正上方或正下方（不遮挡学生作答区）
+  pop.style.left = "0px";
+  pop.style.top = "-9999px";
+  overlayLayer.appendChild(pop);
+  const pw = pop.offsetWidth || 280;
+  const ph = pop.offsetHeight || 72;
+
+  let left = Math.round(sx1);
+  if (left + pw > rect.width - 10) left = Math.round(rect.width - pw - 10);
+  left = Math.max(10, left);
+
+  let top;
+  if (sy1 - ph - 8 >= 8) {
+    top = Math.round(sy1 - ph - 8);
+  } else if (sy2 + 8 + ph <= rect.height - 46) {
+    top = Math.round(sy2 + 8);
+  } else if (sx2 + 10 + pw <= rect.width - 10) {
+    left = Math.round(sx2 + 10);
+    top = Math.max(8, Math.min(rect.height - ph - 48, Math.round(sy1)));
+  } else {
+    top = Math.max(8, Math.round(sy2 + 6));
+  }
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+}
+
+function renderEditBoxActionBar() {
+  if (state.mode !== "edit" || !state.img || state.drag) return;
+  const idx = state.selectedBoxIdx;
+  if (idx < 0 || idx >= state.workingBoxes.length) return;
+  const b = state.workingBoxes[idx];
+  if (!b || !b.box || b.box.length !== 4) return;
+  const rect = host.getBoundingClientRect();
+  const [x1, y1, x2, y2] = b.box;
+  const sx1 = x1 * state.scale + state.tx;
+  const sy1 = y1 * state.scale + state.ty;
+  const sx2 = x2 * state.scale + state.tx;
+  const sy2 = y2 * state.scale + state.ty;
+  if (sx2 < 0 || sy2 < 0 || sx1 > rect.width || sy1 > rect.height) return;
+
+  const canVlm = isVlmRecogCls(b.cls);
+  const bound = findBoundItemForBox(b);
+  const busy = Boolean(b._uid && state.recognizingUids[b._uid]) || state.recognizingBusy;
+  const hasAns = Boolean(bound && bound.transcription);
+
+  const bar = document.createElement("div");
+  bar.className = "edit-box-bar";
+  bar.onmousedown = (e) => e.stopPropagation();
+  bar.onclick = (e) => e.stopPropagation();
+
+  if (canVlm) {
+    const recBtn = document.createElement("button");
+    recBtn.className = (b._needsRecog || !hasAns) ? "btn-ai" : "btn-ai-soft";
+    recBtn.disabled = busy;
+    const keyTag = primaryKeyLabel("recognizeBox");
+    recBtn.textContent = busy
+      ? "⏳ 识别中…"
+      : (hasAns ? `↻ 重认此框 (${keyTag})` : `✨ API识别 (${keyTag})`);
+    recBtn.title = "直接裁切当前框并调用配置的视觉大模型 API 进行识别";
+    recBtn.onclick = () => recognizeBoxIndices([idx]);
+    bar.appendChild(recBtn);
+  }
+  const delBtn = document.createElement("button");
+  delBtn.className = "btn-danger";
+  delBtn.disabled = busy;
+  delBtn.textContent = bound ? "🗑 删框并消卡" : "🗑 删框";
+  delBtn.title = "删除该框并同步移除其对应答案卡片（Ctrl+Z 可撤销）";
+  delBtn.onclick = () => deleteBoxAt(idx);
+  bar.appendChild(delBtn);
+
+  bar.style.left = "0px";
+  bar.style.top = "-9999px";
+  overlayLayer.appendChild(bar);
+  const bw = bar.offsetWidth || 160;
+  const bh = bar.offsetHeight || 30;
+  let left = Math.round(Math.max(8, Math.min(rect.width - bw - 8, sx2 - bw)));
+  if (sx2 - sx1 < bw) left = Math.round(Math.max(8, Math.min(rect.width - bw - 8, sx1)));
+  let top = Math.round(sy1 - bh - 22);
+  if (top < 8) top = Math.round(Math.min(rect.height - bh - 52, sy2 + 8));
+  bar.style.left = left + "px";
+  bar.style.top = Math.max(8, top) + "px";
+}
+
+function renderOverlays() {
+  overlayLayer.innerHTML = "";
+  const p = currentPage();
+  if (!p || !state.img) return;
+  if (state.mode !== "view" || !state.showOverlay) {
+    renderEditBoxActionBar();
+    renderLowConfFocusOverlay();
+    return;
+  }
+
+  const rect = host.getBoundingClientRect();
+  const fillRows = [];
+
+  getPageItems(p).forEach(it => {
+    const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
+    const sx1 = x1 * state.scale + state.tx;
+    const sy1 = y1 * state.scale + state.ty;
+    const sx2 = x2 * state.scale + state.tx;
+    const sy2 = y2 * state.scale + state.ty;
+    if (sx2 < -40 || sy2 < -40 || sx1 > rect.width + 40 || sy1 > rect.height + 40) return;
+
+    const bw = sx2 - sx1;
+    const bh = sy2 - sy1;
+
+    if (it.kind === "choice") {
+      if (bh < 6 || bw < 16) return;
+      const chip = document.createElement("div");
+      const low = isLowConfChoice(it);
+      const edited = Boolean(
+        (state.itemEdits[it.id] && state.itemEdits[it.id].answer !== undefined) ||
+        (((state.feedback.items || {})[it.id] || {}).answer !== undefined)
+      );
+      chip.className = "overlay-chip overlay-choice" + (low ? " low-conf" : "") + (edited ? " edited" : "");
+      const ans = getChoiceDisplayAnswer(it);
+      const conf = state.showConf ? (" " + choiceConfText(it)) : "";
+      chip.textContent = `${it.number || "?"}:${ans}${conf}`;
+      const h = Math.max(10, Math.min(18, Math.floor(bh)));
+      const fs = Math.max(9, Math.min(12, Math.round(h * 0.72)));
+      chip.style.height = h + "px";
+      chip.style.fontSize = fs + "px";
+      chip.style.left = Math.round(sx1) + "px";
+      chip.style.top = Math.round(sy1 + (bh - h) / 2) + "px";
+      const ruleTip = isChoiceRuleInferred(it) ? " · 题号由几何连续性规则推算补全（非OCR）" : "";
+      chip.title = `第 ${it.number || "?"} 题：${ans}${ruleTip}（点击修改或点信任）`;
+      chip.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+      chip.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+      overlayLayer.appendChild(chip);
+    } else if (it.kind === "identity" || (it.kind === "fill" && bh > bw * 1.4 && bw < 95)) {
+      const chip = document.createElement("div");
+      const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+      chip.className = "overlay-chip overlay-identity" + (edited ? " edited" : "");
+      chip.textContent = getIdentityCompactText(it);
+      chip.style.left = Math.round(Math.max(4, sx1)) + "px";
+      chip.style.top = Math.round(Math.max(4, sy1 - 22)) + "px";
+      chip.title = "点击修改姓名/学号";
+      chip.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+      chip.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+      overlayLayer.appendChild(chip);
+    } else if (it.kind === "fill") {
+      if (sy2 < 4 || sy1 > rect.height - 4) return;
+      fillRows.push({ it, sx1, sy1, sx2, sy2, midY: (sy1 + sy2) / 2 });
+    }
+  });
+
+  if (fillRows.length && state.fillDisplayMode === "hover") {
+    // 默认悬停模式：每道填空题左上角放紧凑题号微徽章；鼠标滑到题框或徽章时就近弹出答案气泡
+    let hoveredRow = null;
+    fillRows.forEach(row => {
+      const { it, sx1, sy1 } = row;
+      const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+      const isPending = !edited && !it.transcription && (it.status === "等待视觉转录" || it.status === "等待豆包");
+      const isFailed = !edited && !it.transcription && (it.status === "调用失败" || it.status === "结构异常" || Boolean(it.error));
+      const hasBlank = !edited && hasUnansweredBlank(it);
+      const isActive = it.id === state.hoverItemId || it.id === state.selectedItemId;
+      if (isActive && !state.editingPopItemId) hoveredRow = row;
+
+      const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+      const tag = document.createElement("div");
+      tag.dataset.itemId = it.id;
+      tag.className = "fill-mini-tag"
+        + (edited ? " edited" : (isFailed ? " failed" : (isPending ? " pending" : "")))
+        + (isActive ? " active" : "");
+      const prefix = edited ? "✓ " : (isFailed ? "⚠ " : (isPending ? "⏳ " : ""));
+      tag.textContent = `${prefix}${qno}`;
+      if (hasBlank) {
+        const dot = document.createElement("span");
+        dot.className = "mini-dot";
+        dot.title = "含学生未作答空位";
+        tag.appendChild(dot);
+      }
+      tag.style.left = "0px";
+      tag.style.top = "-9999px";
+      tag.title = `第 ${qno} 题（悬停查看答案，点击原地修改）`;
+      tag.onmouseenter = () => setHoverFillItem(it.id);
+      tag.onmouseleave = () => scheduleHoverClear();
+      tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+      tag.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+      overlayLayer.appendChild(tag);
+      // 嵌在题框右上角内侧（紧贴框内右边缘，彻底避免压到上一题答案或遮挡左侧手写开头）
+      const tw = tag.offsetWidth || 24;
+      const th = tag.offsetHeight || 16;
+      const insideLeft = Math.max(Math.round(row.sx1 + 2), Math.round(row.sx2 - tw - 3));
+      const insideTop = (row.sy2 - row.sy1 >= th + 4)
+        ? Math.round(row.sy1 + 2)
+        : Math.round(row.sy1 + (row.sy2 - row.sy1 - th) / 2);
+      tag.style.left = Math.max(4, Math.min(rect.width - tw - 4, insideLeft)) + "px";
+      tag.style.top = Math.max(4, insideTop) + "px";
+    });
+    if (hoveredRow) {
+      renderFillHoverPopover(hoveredRow, rect);
+    }
+  } else if (fillRows.length) {
+    // 方案 A：智能左右双侧就近批注总览模式（左栏贴左、右栏贴右，彻底消灭跨卷长虚线）
+    const paperLeft = state.tx;
+    const paperRight = state.img.width * state.scale + state.tx;
+    const imgMidX = state.img.width * 0.5;
+    const leftRows = [];
+    const rightRows = [];
+    fillRows.forEach(r => {
+      const cx = (r.it.box[0] + r.it.box[2]) * 0.5;
+      if (cx < imgMidX) leftRows.push(r);
+      else rightRows.push(r);
+    });
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "connector-svg");
+    overlayLayer.appendChild(svg);
+
+    const layoutMarginSide = (rows, side) => {
+      if (!rows.length) return;
+      rows.sort((a, b) => a.midY - b.midY || a.sx1 - b.sx1);
+      // 仅当两题真正在同一水平行且左右不重叠时合并，避免重叠框被糊成一张卡
+      const groups = [];
+      for (const r of rows) {
+        const last = groups[groups.length - 1];
+        const sameRow = last && Math.abs(r.midY - last.midY) <= 14;
+        const noOverlapX = last && last.items.every(prev => {
+          const ov = Math.min(prev.sx2, r.sx2) - Math.max(prev.sx1, r.sx1);
+          const minW = Math.max(1, Math.min(prev.sx2 - prev.sx1, r.sx2 - r.sx1));
+          return (ov / minW) < 0.25;
+        });
+        if (sameRow && noOverlapX) {
+          last.items.push(r);
+          last.midY = last.items.reduce((s, x) => s + x.midY, 0) / last.items.length;
+          last.minSx1 = Math.min(last.minSx1, r.sx1);
+          last.maxSx2 = Math.max(last.maxSx2, r.sx2);
+        } else {
+          groups.push({ items: [r], midY: r.midY, minSx1: r.sx1, maxSx2: r.sx2 });
+        }
+      }
+      groups.forEach(g => g.items.sort((a, b) => a.sx1 - b.sx1));
+
+      let cardW, cardLeft;
+      if (side === "left") {
+        const availLeft = paperLeft - 22;
+        if (availLeft >= 200) {
+          cardW = Math.min(350, Math.floor(availLeft));
+          cardLeft = Math.round(paperLeft - 14 - cardW);
+        } else {
+          cardW = Math.min(310, Math.max(200, Math.floor(rect.width * 0.28)));
+          cardLeft = 10;
+        }
+      } else {
+        const availRight = rect.width - paperRight - 22;
+        if (availRight >= 200) {
+          cardW = Math.min(350, Math.floor(availRight));
+          cardLeft = Math.round(paperRight + 14);
+        } else {
+          cardW = Math.min(310, Math.max(200, Math.floor(rect.width * 0.28)));
+          cardLeft = Math.round(rect.width - cardW - 10);
+        }
+      }
+
+      const placed = [];
+      let prevBottom = 8;
+      groups.forEach(g => {
+        const itemIds = g.items.map(x => x.it.id);
+        const card = document.createElement("div");
+        const anyEdited = g.items.some(x => Boolean(state.itemEdits[x.it.id] || ((state.feedback.items || {})[x.it.id] || {}).correction));
+        const anyActive = g.items.some(x => x.it.id === state.hoverItemId || x.it.id === state.selectedItemId);
+        card.className = "margin-card" + (side === "left" ? " side-left" : "") + (anyEdited ? " edited" : "") + (anyActive ? " active" : "");
+        card.dataset.itemIds = itemIds.join(",");
+        card.style.left = cardLeft + "px";
+        card.style.width = cardW + "px";
+        card.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+
+        g.items.forEach(({ it }) => {
+          const rowEl = document.createElement("div");
+          const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+          rowEl.className = "margin-item" + (edited ? " edited" : "");
+          const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+          const badge = document.createElement("span");
+          badge.className = "margin-qno";
+          badge.textContent = `第${qno}题`;
+          rowEl.appendChild(badge);
+
+          const ansEl = document.createElement("span");
+          ansEl.className = "margin-ans";
+          renderFillMarginInto(ansEl, it);
+          rowEl.appendChild(ansEl);
+
+          rowEl.title = `点击修改第 ${qno} 题识别文字`;
+          rowEl.onmouseenter = () => {
+            if (state.hoverItemId !== it.id) { state.hoverItemId = it.id; syncMarginHighlightOnly(); }
+          };
+          rowEl.onmouseleave = () => {
+            if (state.hoverItemId === it.id) { state.hoverItemId = null; syncMarginHighlightOnly(); }
+          };
+          rowEl.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+          card.appendChild(rowEl);
+        });
+
+        overlayLayer.appendChild(card);
+        const ch = card.offsetHeight || 42;
+        const idealTop = Math.round(g.midY - ch / 2);
+        const top = Math.max(prevBottom, Math.max(8, idealTop));
+        prevBottom = top + ch + 7;
+        placed.push({ g, card, ch, top, anyActive, itemIds });
+      });
+
+      // 底部防裁切回推：底部卡片永不压住底部缩放条或被截断
+      const maxBottom = Math.max(120, rect.height - 52);
+      if (placed.length) {
+        const overflow = (placed[placed.length - 1].top + placed[placed.length - 1].ch) - maxBottom;
+        if (overflow > 0) {
+          let curBottom = maxBottom;
+          for (let k = placed.length - 1; k >= 0; k--) {
+            const item = placed[k];
+            if (item.top + item.ch > curBottom) {
+              item.top = Math.max(6, curBottom - item.ch);
+            }
+            curBottom = item.top - 6;
+          }
+        }
+        placed.forEach(({ g, card, ch, top, anyActive, itemIds }) => {
+          card.style.top = Math.round(top) + "px";
+          const edgeY = Math.round(top + ch / 2);
+          const anchorY = Math.round(g.midY);
+          const idsAttr = itemIds.join(",");
+          let edgeX, anchorX;
+          if (side === "left") {
+            edgeX = cardLeft + cardW;
+            anchorX = Math.round(g.minSx1);
+          } else {
+            edgeX = cardLeft;
+            anchorX = Math.round(g.maxSx2);
+          }
+          const span = side === "left" ? (anchorX - edgeX) : (edgeX - anchorX);
+          if (span >= 4) {
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            const midX = Math.round((edgeX + anchorX) / 2);
+            path.setAttribute("class", "margin-connector");
+            path.dataset.itemIds = idsAttr;
+            path.setAttribute("d", `M ${anchorX} ${anchorY} C ${midX} ${anchorY}, ${midX} ${edgeY}, ${edgeX} ${edgeY}`);
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", anyActive ? "#2563eb" : "rgba(37, 99, 235, 0.34)");
+            path.setAttribute("stroke-width", anyActive ? "2.2" : "1.25");
+            path.setAttribute("stroke-dasharray", anyActive ? "" : "4 3");
+            svg.appendChild(path);
+
+            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            dot.setAttribute("class", "margin-anchor-dot");
+            dot.dataset.itemIds = idsAttr;
+            dot.setAttribute("cx", String(anchorX));
+            dot.setAttribute("cy", String(anchorY));
+            dot.setAttribute("r", anyActive ? "4" : "2.8");
+            dot.setAttribute("fill", anyActive ? "#2563eb" : "rgba(37, 99, 235, 0.55)");
+            svg.appendChild(dot);
+          }
+        });
+      }
+    };
+
+    layoutMarginSide(leftRows, "left");
+    layoutMarginSide(rightRows, "right");
+  }
+
+  // 如果正在编辑某题，渲染紧贴该题的轻量原地编辑器
+  if (state.editingPopItemId) {
+    const it = getPageItems(p).find(x => x.id === state.editingPopItemId);
+    if (it) renderInlinePop(it);
+  }
+  // 渲染低置信度定位脉冲框（置顶显示，精准锁定具体框）
+  renderLowConfFocusOverlay();
+}
+
+function openInlineEditor(it) {
+  state.selectedItemId = it.id;
+  state.editingPopItemId = it.id;
+  draw();
+}
+
+function renderInlinePop(it) {
+  const rect = host.getBoundingClientRect();
+  const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
+  let left = Math.round(x1 * state.scale + state.tx);
+  let top = Math.round(y2 * state.scale + state.ty + 6);
+  if (left + 330 > rect.width) left = Math.max(8, rect.width - 336);
+  if (top + 170 > rect.height) top = Math.max(8, Math.round(y1 * state.scale + state.ty - 165));
+
+  const pop = document.createElement("div");
+  pop.className = "inline-pop";
+  pop.style.left = Math.max(8, left) + "px";
+  pop.style.top = Math.max(8, top) + "px";
+  pop.onmousedown = (e) => e.stopPropagation();
+  pop.onclick = (e) => e.stopPropagation();
+
+  if (it.kind === "choice") {
+    const cur = getChoiceDisplayAnswer(it);
+    const showTrust = isLowConfChoice(it);
+    const ruleBanner = isChoiceRuleInferred(it)
+      ? `<div style="font-size:11.5px;color:#b45309;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:4px 7px;margin-bottom:6px;">规则推算补全（非OCR识别）：PP-OCRv6 原读 ${escHtml(it.recognition.no_raw > 0 ? it.recognition.no_raw : "?")}，按几何连续性规则补为第 ${escHtml(it.number)} 题</div>`
+      : (showTrust ? `<div style="font-size:11.5px;color:#b45309;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:4px 7px;margin-bottom:6px;">${escHtml(describeLowConfChoice(it))}</div>` : "");
+    pop.innerHTML = `
+      <div class="inline-pop-head">
+        <span>修改第 ${escHtml(it.number || "?")} 题答案</span>
+        <button id="popClose" style="padding:2px 7px;font-size:11px;">✕</button>
+      </div>
+      ${ruleBanner}
+      <input id="popInput" placeholder="输入选项如 A / BD" style="font-weight:700;text-transform:uppercase;">
+      <div class="inline-pop-foot">
+        <span>${escHtml(choiceConfText(it) || "回车保存")}</span>
+        <div style="display:flex;gap:6px;">
+          ${showTrust ? `<button id="popTrust" style="padding:3px 9px;background:#15803d;color:#fff;border-color:#15803d;font-weight:600;">✓ 信任无误</button>` : ""}
+          <button class="btn-primary" id="popSave" style="padding:3px 10px;">确定</button>
+        </div>
+      </div>
+    `;
+    overlayLayer.appendChild(pop);
+    const inp = pop.querySelector("#popInput");
+    inp.value = cur === "—" ? "" : cur;
+    setTimeout(() => { inp.focus(); inp.select(); }, 0);
+    const closePop = () => { state.editingPopItemId = null; state.selectedItemId = null; draw(); };
+    const commit = () => {
+      const nv = inp.value.trim().toUpperCase();
+      const wasTrusted = Boolean(state.itemEdits[it.id] && state.itemEdits[it.id].trusted);
+      if (nv && nv !== (it.answer || "")) {
+        state.itemEdits[it.id] = { ...(wasTrusted ? { trusted: true } : {}), answer: nv, correction: nv, label: "已订正" };
+      } else if (wasTrusted) {
+        state.itemEdits[it.id] = { trusted: true, label: "已确认" };
+      } else {
+        delete state.itemEdits[it.id];
+      }
+      state.editingPopItemId = null;
+      state.selectedItemId = null;
+      updateDirtyBadge();
+      renderLeftList();
+      updateTopbar();
+      renderRightPanel();
+      draw();
+    };
+    pop.querySelector("#popSave").onclick = commit;
+    pop.querySelector("#popClose").onclick = closePop;
+    const tBtn = pop.querySelector("#popTrust");
+    if (tBtn) tBtn.onclick = () => trustLowConfTarget({ kind: "item", item: it });
+    inp.onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+      if (e.key === "Escape") closePop();
+    };
+  } else {
+    const title = it.kind === "identity" ? "姓名学号" : ("第 " + ((it.transcription && it.transcription.question_number) || it.number || "?") + " 题");
+    const cur = getFillDisplayText(it);
+    const showTrust = !isItemTrusted(it) && Boolean(it.error || (it.issues && it.issues.length > 0));
+    pop.innerHTML = `
+      <div class="inline-pop-head">
+        <span>修改 ${escHtml(title)} 识别文字</span>
+        <button id="popClose" style="padding:2px 7px;font-size:11px;">✕</button>
+      </div>
+      <textarea id="popTa" rows="4"></textarea>
+      <div class="inline-pop-foot">
+        <span>Ctrl+Enter 确定 · Esc 取消</span>
+        <div style="display:flex;gap:6px;">
+          ${showTrust ? `<button id="popTrust" style="padding:3px 9px;background:#15803d;color:#fff;border-color:#15803d;font-weight:600;">✓ 信任无误</button>` : ""}
+          <button class="btn-primary" id="popSave" style="padding:3px 10px;">确定</button>
+        </div>
+      </div>
+    `;
+    overlayLayer.appendChild(pop);
+    const ta = pop.querySelector("#popTa");
+    ta.value = cur;
+    setTimeout(() => { ta.focus(); }, 0);
+    const closePop = () => { state.editingPopItemId = null; state.selectedItemId = null; draw(); };
+    const commit = () => {
+      const nv = ta.value.trim();
+      const wasTrusted = Boolean(state.itemEdits[it.id] && state.itemEdits[it.id].trusted);
+      if (nv !== formatFillAnswers(it).trim()) {
+        state.itemEdits[it.id] = { ...(wasTrusted ? { trusted: true } : {}), correction: nv, label: "已订正" };
+      } else if (wasTrusted) {
+        state.itemEdits[it.id] = { trusted: true, label: "已确认" };
+      } else {
+        delete state.itemEdits[it.id];
+      }
+      state.editingPopItemId = null;
+      state.selectedItemId = null;
+      updateDirtyBadge();
+      renderLeftList();
+      updateTopbar();
+      renderRightPanel();
+      draw();
+    };
+    pop.querySelector("#popSave").onclick = commit;
+    pop.querySelector("#popClose").onclick = closePop;
+    const tBtn = pop.querySelector("#popTrust");
+    if (tBtn) tBtn.onclick = () => trustLowConfTarget({ kind: "item", item: it });
+    ta.onkeydown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+      if (e.key === "Escape") closePop();
+    };
+  }
+}
+
+/* ==================== 右侧栏（调框工具 / 可选清单） ==================== */
+function renderRightPanel() {
+  const body = $("rightBody");
+  body.innerHTML = "";
+  const p = currentPage();
+  if (!p) return;
+
+  if (state.mode === "edit") {
+    const secLayer = document.createElement("div");
+    secLayer.className = "sec-card";
+    secLayer.innerHTML = `
+      <div class="sec-title"><span>显示标框层级</span></div>
+      <div class="layer-row">
+        <label class="chk-label"><input type="checkbox" id="lyM1" ${state.showLayers.m1 ? "checked" : ""}> M1 版面</label>
+        <label class="chk-label"><input type="checkbox" id="lyM2" ${state.showLayers.m2 ? "checked" : ""}> M2 选择</label>
+        <label class="chk-label"><input type="checkbox" id="lyM3" ${state.showLayers.m3 ? "checked" : ""}> M3 大题</label>
+      </div>
+    `;
+    body.appendChild(secLayer);
+    ["m1", "m2", "m3"].forEach(k => {
+      secLayer.querySelector("#ly" + k.toUpperCase()).onchange = (e) => { state.showLayers[k] = e.target.checked; draw(); };
+    });
+
+    const secCls = document.createElement("div");
+    secCls.className = "sec-card";
+    secCls.innerHTML = `<div class="sec-title"><span>新建框类别</span></div>`;
+    const clsList = document.createElement("div");
+    clsList.className = "cls-list";
+    CLS_ORDER.forEach(cid => {
+      const m = BOX_META[cid];
+      const btn = document.createElement("button");
+      btn.className = "cls-btn" + (state.activeCls === cid ? " active" : "");
+      btn.innerHTML = `
+        <span class="cls-left"><span class="cls-dot" style="background:${m.color}"></span>${m.name} <small style="color:var(--muted)">(${m.stage.toUpperCase()})</small></span>
+        <span class="cls-key">${primaryKeyLabel("cls_" + cid)}</span>
+      `;
+      btn.onclick = () => {
+        state.activeCls = cid;
+        state.showLayers[m.stage] = true;
+        if (state.selectedBoxIdx >= 0 && state.workingBoxes[state.selectedBoxIdx] && state.workingBoxes[state.selectedBoxIdx].cls !== cid) {
+          state.selectedBoxIdx = -1;
+        }
+        renderRightPanel();
+        draw();
+      };
+      clsList.appendChild(btn);
+    });
+    secCls.appendChild(clsList);
+    body.appendChild(secCls);
+
+    const secAct = document.createElement("div");
+    secAct.className = "sec-card";
+    const selBox = state.selectedBoxIdx >= 0 ? state.workingBoxes[state.selectedBoxIdx] : null;
+    const selMeta = selBox ? (BOX_META[selBox.cls] || { name: String(selBox.cls) }) : null;
+    const selConf = selBox ? (typeof selBox.confidence === "number" ? `${(selBox.confidence * 100).toFixed(1)}%` : "人工绘制") : "";
+    const selBound = selBox ? findBoundItemForBox(selBox) : null;
+    const selCanVlm = Boolean(selBox && isVlmRecogCls(selBox.cls));
+    const selHasAns = Boolean(selBound && selBound.transcription);
+    const pendingIndices = getPendingRecogBoxIndices();
+    const recogKey = primaryKeyLabel("recognizeBox");
+    const busy = state.recognizingBusy;
+    const selBtnLabel = busy
+      ? "⏳ 正在调用 API…"
+      : (selHasAns ? `↻ 重新识别此框 (${recogKey})` : `✨ 调用 API 识别此框 (${recogKey})`);
+
+    secAct.innerHTML = `
+      <div class="sec-title"><span>快捷操作</span><span>共 ${state.workingBoxes.length} 框</span></div>
+      ${selBox ? `<div style="font-size:12px;margin-bottom:7px;color:var(--text);">当前选中：<b>${escHtml(selMeta.name)}</b> <span style="color:var(--muted);">（${escHtml(selConf)}）</span>${selBox._needsRecog ? ` <span style="color:#b45309;font-weight:700;">· 待识别</span>` : ""}</div>` : ""}
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${selCanVlm ? `<button class="${(selBox._needsRecog || !selHasAns) ? "btn-ai" : "btn-ai-soft"}" id="btnRecogSel" ${busy ? "disabled" : ""} style="width:100%;padding:7px 10px;">${selBtnLabel}</button>` : ""}
+        ${pendingIndices.length > 0 ? `<button class="btn-ai-soft" id="btnRecogPending" ${busy ? "disabled" : ""} style="width:100%;padding:6px 10px;">${busy ? "⏳ 识别中…" : `✨ 一键识别本页全部待识别框 (${pendingIndices.length})`}</button>` : ""}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button id="btnUndoBox" ${state.undoStack.length && !busy ? "" : "disabled"} style="flex:1;">↶ 撤销 (Ctrl+Z)</button>
+          <button class="btn-danger" id="btnDelBox" ${selBox && !busy ? "" : "disabled"} style="flex:1;">🗑 ${selBound ? "删框并消卡" : "删除框"} (${primaryKeyLabel("deleteBox")})</button>
+        </div>
+      </div>
+      <div id="selRecogPreview"></div>
+      <div style="margin-top:8px;font-size:11.5px;color:var(--muted);line-height:1.65;">
+        • <b>左键长按拖动</b>：任意位置（含蓝色大框内）直接画新框；<b>左键单击</b>：选中框后可拖边/角缩放、拖框内移动（<b>Esc</b> 取消选中）<br>
+        • <b>删框即消卡</b>：<b>右键单击框</b>或按 Delete 删框，切回看答案卡片立即消失（<b>Ctrl+Z</b> 连原答案无损恢复）<br>
+        • <b>新框直调 API</b>：画完「大题-框 (6)」或「姓名学号 (1)」后按 <b>${recogKey}</b> 直接调用大模型识别<br>
+        • <b>平移画布</b>：中键/右键拖动 或 空格+左键拖动
+      </div>
+    `;
+    body.appendChild(secAct);
+    secAct.querySelector("#btnUndoBox").onclick = undoBoxEdit;
+    secAct.querySelector("#btnDelBox").onclick = () => deleteBoxAt(state.selectedBoxIdx);
+    const recSelBtn = secAct.querySelector("#btnRecogSel");
+    if (recSelBtn) recSelBtn.onclick = () => recognizeBoxIndices([state.selectedBoxIdx]);
+    const recPendBtn = secAct.querySelector("#btnRecogPending");
+    if (recPendBtn) recPendBtn.onclick = () => recognizeBoxIndices(getPendingRecogBoxIndices());
+
+    // 若当前选中框已有关联识别结果，直接在此预览，无需反复切模式
+    const prevWrap = secAct.querySelector("#selRecogPreview");
+    if (prevWrap && selBound && (selBound.kind === "fill" || selBound.kind === "identity")) {
+      const boxDiv = document.createElement("div");
+      boxDiv.className = "recog-preview-box";
+      const qno = selBound.kind === "identity"
+        ? "姓名学号"
+        : `第 ${(selBound.transcription && selBound.transcription.question_number) || selBound.number || "?"} 题`;
+      const head = document.createElement("div");
+      head.className = "recog-preview-head";
+      head.innerHTML = `<span>已关联答案 · ${escHtml(qno)}</span><span style="color:var(--muted);font-weight:500;">${escHtml(selBound.status || "")}</span>`;
+      boxDiv.appendChild(head);
+      const ansHolder = document.createElement("div");
+      ansHolder.className = "margin-ans";
+      if (selBound.kind === "identity") {
+        ansHolder.textContent = getIdentityCompactText(selBound);
+      } else {
+        renderFillMarginInto(ansHolder, selBound);
+      }
+      boxDiv.appendChild(ansHolder);
+      prevWrap.appendChild(boxDiv);
+    }
+    return;
+  }
+
+  // 看答案模式下的可选右侧汇总（平时默认收起）
+  const choices = getPageItems(p).filter(i => i.kind === "choice");
+  if (choices.length) {
+    const sec = document.createElement("div");
+    sec.className = "sec-card";
+    sec.innerHTML = `<div class="sec-title"><span>选择题速览（${choices.length} 题）</span></div>`;
+    const grid = document.createElement("div");
+    grid.className = "choice-grid";
+    choices.forEach(it => {
+      const chip = document.createElement("div");
+      const edited = Boolean(
+        (state.itemEdits[it.id] && state.itemEdits[it.id].answer !== undefined) ||
+        (((state.feedback.items || {})[it.id] || {}).answer !== undefined)
+      );
+      chip.className = "choice-chip" + (isLowConfChoice(it) ? " low-conf" : "") + (edited ? " edited" : "");
+      chip.innerHTML = `
+        <div class="choice-top"><span class="choice-no">${escHtml(it.number || "?")}</span><span class="choice-ans">${escHtml(getChoiceDisplayAnswer(it))}</span></div>
+        <div class="choice-conf">${escHtml(choiceConfText(it) || "—")}</div>
+      `;
+      chip.onclick = () => openInlineEditor(it);
+      grid.appendChild(chip);
+    });
+    sec.appendChild(grid);
+    body.appendChild(sec);
+  }
+  const tip = document.createElement("div");
+  tip.className = "sec-card";
+  tip.style.color = "var(--muted)";
+  tip.style.lineHeight = "1.6";
+  tip.innerHTML = `所有手写与选择识别结果已直接显示在原卷框上，<b>点击原卷上的任意框即可直接修改答案</b>。平时可收起右侧栏让原卷更大。`;
+  body.appendChild(tip);
+}
+
+/* ==================== 画布绘制与精准命中检测（整边 + 四角缩放） ==================== */
+function resizeCanvas() {
+  const rect = host.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function fitCanvas() {
+  if (!state.img) return;
+  const rect = host.getBoundingClientRect();
+  const pad = 16;
+  let reserveLeft = 0, reserveRight = 0;
+  if (state.mode === "view" && state.showOverlay && state.fillDisplayMode === "margin" && rect.width >= 760) {
+    const sides = getMarginSidesForPage(currentPage());
+    if (sides.hasLeft && sides.hasRight) {
+      const wing = Math.max(210, Math.min(310, Math.floor(rect.width * 0.22)));
+      reserveLeft = wing + 14;
+      reserveRight = wing + 14;
+    } else if (sides.hasLeft) {
+      const wing = Math.max(240, Math.min(350, Math.floor(rect.width * 0.27)));
+      reserveLeft = wing + 14;
+    } else if (sides.hasRight) {
+      const wing = Math.max(240, Math.min(350, Math.floor(rect.width * 0.27)));
+      reserveRight = wing + 14;
+    }
+  }
+  const availW = Math.max(260, rect.width - reserveLeft - reserveRight - pad * 2);
+  const availH = Math.max(180, rect.height - pad * 2);
+  const sw = availW / state.img.width;
+  const sh = availH / state.img.height;
+  state.scale = Math.max(0.05, Math.min(sw, sh));
+  const paperW = state.img.width * state.scale;
+  state.tx = pad + reserveLeft + Math.max(0, (availW - paperW) / 2);
+  state.ty = (rect.height - state.img.height * state.scale) / 2;
+  $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+}
+
+function screenToImg(sx, sy) { return [(sx - state.tx) / state.scale, (sy - state.ty) / state.scale]; }
+
+function visibleBoxIndices() {
+  const out = [];
+  state.workingBoxes.forEach((b, idx) => {
+    const meta = BOX_META[b.cls];
+    if (!meta) return;
+    if (state.mode === "edit") {
+      if (state.showLayers[meta.stage]) out.push(idx);
+    } else {
+      if (b.cls === 0 || b.cls === 5) out.push(idx);
+    }
+  });
+  return out;
+}
+
+/** 检测点 (ix, iy) 命中 box 的哪个边/角，返回 'nw'|'ne'|'sw'|'se'|'n'|'s'|'w'|'e'|null */
+function hitResizeEdge(box, ix, iy) {
+  const [x1, y1, x2, y2] = box;
+  const tol = 8 / Math.max(0.15, state.scale);
+  const nearL = Math.abs(ix - x1) <= tol;
+  const nearR = Math.abs(ix - x2) <= tol;
+  const nearT = Math.abs(iy - y1) <= tol;
+  const nearB = Math.abs(iy - y2) <= tol;
+  const inX = ix >= x1 - tol && ix <= x2 + tol;
+  const inY = iy >= y1 - tol && iy <= y2 + tol;
+  if (!inX || !inY) return null;
+  if (nearL && nearT) return "nw";
+  if (nearR && nearT) return "ne";
+  if (nearL && nearB) return "sw";
+  if (nearR && nearB) return "se";
+  if (nearT && ix > x1 && ix < x2) return "n";
+  if (nearB && ix > x1 && ix < x2) return "s";
+  if (nearL && iy > y1 && iy < y2) return "w";
+  if (nearR && iy > y1 && iy < y2) return "e";
+  return null;
+}
+
+function edgeToCursor(dir) {
+  return { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", w: "ew-resize", e: "ew-resize" }[dir] || "default";
+}
+
+/** 仅命中当前已选中的框（先四边/四角缩放，再框内移动）；未选中的框不拦截左键长按画新框 */
+function hitTestSelectedBox(ix, iy) {
+  const idx = state.selectedBoxIdx;
+  if (idx < 0 || idx >= state.workingBoxes.length) return null;
+  const indices = visibleBoxIndices();
+  if (!indices.includes(idx)) return null;
+  const b = state.workingBoxes[idx];
+  if (!b || !b.box || b.box.length !== 4) return null;
+  const dir = hitResizeEdge(b.box, ix, iy);
+  if (dir) return { kind: "resize", idx, dir };
+  const [x1, y1, x2, y2] = b.box;
+  if (ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2) {
+    return { kind: "move", idx };
+  }
+  return null;
+}
+
+/** 命中任意可见框（用于左键单击选中 & 右键单击删框），严格按面积从小到大排序（小框优先，避免大框抢点） */
+function hitTestAnyBox(ix, iy) {
+  const indices = visibleBoxIndices();
+  const areaOf = (b) => Math.max(0, (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]));
+  const inside = indices
+    .map(idx => ({ idx, b: state.workingBoxes[idx] }))
+    .filter(({ b }) => b && b.box && b.box.length === 4 && ix >= b.box[0] && ix <= b.box[2] && iy >= b.box[1] && iy <= b.box[3])
+    .sort((a, b) => areaOf(a.b) - areaOf(b.b));
+  if (inside.length) {
+    return { idx: inside[0].idx, allInside: inside.map(x => x.idx) };
+  }
+  const onEdge = indices
+    .map(idx => ({ idx, b: state.workingBoxes[idx] }))
+    .filter(({ b }) => b && b.box && b.box.length === 4 && Boolean(hitResizeEdge(b.box, ix, iy)))
+    .sort((a, b) => areaOf(a.b) - areaOf(b.b));
+  if (onEdge.length) {
+    return { idx: onEdge[0].idx, allInside: onEdge.map(x => x.idx) };
+  }
+  return null;
+}
+
+function drawCanvasOnly() {
+  const rect = host.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  if (!state.img) return;
+
+  ctx.save();
+  ctx.translate(state.tx, state.ty);
+  ctx.scale(state.scale, state.scale);
+  ctx.drawImage(state.img, 0, 0);
+
+  const p = currentPage();
+  const inv = 1 / Math.max(0.15, state.scale);
+
+  visibleBoxIndices().forEach(idx => {
+    const b = state.workingBoxes[idx];
+    const meta = BOX_META[b.cls] || { color: "#2563eb", name: String(b.cls) };
+    const [x1, y1, x2, y2] = b.box;
+    const isSel = state.mode === "edit" && idx === state.selectedBoxIdx;
+    ctx.lineWidth = (isSel ? 2.6 : 1.5) * inv;
+    ctx.strokeStyle = meta.color;
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    if (isSel) {
+      ctx.fillStyle = meta.color + "1c";
+      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+      const hs = 5 * inv;
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      const pts = [[x1,y1],[mx,y1],[x2,y1],[x2,my],[x2,y2],[mx,y2],[x1,y2],[x1,my]];
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = meta.color;
+      ctx.lineWidth = 1.6 * inv;
+      pts.forEach(([px, py]) => {
+        ctx.fillRect(px - hs, py - hs, hs * 2, hs * 2);
+        ctx.strokeRect(px - hs, py - hs, hs * 2, hs * 2);
+      });
+    }
+    if (state.mode === "edit") {
+      const isRecogBusy = Boolean(b._uid && state.recognizingUids[b._uid]);
+      if (isRecogBusy) {
+        ctx.save();
+        ctx.fillStyle = "rgba(37, 99, 235, 0.14)";
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 2.6 * inv;
+        ctx.setLineDash([7 * inv, 4 * inv]);
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.restore();
+      }
+      ctx.font = `600 ${Math.max(10, 11.5 * inv)}px sans-serif`;
+      const confVal = typeof b.confidence === "number" ? b.confidence : (typeof b.conf === "number" ? b.conf : null);
+      const confSuffix = state.showConf ? (confVal !== null ? ` ${Math.round(confVal * 100)}%` : " 人工") : "";
+      const recogSuffix = isRecogBusy ? " · ⏳识别中" : (isVlmRecogCls(b.cls) && b._needsRecog ? " · 待识别" : "");
+      const tag = meta.name + confSuffix + recogSuffix;
+      const tw = ctx.measureText(tag).width + 8 * inv;
+      const th = 16 * inv;
+      ctx.fillStyle = isRecogBusy
+        ? "#2563eb"
+        : ((isVlmRecogCls(b.cls) && b._needsRecog)
+            ? "#d97706"
+            : ((state.showConf && !b.trusted && confVal !== null && confVal < 0.7) ? "#d97706" : meta.color));
+      ctx.fillRect(x1, Math.max(0, y1 - th), tw, th);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
+    }
+  });
+
+  if (state.mode === "view" && p) {
+    getPageItems(p).forEach(it => {
+      const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
+      const isSel = it.id === state.selectedItemId || it.id === state.hoverItemId;
+      if (it.kind === "choice") {
+        const low = isLowConfChoice(it);
+        ctx.lineWidth = (isSel ? 2.6 : 1.4) * inv;
+        ctx.strokeStyle = isSel ? "#2563eb" : (low ? "#d97706" : "#15803d");
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      } else if (isSel) {
+        ctx.fillStyle = "rgba(37, 99, 235, 0.08)";
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.lineWidth = 2.6 * inv;
+        ctx.strokeStyle = "#2563eb";
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      }
+    });
+  }
+
+  if (state.drag && state.drag.type === "draw") {
+    const d = state.drag;
+    const meta = BOX_META[state.activeCls] || { color: "#2563eb", name: String(state.activeCls) };
+    const x1 = Math.min(d.ix0, d.ix1), y1 = Math.min(d.iy0, d.iy1);
+    const rw = Math.abs(d.ix1 - d.ix0), rh = Math.abs(d.iy1 - d.iy0);
+    ctx.fillStyle = meta.color + "18";
+    ctx.fillRect(x1, y1, rw, rh);
+    ctx.strokeStyle = meta.color;
+    ctx.lineWidth = 2.2 * inv;
+    ctx.setLineDash([6 * inv, 4 * inv]);
+    ctx.strokeRect(x1, y1, rw, rh);
+    ctx.setLineDash([]);
+    if (rw >= 6 * inv && rh >= 6 * inv) {
+      ctx.font = `600 ${Math.max(10, 11.5 * inv)}px sans-serif`;
+      const tag = `+ ${meta.name}`;
+      const tw = ctx.measureText(tag).width + 8 * inv;
+      const th = 16 * inv;
+      ctx.fillStyle = meta.color;
+      ctx.fillRect(x1, Math.max(0, y1 - th), tw, th);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
+    }
+  }
+
+  ctx.restore();
+}
+
+function draw() {
+  drawCanvasOnly();
+  renderOverlays();
+}
+
+function pushUndo() {
+  state.undoStack.push({
+    boxes: JSON.parse(JSON.stringify(state.workingBoxes)),
+    items: JSON.parse(JSON.stringify(state.workingItems)),
+    itemEdits: JSON.parse(JSON.stringify(state.itemEdits)),
+  });
+  if (state.undoStack.length > 50) state.undoStack.shift();
+}
+
+function undoBoxEdit() {
+  if (!state.undoStack.length || state.recognizingBusy) return;
+  const snap = state.undoStack.pop();
+  if (Array.isArray(snap)) {
+    state.workingBoxes = snap;
+  } else {
+    state.workingBoxes = snap.boxes || [];
+    state.workingItems = snap.items || [];
+    state.itemEdits = snap.itemEdits || {};
+    bindBoxesAndItems(state.workingBoxes, state.workingItems);
+  }
+  state.selectedBoxIdx = -1;
+  state.boxesModified = true;
+  state.itemsModified = true;
+  updateDirtyBadge();
+  renderLeftList();
+  updateTopbar();
+  renderRightPanel();
+  draw();
+  toast("已撤销上一步改动（框与答案同步恢复）", 1500);
+}
+
+function deleteBoxAt(idx) {
+  if (idx < 0 || idx >= state.workingBoxes.length || state.recognizingBusy) return;
+  pushUndo();
+  const [removed] = state.workingBoxes.splice(idx, 1);
+  let removedItemCount = 0;
+
+  if (removed) {
+    const idsToDrop = new Set();
+    if (removed.item_id) idsToDrop.add(removed.item_id);
+    // 若删除的是 M2 选择-选项框 (cls=3)，且所属 choice 内已无其他选项框，一并清理对应选择题卡片
+    if (removed.cls === 3 && removed.box && removed.box.length === 4) {
+      const rcx = (removed.box[0] + removed.box[2]) * 0.5;
+      const rcy = (removed.box[1] + removed.box[3]) * 0.5;
+      state.workingItems.forEach(it => {
+        if (it.kind !== "choice" || !it.box || it.box.length !== 4) return;
+        const [x1, y1, x2, y2] = it.box;
+        if (rcx >= x1 && rcx <= x2 && rcy >= y1 && rcy <= y2) {
+          const hasOtherOpt = state.workingBoxes.some(ob => {
+            if (ob.cls !== 3 || !ob.box || ob.box.length !== 4) return false;
+            const ocx = (ob.box[0] + ob.box[2]) * 0.5;
+            const ocy = (ob.box[1] + ob.box[3]) * 0.5;
+            return ocx >= x1 && ocx <= x2 && ocy >= y1 && ocy <= y2;
+          });
+          if (!hasOtherOpt) idsToDrop.add(it.id);
+        }
+      });
+    }
+    if (idsToDrop.size > 0) {
+      const before = state.workingItems.length;
+      state.workingItems = state.workingItems.filter(it => !idsToDrop.has(it.id));
+      removedItemCount = before - state.workingItems.length;
+      idsToDrop.forEach(id => {
+        delete state.itemEdits[id];
+        if (state.hoverItemId === id) state.hoverItemId = null;
+        if (state.selectedItemId === id) state.selectedItemId = null;
+        if (state.editingPopItemId === id) state.editingPopItemId = null;
+        if (state.focusedLowConf && state.focusedLowConf.item && state.focusedLowConf.item.id === id) {
+          state.focusedLowConf = null;
+        }
+      });
+    }
+  }
+
+  state.selectedBoxIdx = -1;
+  state.boxesModified = true;
+  state.itemsModified = true;
+  state.workload.deleted += 1;
+  updateDirtyBadge();
+  updateWorkloadBar();
+  renderLeftList();
+  updateTopbar();
+  renderRightPanel();
+  draw();
+  toast(
+    removedItemCount > 0
+      ? "已删除框并同步移除对应答案卡（Ctrl+Z 可还原）"
+      : "已删除框（Ctrl+Z 可撤销）",
+    1700
+  );
+}
+
+async function recognizeBoxIndices(indices) {
+  if (state.recognizingBusy) return;
+  const p = currentPage();
+  if (!p) return;
+  const uniqueIdx = [...new Set((indices || []).filter(i => i >= 0 && i < state.workingBoxes.length))];
+  if (!uniqueIdx.length) {
+    toast("请先选中一个大题-框 (M3) 或姓名学号框 (M1)", 2200);
+    return;
+  }
+  const targets = [];
+  const uidList = [];
+  uniqueIdx.forEach(idx => {
+    const b = state.workingBoxes[idx];
+    if (!b || !isVlmRecogCls(b.cls)) return;
+    if (!b._uid) b._uid = nextBoxUid();
+    targets.push({
+      cls: b.cls,
+      box: b.box,
+      item_id: b.item_id || "",
+      client_uid: b._uid,
+    });
+    uidList.push(b._uid);
+  });
+  if (!targets.length) {
+    toast("仅「大题-框 (M3)」与「姓名学号 (M1)」支持直接调用视觉大模型 API 识别", 2600);
+    return;
+  }
+
+  state.recognizingBusy = true;
+  uidList.forEach(uid => { state.recognizingUids[uid] = true; });
+  renderRightPanel();
+  draw();
+  toast(`正在调用视觉大模型 API 识别 ${targets.length} 个框…`, 4500);
+
+  try {
+    const res = await api("/api/recognize-box", {
+      page_id: p.id,
+      targets,
+    });
+    if (res.results_mtime) state.resultsMtime = res.results_mtime;
+
+    let okCnt = 0;
+    let firstQno = "";
+    (res.recognized || []).forEach(row => {
+      const it = row.item;
+      if (!it || !it.id) return;
+      okCnt += 1;
+      if (!firstQno) {
+        firstQno = it.kind === "identity"
+          ? "姓名学号"
+          : `第 ${(it.transcription && it.transcription.question_number) || it.number || "?"} 题`;
+      }
+      const b = state.workingBoxes.find(x => x._uid === row.client_uid);
+      if (b) {
+        b.item_id = it.id;
+        b._needsRecog = false;
+        b._isNew = false;
+        b.manual = true;
+      }
+      const pos = state.workingItems.findIndex(x => x.id === it.id);
+      if (pos >= 0) state.workingItems[pos] = it;
+      else state.workingItems.push(it);
+      // 同步清理旧的手工文字订正，使新识别文字立即呈现
+      delete state.itemEdits[it.id];
+    });
+
+    if (okCnt > 0) {
+      state.boxesModified = true;
+      state.itemsModified = true;
+    }
+
+    const failCnt = (res.failed || []).length;
+    const costObj = res.cost;
+    let costTag = "";
+    if (costObj && costObj.found && typeof costObj.cost === "number") {
+      const sym = costObj.currency === "USD" ? "$" : "¥";
+      costTag = ` · 约 ${sym}${costObj.cost < 0.01 ? costObj.cost.toFixed(4) : costObj.cost.toFixed(3)}`;
+    } else if (res.usage && (res.usage.prompt_tokens || res.usage.completion_tokens)) {
+      costTag = ` · ${(res.usage.prompt_tokens || 0) + (res.usage.completion_tokens || 0)} tok`;
+    }
+    const secTag = res.elapsed_seconds ? `耗时 ${res.elapsed_seconds}s` : "";
+    if (okCnt === 1 && !failCnt) {
+      toast(`✓ 已识别 ${firstQno}（${secTag}${costTag}），切回「看答案」即可查看`, 3200);
+    } else if (okCnt > 0) {
+      toast(`✓ 已识别 ${okCnt} 个框${failCnt ? `，${failCnt} 个失败` : ""}（${secTag}${costTag}）`, 3400);
+    } else {
+      toast(`识别失败：${res.error || "大模型未返回有效结果"}`, 4000);
+    }
+  } catch (err) {
+    toast("API 识别失败：" + err.message, 4200);
+  } finally {
+    uidList.forEach(uid => { delete state.recognizingUids[uid]; });
+    state.recognizingBusy = false;
+    updateDirtyBadge();
+    renderLeftList();
+    updateTopbar();
+    renderRightPanel();
+    draw();
+  }
+}
+
+/* ==================== 鼠标与画布交互（支持右键删框 + 实时缩放光标） ==================== */
+let spaceDown = false;
+
+host.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  if (!state.img) return;
+  const rect = host.getBoundingClientRect();
+  const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+  const factor = ev.deltaY < 0 ? 1.14 : 1 / 1.14;
+  const nextScale = Math.max(0.08, Math.min(8, state.scale * factor));
+  const ix = (sx - state.tx) / state.scale, iy = (sy - state.ty) / state.scale;
+  state.scale = nextScale;
+  state.tx = sx - ix * state.scale;
+  state.ty = sy - iy * state.scale;
+  $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+  draw();
+}, { passive: false });
+
+host.addEventListener("mousedown", (ev) => {
+  if (!state.img) return;
+  const rect = host.getBoundingClientRect();
+  const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+  const [ix, iy] = screenToImg(sx, sy);
+
+  // 点击画布空白处关闭原地文字编辑器并取消高亮选中框
+  if (state.editingPopItemId && ev.button === 0 && !spaceDown) {
+    state.editingPopItemId = null;
+    state.selectedItemId = null;
+    draw();
+    return;
+  }
+
+  // 中键拖动 / 空格+左键拖动 -> 任意模式立即平移（兼容 CAD 习惯）
+  if (ev.button === 1 || (ev.button === 0 && spaceDown)) {
+    ev.preventDefault();
+    state.drag = { type: "pan", sx, sy, tx0: state.tx, ty0: state.ty };
+    host.classList.add("panning");
+    return;
+  }
+
+  // 右键（全模式兼容）：
+  // - 拖动 >= 5px：平移画布（兼容右键拖图习惯）
+  // - 调框模式下短按单击（< 5px）落在框上：删除最内层命中的框；落在空白：取消选中
+  if (ev.button === 2) {
+    ev.preventDefault();
+    const hit = state.mode === "edit" ? hitTestAnyBox(ix, iy) : null;
+    state.drag = {
+      type: "right_pending",
+      sx, sy,
+      tx0: state.tx, ty0: state.ty,
+      hitIdx: hit ? hit.idx : -1,
+    };
+    return;
+  }
+
+  if (ev.button !== 0) return;
+
+  if (state.mode === "view") {
+    const p = currentPage();
+    const hit = getPageItems(p).find(it => {
+      const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
+      return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
+    });
+    if (hit) {
+      // 点击(<5px)才打开原地改字，拖动(>=5px)则平滑平移画布，避免在大填空框里无法拖图
+      state.drag = { type: "view_pending", sx, sy, tx0: state.tx, ty0: state.ty, hitItem: hit };
+      return;
+    }
+    if (state.selectedItemId || state.focusedLowConf) {
+      state.selectedItemId = null;
+      state.focusedLowConf = null;
+      draw();
+    }
+    state.drag = { type: "pan", sx, sy, tx0: state.tx, ty0: state.ty };
+    host.classList.add("panning");
+    return;
+  }
+
+  // 调框模式左键（与「标注工具」手感完全一致）：
+  // 1) 若已选中某个框，且按在【该已选中框】的四边/四角或框内 -> 缩放 / 移动（短按未拖动时可在重叠框间循环切换）
+  // 2) 其余任意位置（即使落在蓝色「非选择题区」等未选中大框内部！）：
+  //    - 长按拖动 >= 5px -> 直接新建框（永不误抓大框）
+  //    - 短按单击 < 5px -> 选中鼠标下最小框（再点可循环重叠框；点空白取消选中）
+  const selHit = hitTestSelectedBox(ix, iy);
+  if (selHit && selHit.kind === "resize") {
+    pushUndo();
+    state.drag = {
+      type: "resize",
+      dir: selHit.dir,
+      idx: selHit.idx,
+      orig: [...state.workingBoxes[selHit.idx].box],
+      sx, sy,
+      moved: false,
+    };
+    draw();
+    return;
+  }
+  if (selHit && selHit.kind === "move") {
+    pushUndo();
+    state.drag = {
+      type: "move",
+      idx: selHit.idx,
+      orig: [...state.workingBoxes[selHit.idx].box],
+      sx, sy,
+      ix0: ix, iy0: iy,
+      rawIx: ix, rawIy: iy,
+      moved: false,
+    };
+    return;
+  }
+
+  // 任意未选中区域（含大框内部）：待判定左键单击选中 vs 左键长按拖动新建框
+  const cx = Math.max(0, Math.min(state.img.width, ix));
+  const cy = Math.max(0, Math.min(state.img.height, iy));
+  state.drag = {
+    type: "draw_pending",
+    sx, sy,
+    rawIx: ix, rawIy: iy,
+    ix0: cx, iy0: cy,
+    ix1: cx, iy1: cy,
+  };
+});
+
+window.addEventListener("mousemove", (ev) => {
+  if (!state.img) return;
+  const rect = host.getBoundingClientRect();
+  const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+  const [ix, iy] = screenToImg(sx, sy);
+
+  // 未拖拽时在调框模式实时更新光标：仅已选中框的四边/框内显示缩放/移动，其余全部显示十字准星（随时可划新框）
+  if (!state.drag) {
+    if (state.mode === "edit" && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+      if (spaceDown) { host.style.cursor = "grab"; return; }
+      const selHit = hitTestSelectedBox(ix, iy);
+      if (selHit && selHit.kind === "resize") host.style.cursor = edgeToCursor(selHit.dir);
+      else if (selHit && selHit.kind === "move") host.style.cursor = "move";
+      else host.style.cursor = "crosshair";
+    } else if (state.mode === "view") {
+      if (state.showOverlay && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+        const p = currentPage();
+        const hitFill = getPageItems(p).find(it => {
+          if (it.kind !== "fill" || !it.box || it.box.length !== 4) return false;
+          const [x1, y1, x2, y2] = it.box;
+          return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
+        });
+        if (state.fillDisplayMode === "hover") {
+          if (hitFill) {
+            host.style.cursor = "pointer";
+            setHoverFillItem(hitFill.id);
+          } else {
+            host.style.cursor = "grab";
+            if (state.hoverItemId && !state.hoverInPopover) {
+              scheduleHoverClear();
+            }
+          }
+        } else {
+          // 双侧总览模式：悬停原卷题框时双向高亮对应的左/右批注卡与引导线
+          const overCard = ev.target && ev.target.closest && ev.target.closest(".margin-card");
+          if (!overCard) {
+            const nextId = hitFill ? hitFill.id : null;
+            host.style.cursor = hitFill ? "pointer" : "grab";
+            if (state.hoverItemId !== nextId) {
+              state.hoverItemId = nextId;
+              syncMarginHighlightOnly();
+            }
+          }
+        }
+      } else {
+        host.style.cursor = "grab";
+      }
+    }
+    return;
+  }
+
+  const d = state.drag;
+  if (d.type === "right_pending" || d.type === "view_pending") {
+    if (Math.hypot(sx - d.sx, sy - d.sy) >= 5) {
+      d.type = "pan";
+      host.classList.add("panning");
+      state.tx = d.tx0 + (sx - d.sx);
+      state.ty = d.ty0 + (sy - d.sy);
+      draw();
+    }
+  } else if (d.type === "draw_pending") {
+    if (Math.hypot(sx - d.sx, sy - d.sy) >= 5) {
+      d.type = "draw";
+      state.selectedBoxIdx = -1;
+      d.ix1 = Math.max(0, Math.min(state.img.width, ix));
+      d.iy1 = Math.max(0, Math.min(state.img.height, iy));
+      renderRightPanel();
+      draw();
+    }
+  } else if (d.type === "pan") {
+    state.tx = d.tx0 + (sx - d.sx);
+    state.ty = d.ty0 + (sy - d.sy);
+    draw();
+  } else if (d.type === "draw") {
+    d.ix1 = Math.max(0, Math.min(state.img.width, ix));
+    d.iy1 = Math.max(0, Math.min(state.img.height, iy));
+    draw();
+  } else if (d.type === "move") {
+    if (!d.moved && Math.hypot(sx - d.sx, sy - d.sy) < 4) return;
+    d.moved = true;
+    const dx = ix - d.ix0, dy = iy - d.iy0;
+    const w = d.orig[2] - d.orig[0], h = d.orig[3] - d.orig[1];
+    const x1 = Math.max(0, Math.min(state.img.width - w, d.orig[0] + dx));
+    const y1 = Math.max(0, Math.min(state.img.height - h, d.orig[1] + dy));
+    const b = state.workingBoxes[d.idx];
+    b.box = [x1, y1, x1 + w, y1 + h];
+    const bound = findBoundItemForBox(b);
+    if (bound) {
+      bound.box = [...b.box];
+      state.itemsModified = true;
+    }
+    state.boxesModified = true;
+    updateDirtyBadge();
+    draw();
+  } else if (d.type === "resize") {
+    if (!d.moved && Math.hypot(sx - d.sx, sy - d.sy) < 3) return;
+    let [x1, y1, x2, y2] = d.orig;
+    const cx = Math.max(0, Math.min(state.img.width, ix));
+    const cy = Math.max(0, Math.min(state.img.height, iy));
+    if (d.dir.includes("w")) x1 = Math.min(x2 - 8, cx);
+    if (d.dir.includes("e")) x2 = Math.max(x1 + 8, cx);
+    if (d.dir.includes("n")) y1 = Math.min(y2 - 8, cy);
+    if (d.dir.includes("s")) y2 = Math.max(y1 + 8, cy);
+    d.moved = true;
+    const b = state.workingBoxes[d.idx];
+    b.box = [x1, y1, x2, y2];
+    const bound = findBoundItemForBox(b);
+    if (bound) {
+      bound.box = [...b.box];
+      state.itemsModified = true;
+    }
+    state.boxesModified = true;
+    updateDirtyBadge();
+    draw();
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  if (!state.drag) return;
+  const d = state.drag;
+  state.drag = null;
+  host.classList.remove("panning");
+  if (d.type === "view_pending") {
+    if (d.hitItem) openInlineEditor(d.hitItem);
+  } else if (d.type === "right_pending") {
+    // 右键短按（未拖动 >= 5px）在调框模式：命中框 -> 删框；点空白 -> 取消选中
+    if (state.mode === "edit") {
+      if (d.hitIdx >= 0) {
+        deleteBoxAt(d.hitIdx);
+      } else if (state.selectedBoxIdx >= 0) {
+        state.selectedBoxIdx = -1;
+        renderRightPanel();
+        draw();
+      }
+    }
+  } else if (d.type === "draw_pending") {
+    // 左键短按（未拖动 >= 5px）：选中命中的最小框（重叠框可再次单击循环切换；点空白取消选中）
+    const hit = hitTestAnyBox(d.rawIx, d.rawIy);
+    if (hit) {
+      let targetIdx = hit.idx;
+      if (hit.allInside && hit.allInside.length > 1 && hit.allInside.includes(state.selectedBoxIdx)) {
+        const pos = hit.allInside.indexOf(state.selectedBoxIdx);
+        targetIdx = hit.allInside[(pos + 1) % hit.allInside.length];
+      }
+      state.selectedBoxIdx = targetIdx;
+    } else {
+      state.selectedBoxIdx = -1;
+    }
+    renderRightPanel();
+    draw();
+  } else if (d.type === "move" && !d.moved) {
+    // 已选中框内短按未拖动：撤销空快照；若此处重叠多个框，则循环切换到下一框（小框优先）
+    state.undoStack.pop();
+    const hit = hitTestAnyBox(d.rawIx, d.rawIy);
+    if (hit && hit.allInside && hit.allInside.length > 1) {
+      const pos = hit.allInside.indexOf(state.selectedBoxIdx);
+      state.selectedBoxIdx = hit.allInside[(pos + 1) % hit.allInside.length];
+    }
+    renderRightPanel();
+    draw();
+  } else if (d.type === "resize" && !d.moved) {
+    state.undoStack.pop();
+    draw();
+  } else if ((d.type === "move" || d.type === "resize") && d.moved) {
+    const b = state.workingBoxes[d.idx];
+    if (b && isVlmRecogCls(b.cls) && d.orig) {
+      const ov = boxIoU(d.orig, b.box);
+      if (ov < 0.90) b._needsRecog = true;
+    }
+    state.workload.moved += 1;
+    updateWorkloadBar();
+    renderRightPanel();
+    draw();
+  } else if (d.type === "draw") {
+    const x1 = Math.min(d.ix0, d.ix1), y1 = Math.min(d.iy0, d.iy1);
+    const x2 = Math.max(d.ix0, d.ix1), y2 = Math.max(d.iy0, d.iy1);
+    if ((x2 - x1) >= 8 && (y2 - y1) >= 8) {
+      pushUndo();
+      const meta = BOX_META[state.activeCls];
+      state.showLayers[meta.stage] = true;
+      const canVlm = isVlmRecogCls(state.activeCls);
+      state.workingBoxes.push({
+        cls: state.activeCls,
+        box: [x1, y1, x2, y2],
+        stage: meta.stage,
+        manual: true,
+        _uid: nextBoxUid(),
+        _needsRecog: canVlm,
+        _isNew: canVlm,
+      });
+      state.selectedBoxIdx = state.workingBoxes.length - 1;
+      state.boxesModified = true;
+      state.workload.added += 1;
+      updateDirtyBadge();
+      updateWorkloadBar();
+      renderRightPanel();
+      if (canVlm) {
+        toast(`已画新框：点「✨ API识别」或按 ${primaryKeyLabel("recognizeBox")} 即可直接调用大模型识别`, 2600);
+      }
+    }
+    draw();
+  }
+});
+
+host.addEventListener("dblclick", () => { fitCanvas(); draw(); });
+host.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
+/* ==================== 整页提交 ==================== */
+async function submitCurrentPage(goNext = true) {
+  if (state.saving || state.recognizingBusy) return;
+  const p = currentPage();
+  if (!p) return;
+  const pendingItems = getPageItems(p).filter(it => !it.transcription && (it.status === "等待视觉转录" || it.status === "等待豆包"));
+  if (pendingItems.length > 0) {
+    if (!confirm(`本页还有 ${pendingItems.length} 道手写题正在后台识别中（尚未出字）。\n确定现在就要把本页标为「已确认」吗？（建议点取消，等几秒答案自动出现后再确认）`)) {
+      return;
+    }
+  }
+  state.saving = true;
+  $("btnSubmitNext").disabled = true;
+  try {
+    const res = await api("/api/submit-page", {
+      page_id: p.id,
+      reviewer: REVIEWER,
+      client_id: CLIENT_ID,
+      page_status: "已确认",
+      boxes: state.workingBoxes,
+      boxes_modified: state.boxesModified,
+      items: state.workingItems,
+      items_modified: state.itemsModified,
+      sync_log: true,
+      item_edits: state.itemEdits,
+    });
+    if (res.feedback) state.feedback = res.feedback;
+    if (res.boxes) p.boxes = res.boxes;
+    if (res.items) p.items = res.items;
+    if (res.results_mtime) state.resultsMtime = res.results_mtime;
+    if (res.locks) state.locks = res.locks;
+    state.workingBoxes = JSON.parse(JSON.stringify(getPageBoxes(p)));
+    state.workingItems = JSON.parse(JSON.stringify(getRawPageItems(p)));
+    bindBoxesAndItems(state.workingBoxes, state.workingItems);
+    state.boxesModified = false;
+    state.itemsModified = false;
+    state.itemEdits = {};
+    state.focusedLowConf = null;
+    updateDirtyBadge();
+    renderLeftList();
+    updateTopbar();
+
+    const syncMsg = res.sync && res.sync.synced ? `（已同步标框记录）` : "";
+    if (goNext) {
+      // 多人协作优先通过 /api/claim 自动领取下一张「无人锁定且未审」的试卷，避免撞车
+      let nextIdx = -1;
+      try {
+        const claimRes = await api("/api/claim", {
+          client_id: CLIENT_ID,
+          user: REVIEWER || "成员",
+          exclude: [p.id],
+        });
+        if (claimRes.locks) state.locks = claimRes.locks;
+        const claimedPid = claimRes.page_id || claimRes.key;
+        if (claimedPid) {
+          nextIdx = state.pages.findIndex(x => x.id === claimedPid);
+        }
+      } catch {}
+      if (nextIdx >= 0) {
+        toast(`已保存 ${p.name}${syncMsg}`, 1700);
+        await openPage(nextIdx, true, true);
+      } else if (state.pageIdx < state.pages.length - 1) {
+        toast(`已保存 ${p.name}${syncMsg} · 其余待审页已被他人锁定或已全部审完`, 2400);
+        renderRightPanel();
+        draw();
+      } else {
+        toast(`已保存 ${p.name}${syncMsg} · 本批试卷已全部审完`, 2400);
+        renderRightPanel();
+        draw();
+      }
+    } else {
+      toast(`已保存 ${p.name}${syncMsg}`, 2000);
+      renderRightPanel();
+      draw();
+    }
+  } catch (err) {
+    toast("保存失败：" + err.message, 3500);
+  } finally {
+    state.saving = false;
+    $("btnSubmitNext").disabled = false;
+  }
+}
+
+function setMode(m) {
+  state.mode = m;
+  state.editingPopItemId = null;
+  // 调框模式自动展开右栏选类别；看答案模式自动收起右栏把空间全给原卷
+  $("sidebarRight").classList.toggle("collapsed", m === "view");
+  updateTopbar();
+  renderRightPanel();
+  setTimeout(() => {
+    resizeCanvas();
+    if (m === "view" && state.fillDisplayMode === "margin") {
+      fitCanvas();
+      draw();
+    }
+  }, 200);
+}
+
+/* ==================== 游戏风键位设置弹窗逻辑（主/副双键位） ==================== */
+function renderKeybindDialog() {
+  const list = $("kbList");
+  list.innerHTML = "";
+  KEYBIND_LABELS.forEach(([act, label]) => {
+    const row = document.createElement("div");
+    row.className = "kb-row";
+    row.innerHTML = `<span style="font-size:12.5px;">${label}</span>`;
+    const slots = document.createElement("div");
+    slots.className = "kb-slots";
+    const pair = state.keybinds[act] || ["", ""];
+    [0, 1].forEach(slotIdx => {
+      const val = pair[slotIdx] || "";
+      const isListen = state.listeningAction === act && state.listeningSlot === slotIdx;
+      const btn = document.createElement("button");
+      btn.className = "kb-btn" + (isListen ? " listening" : "") + (!val && !isListen ? " empty" : "");
+      btn.textContent = isListen ? "请按键..." : (val ? fmtKey(val) : (slotIdx === 0 ? "主未设" : "副键位"));
+      btn.title = "左键点击重设 · 右键点击清空";
+      btn.onclick = () => {
+        if (isListen) state.listeningAction = null;
+        else { state.listeningAction = act; state.listeningSlot = slotIdx; }
+        renderKeybindDialog();
+      };
+      btn.oncontextmenu = (e) => {
+        e.preventDefault();
+        state.keybinds[act][slotIdx] = "";
+        saveKeybinds(state.keybinds);
+        renderKeybindDialog();
+        updateTopbar();
+        renderRightPanel();
+      };
+      slots.appendChild(btn);
+    });
+    row.appendChild(slots);
+    list.appendChild(row);
+  });
+}
+
+$("btnCloseKb").onclick = $("btnDoneKb").onclick = () => {
+  state.listeningAction = null;
+  $("kbDialog").close();
+};
+$("btnResetKb").onclick = () => {
+  state.keybinds = cloneDefaultKeybinds();
+  saveKeybinds(state.keybinds);
+  state.listeningAction = null;
+  renderKeybindDialog();
+  updateTopbar();
+  renderRightPanel();
+  toast("已恢复默认键位");
+};
+
+/* ==================== 交互式同步聚光灯新手引导 ==================== */
+const TOUR_STEPS = [
+  {
+    selector: "#sidebarLeft",
+    title: "试卷列表与进度",
+    desc: "这里显示整批试卷的审阅进度。多人一起审时，会自动标出谁正在看哪一张；橙色的 <b>低置</b> 是<b>「低置信度」</b>的简称（程序识别把握不高的题或框），点一下可直接跳过去核对。",
+    onEnter: () => { $("sidebarLeft").classList.remove("collapsed"); setTimeout(resizeCanvas, 210); },
+  },
+  {
+    selector: "#canvasHost",
+    title: "核对原卷与修改答案",
+    desc: "填空题默认<b>鼠标滑到题框上</b>即就近弹出答案（顶栏可切「右侧列表」），学生没写的空位会显示<b>「未作答」</b>胶囊，发现认错了点框或点气泡直接改。中键/右键拖图，滚轮缩放，按住 <b>Alt</b> 透视原图。",
+    onEnter: () => { if (state.mode !== "view") setMode("view"); },
+  },
+  {
+    selector: "#btnLowConf",
+    fallbackSelector: "#topPageTitle",
+    title: "一键定位低置信度 (L)",
+    desc: "<b>「低置」即低置信度</b>，表示模型对题号、涂卡或标框的识别把握较低。点这里（或按 <b>L</b>）会自动放大跳到对应框并标明原因；核对无误点绿色的 <b>✓ 信任无误</b> 即可消掉橙色提醒。",
+    tryLabel: "试着定位一题",
+    onTry: () => { jumpNextLowConf(); },
+  },
+  {
+    selector: "#btnModeEdit",
+    title: "调整标框 (E)",
+    desc: "如果题框画偏了或漏框，点这里（或按 <b>E</b>）进入调框：<b>左键长按拖动</b>直接画新框（大框里面也能直接划），<b>左键单击</b>选中框后可拖边缩放/框内移动，<b>右键单击</b>删框，画完按 <b>R</b> 直接调用 API 识别（Ctrl+Z 撤销）。",
+    tryLabel: "切到调框看看",
+    onTry: () => { setMode(state.mode === "edit" ? "view" : "edit"); setTimeout(positionTour, 240); },
+  },
+  {
+    selector: "#btnMoreMenu",
+    fallbackSelector: "#topPageTitle",
+    title: "显示选项与自定义快捷键",
+    desc: "点「⚙ 更多」可开关置信度显示、隐藏答案叠加、自定义所有主/副快捷键或再次打开本教程。",
+    onEnter: () => { if (state.mode !== "view") setMode("view"); },
+    tryLabel: "打开键位设置",
+    onTry: () => { $("btnKeybinds").click(); },
+  },
+  {
+    selector: "#btnSubmitNext",
+    title: "保存并看下一张 (D)",
+    desc: "这一页核对完没问题，点这里（或按 <b>D</b>）保存改动，系统会自动切到下一张还没人审的试卷。",
+  },
+];
+
+let tourIdx = -1;
+function positionTour() {
+  if (tourIdx < 0 || tourIdx >= TOUR_STEPS.length) return;
+  const step = TOUR_STEPS[tourIdx];
+  let el = document.querySelector(step.selector);
+  if (!el || el.offsetWidth === 0 || el.offsetHeight === 0 || getComputedStyle(el).display === "none") {
+    el = step.fallbackSelector ? document.querySelector(step.fallbackSelector) : null;
+  }
+  const spot = $("tourSpot");
+  const pop = $("tourPop");
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const pad = 5;
+  const sl = Math.max(4, r.left - pad);
+  const st = Math.max(4, r.top - pad);
+  const sw = Math.min(window.innerWidth - sl - 4, r.width + pad * 2);
+  const sh = Math.min(window.innerHeight - st - 4, r.height + pad * 2);
+  spot.style.display = "block";
+  spot.style.left = sl + "px";
+  spot.style.top = st + "px";
+  spot.style.width = sw + "px";
+  spot.style.height = sh + "px";
+
+  pop.style.display = "block";
+  const pw = pop.offsetWidth || 345;
+  const ph = pop.offsetHeight || 190;
+  let pl, pt;
+  if (st + sh + 12 + ph <= window.innerHeight - 10) {
+    pt = st + sh + 12;
+    pl = Math.max(12, Math.min(window.innerWidth - pw - 12, sl + sw / 2 - pw / 2));
+  } else if (sl + sw + 14 + pw <= window.innerWidth - 10) {
+    pl = sl + sw + 14;
+    pt = Math.max(12, Math.min(window.innerHeight - ph - 12, st + 24));
+  } else if (sl - 14 - pw >= 10) {
+    pl = sl - 14 - pw;
+    pt = Math.max(12, Math.min(window.innerHeight - ph - 12, st + 24));
+  } else {
+    pl = Math.max(12, Math.min(window.innerWidth - pw - 12, (window.innerWidth - pw) / 2));
+    pt = Math.max(12, Math.min(window.innerHeight - ph - 12, st - ph - 12 > 10 ? st - ph - 12 : 70));
+  }
+  pop.style.left = Math.round(pl) + "px";
+  pop.style.top = Math.round(pt) + "px";
+}
+
+function showTourStep(idx) {
+  if (idx < 0 || idx >= TOUR_STEPS.length) { endTour(); return; }
+  tourIdx = idx;
+  const step = TOUR_STEPS[tourIdx];
+  if (step.onEnter) step.onEnter();
+  $("tourStepBadge").textContent = `步骤 ${tourIdx + 1} / ${TOUR_STEPS.length}`;
+  $("tourTitle").textContent = step.title;
+  $("tourDesc").innerHTML = step.desc;
+  const tryRow = $("tourTryRow");
+  tryRow.innerHTML = "";
+  if (step.tryLabel && step.onTry) {
+    tryRow.style.display = "flex";
+    const b = document.createElement("button");
+    b.className = "tour-try-btn";
+    b.textContent = step.tryLabel;
+    b.onclick = () => step.onTry();
+    tryRow.appendChild(b);
+  } else {
+    tryRow.style.display = "none";
+  }
+  $("tourPrev").disabled = tourIdx === 0;
+  $("tourNext").textContent = tourIdx === TOUR_STEPS.length - 1 ? "✓ 完成引导" : "下一步 →";
+  setTimeout(positionTour, 30);
+}
+
+function startTour() { showTourStep(0); }
+function endTour() {
+  tourIdx = -1;
+  $("tourSpot").style.display = "none";
+  $("tourPop").style.display = "none";
+}
+
+$("tourClose").onclick = endTour;
+$("tourPrev").onclick = () => showTourStep(tourIdx - 1);
+$("tourNext").onclick = () => showTourStep(tourIdx + 1);
+window.addEventListener("resize", () => { if (tourIdx >= 0) positionTour(); });
+
+/* ==================== 控件与全局键盘绑定 ==================== */
+$("btnMoreMenu").onclick = (e) => {
+  e.stopPropagation();
+  $("moreMenu").classList.toggle("open");
+};
+document.addEventListener("click", (e) => {
+  const m = $("moreMenu");
+  if (m && m.classList.contains("open") && !e.target.closest(".more-wrap")) {
+    m.classList.remove("open");
+  }
+});
+$("btnLowConf").onclick = () => jumpNextLowConf();
+$("btnGuide").onclick = () => { $("moreMenu").classList.remove("open"); startTour(); };
+$("btnToggleLeft").onclick = () => { $("sidebarLeft").classList.toggle("collapsed"); setTimeout(resizeCanvas, 200); };
+$("btnToggleRight").onclick = () => { $("moreMenu").classList.remove("open"); $("sidebarRight").classList.toggle("collapsed"); setTimeout(resizeCanvas, 200); };
+$("btnKeybinds").onclick = () => {
+  $("moreMenu").classList.remove("open");
+  state.listeningAction = null;
+  renderKeybindDialog();
+  $("kbDialog").showModal();
+};
+$("btnModeView").onclick = () => setMode("view");
+$("btnModeEdit").onclick = () => setMode("edit");
+$("btnPrev").onclick = () => openPage(state.pageIdx - 1);
+$("btnSubmitNext").onclick = () => submitCurrentPage(true);
+$("btnFit").onclick = () => { fitCanvas(); draw(); };
+$("btnZoomIn").onclick = () => { state.scale = Math.min(8, state.scale * 1.2); $("zoomLabel").textContent = Math.round(state.scale * 100) + "%"; draw(); };
+$("btnZoomOut").onclick = () => { state.scale = Math.max(0.08, state.scale / 1.2); $("zoomLabel").textContent = Math.round(state.scale * 100) + "%"; draw(); };
+$("chkConf").onchange = (ev) => { state.showConf = ev.target.checked; document.body.classList.toggle("show-conf", state.showConf); draw(); };
+$("chkOverlay").onchange = (ev) => { state.showOverlay = ev.target.checked; fitCanvas(); draw(); };
+$("btnFillDisplayMode").onclick = () => {
+  state.fillDisplayMode = state.fillDisplayMode === "hover" ? "margin" : "hover";
+  localStorage.setItem("reviewFillDisplayMode", state.fillDisplayMode);
+  state.hoverItemId = null;
+  state.hoverInPopover = false;
+  let autoCollapsed = false;
+  if (state.fillDisplayMode === "margin") {
+    const sides = getMarginSidesForPage(currentPage());
+    const leftBar = $("sidebarLeft");
+    if (leftBar && !leftBar.classList.contains("collapsed") && (sides.hasLeft && sides.hasRight || window.innerWidth < 1500)) {
+      leftBar.classList.add("collapsed");
+      autoCollapsed = true;
+    }
+  }
+  updateTopbar();
+  fitCanvas();
+  draw();
+  if (autoCollapsed) {
+    setTimeout(() => { resizeCanvas(); fitCanvas(); draw(); }, 210);
+  }
+  toast(state.fillDisplayMode === "hover"
+    ? "已切换为「悬停看答案」（鼠标滑到填空题框显示）"
+    : "已切换为「左右双侧总览」（左栏贴左、右栏贴右，零跨卷连线）", 2200);
+};
+$("btnRefreshNow").onclick = () => hotReloadResults(true);
+
+window.addEventListener("keydown", (ev) => {
+  // 正在监听游戏改键位
+  if (state.listeningAction) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.key === "Escape") {
+      state.listeningAction = null;
+      renderKeybindDialog();
+      return;
+    }
+    if (["Control", "Shift", "Alt", "Meta"].includes(ev.key)) return;
+    const nk = ev.key.toLowerCase();
+    // 清除其他槽位上的重复冲突绑定
+    for (const [act, pair] of Object.entries(state.keybinds)) {
+      if (pair[0] === nk) pair[0] = "";
+      if (pair[1] === nk) pair[1] = "";
+    }
+    state.keybinds[state.listeningAction][state.listeningSlot] = nk;
+    saveKeybinds(state.keybinds);
+    state.listeningAction = null;
+    renderKeybindDialog();
+    updateTopbar();
+    renderRightPanel();
+    return;
+  }
+
+  const tag = (ev.target && ev.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea") return;
+
+  // 按住 Alt 临时透视隐藏答案浮层
+  if (ev.key === "Alt") {
+    ev.preventDefault();
+    overlayLayer.classList.add("peek-hide");
+    return;
+  }
+  if (ev.code === "Space") { spaceDown = true; return; }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z" && state.mode === "edit") {
+    ev.preventDefault();
+    undoBoxEdit();
+    return;
+  }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+
+  if (ev.key === "Escape") {
+    if (tourIdx >= 0) { endTour(); return; }
+    if (state.mode === "edit" && state.selectedBoxIdx >= 0) {
+      state.selectedBoxIdx = -1;
+      renderRightPanel();
+      draw();
+      return;
+    }
+    if (state.editingPopItemId || state.selectedItemId || state.focusedLowConf) {
+      state.editingPopItemId = null;
+      state.selectedItemId = null;
+      state.focusedLowConf = null;
+      draw();
+      return;
+    }
+  }
+  const k = ev.key.toLowerCase();
+  if (matchActionKey("nextSubmit", k)) { ev.preventDefault(); submitCurrentPage(true); }
+  else if (matchActionKey("prevPage", k)) { ev.preventDefault(); openPage(state.pageIdx - 1); }
+  else if (matchActionKey("toggleMode", k)) { ev.preventDefault(); setMode(state.mode === "edit" ? "view" : "edit"); }
+  else if (matchActionKey("fitCanvas", k)) { ev.preventDefault(); state.focusedLowConf = null; fitCanvas(); draw(); }
+  else if (matchActionKey("toggleAns", k)) {
+    ev.preventDefault();
+    state.showOverlay = !state.showOverlay;
+    $("chkOverlay").checked = state.showOverlay;
+    draw();
+  } else if (matchActionKey("nextLowConf", k)) {
+    ev.preventDefault();
+    jumpNextLowConf();
+  } else if (state.mode === "edit" && matchActionKey("deleteBox", k)) {
+    ev.preventDefault();
+    deleteBoxAt(state.selectedBoxIdx);
+  } else if (state.mode === "edit" && matchActionKey("recognizeBox", k)) {
+    ev.preventDefault();
+    recognizeBoxIndices([state.selectedBoxIdx]);
+  } else if (state.mode === "edit") {
+    for (const cid of CLS_ORDER) {
+      if (matchActionKey("cls_" + cid, k)) {
+        ev.preventDefault();
+        state.activeCls = cid;
+        state.showLayers[BOX_META[cid].stage] = true;
+        if (state.selectedBoxIdx >= 0 && state.workingBoxes[state.selectedBoxIdx] && state.workingBoxes[state.selectedBoxIdx].cls !== cid) {
+          state.selectedBoxIdx = -1;
+        }
+        renderRightPanel();
+        draw();
+        break;
+      }
+    }
+  }
+});
+window.addEventListener("keyup", (ev) => {
+  if (ev.code === "Space") spaceDown = false;
+  if (ev.key === "Alt") overlayLayer.classList.remove("peek-hide");
+});
+window.addEventListener("blur", () => {
+  spaceDown = false;
+  overlayLayer.classList.remove("peek-hide");
+});
+window.addEventListener("resize", resizeCanvas);
+
+// 每 3 秒静默拉取多人实时状态 + 后台增量识别结果热合并
+async function pollLive() {
+  if (document.hidden || state.saving) return;
+  try {
+    const data = await api("/api/live");
+    if (!data || !data.ok) return;
+    const prevRev = (state.feedback && state.feedback.revision) || 0;
+    const nextRev = (data.feedback && data.feedback.revision) || 0;
+    const locksChanged = JSON.stringify(data.locks || {}) !== JSON.stringify(state.locks || {});
+    const mtimeChanged = Boolean(data.results_mtime && data.results_mtime !== state.resultsMtime);
+    if (data.locks) state.locks = data.locks;
+    if (data.feedback && nextRev !== prevRev) state.feedback = data.feedback;
+    if (mtimeChanged) {
+      await hotReloadResults(false);
+    } else if (locksChanged || nextRev !== prevRev) {
+      renderLeftList();
+      updateWorkloadBar();
+      $("leftSummary").textContent = `${state.pages.filter(isPageDone).length}/${state.pages.length}`;
+    }
+  } catch {}
+}
+
+setInterval(pollLive, 3000);
+
+setInterval(() => {
+  const p = currentPage();
+  if (p) api("/api/heartbeat", { page_id: p.id, client_id: CLIENT_ID, user: REVIEWER || "成员" }).catch(() => {});
+}, 20000);
+
+window.addEventListener("beforeunload", (ev) => {
+  const p = currentPage();
+  if (p && navigator.sendBeacon) {
+    navigator.sendBeacon("/api/release", JSON.stringify({ client_id: CLIENT_ID, page_id: p.id, token: TOKEN }));
+  }
+  if (state.boxesModified || state.itemsModified || Object.keys(state.itemEdits).length > 0) {
+    ev.preventDefault();
+    ev.returnValue = "";
+  }
+});
+
+resizeCanvas();
+loadAll().catch(err => toast("加载失败：" + err.message, 5000));
+</script>
+</body>
+</html>

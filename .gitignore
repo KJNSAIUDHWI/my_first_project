@@ -35,3 +35,6 @@ desktop.ini
 # 本地维护约定、接力与历史；公开文档使用docs中的命名页面
 /docs/[0-9][0-9]-*
 /docs/history/
+
+# 本地独立宣传视频工程（不混入主代码库）
+/tools/autograde-explainer/

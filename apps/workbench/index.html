@@ -1,0 +1,3014 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动改卷工作台</title>
+<style>
+  :root{
+    --bg:#f5f3ee; --card:#ffffff; --line:#e6e1d6; --line-strong:#d4ccb9;
+    --text:#1d2420; --muted:#68716c; --soft:#f0ede5;
+    --primary:#1f7a53; --primary-hover:#176242; --primary-soft:#e6f4ed;
+    --warn:#b45309; --warn-soft:#fef3c7;
+    --err:#b91c1c; --err-soft:#fee2e2;
+    --blue:#2563eb; --blue-soft:#eff6ff;
+    --violet:#7c3aed; --violet-soft:#f5f3ff;
+    --shadow:0 4px 18px rgba(29,36,32,.055);
+    --radius:15px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 20px 84px}
+
+  /* 顶栏 */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px}
+  .brand{display:flex;align-items:center;gap:11px}
+  .brand-logo{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,#1f7a53,#2ea371);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px;flex:none}
+  .brand h1{margin:0;font-size:17.5px;font-weight:700;line-height:1.25}
+  .brand .sub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .role-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .role-pill.host{background:var(--primary-soft);color:var(--primary)}
+  .role-pill.collab{background:var(--blue-soft);color:var(--blue)}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+  .user-btn{background:var(--soft);border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer;font-size:12.5px;color:var(--text);font-weight:600;white-space:nowrap}
+  .user-btn:hover{border-color:var(--primary)}
+
+  /* 主机步骤导航 */
+  .stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .step-tab{background:var(--card);border:1.5px solid var(--line);border-radius:13px;padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:.18s;text-align:left}
+  .step-tab:hover{border-color:var(--line-strong)}
+  .step-tab.active{border-color:var(--primary);background:var(--primary-soft)}
+  .step-num{width:26px;height:26px;border-radius:50%;background:var(--soft);color:var(--muted);display:grid;place-items:center;font-weight:700;font-size:13px;flex:none}
+  .step-tab.active .step-num{background:var(--primary);color:#fff}
+  .step-tab.ok .step-num{background:#16a34a;color:#fff}
+  .step-tab.err .step-num{background:var(--err);color:#fff}
+  .step-title{font-weight:700;font-size:14px;line-height:1.25}
+  .step-desc{font-size:11.5px;color:var(--muted)}
+
+  @keyframes spotlightPulse{
+    0%{box-shadow:0 0 0 0 rgba(31,122,83,.45), 0 0 0 2px var(--primary)}
+    70%{box-shadow:0 0 0 12px rgba(31,122,83,0), 0 0 0 2px var(--primary)}
+    100%{box-shadow:0 0 0 0 rgba(31,122,83,0), 0 0 0 2px var(--primary)}
+  }
+  .spotlight{animation:spotlightPulse 1.5s infinite;border-color:var(--primary) !important}
+
+  /* 通用卡片与按钮 */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);margin-bottom:14px}
+  .card h2{margin:0 0 3px;font-size:16.5px;font-weight:700}
+  .card .lead{margin:0;color:var(--muted);font-size:13px}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .btn{border:1px solid var(--line-strong);background:#fff;color:var(--text);padding:8px 14px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .btn:hover:not(:disabled){background:var(--soft)}
+  .btn:disabled{opacity:.48;cursor:not-allowed}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .btn.primary:hover:not(:disabled){background:var(--primary-hover);color:#fff}
+  .btn.warn{background:var(--warn-soft);border-color:#f59e0b;color:var(--warn)}
+  .btn.danger{background:var(--err-soft);border-color:#f87171;color:var(--err)}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+  .btn.ghost:hover:not(:disabled){background:var(--soft);color:var(--text)}
+  .btn.sm{padding:5px 11px;font-size:12.5px;border-radius:8px}
+  .btn.xs{padding:3px 9px;font-size:11.5px;border-radius:7px}
+
+  .badge{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;flex:none;white-space:nowrap}
+  .badge.ok{background:var(--primary-soft);color:var(--primary)}
+  .badge.err{background:var(--err-soft);color:var(--err)}
+  .badge.warn{background:var(--warn-soft);color:var(--warn)}
+
+  /* 折叠抽屉 */
+  details.clean-drawer{margin-top:12px;border:1px solid var(--line);border-radius:12px;background:#faf8f3;overflow:hidden}
+  details.clean-drawer > summary{list-style:none;cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;color:#475569;display:flex;align-items:center;justify-content:space-between;user-select:none}
+  details.clean-drawer > summary::-webkit-details-marker{display:none}
+  details.clean-drawer > summary::after{content:"▾";font-size:12px;color:var(--muted);transition:transform .18s}
+  details.clean-drawer[open] > summary::after{transform:rotate(180deg)}
+  details.clean-drawer > summary:hover{background:#f3f0e8}
+  .drawer-body{padding:12px 14px 14px;border-top:1px solid var(--line);background:#fff}
+
+  /* ==================== Step 1：架构图化环境配置 ==================== */
+  .repair-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 13px;background:#fff8eb;border:1px solid #fcd34d;border-radius:11px;margin-top:12px;font-size:13px}
+  .env-arch-wrap{position:relative;margin-top:14px;padding:16px 14px;background:linear-gradient(180deg,#faf8f3,#f6f9f7);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .env-arch-grid{position:relative;z-index:2;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:38px;align-items:stretch}
+  .env-node{
+    background:#fff;border:1.5px solid var(--line);border-radius:13px;padding:13px 14px;
+    display:flex;flex-direction:column;gap:8px;cursor:pointer;min-width:0;
+    box-shadow:0 2px 10px rgba(29,36,32,.04);transition:border-color .18s,box-shadow .18s,transform .15s;
+  }
+  .env-node:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(29,36,32,.09);border-color:#94a3b8}
+  .env-node.is-ok{border-color:#86efac}
+  .env-node.is-warn{border-color:#f59e0b;background:#fffdf6}
+  .env-node.is-err{border-color:#f87171;background:#fff7f7}
+  .env-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .env-title{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:800;white-space:nowrap}
+  .env-main{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .env-sub{font-size:11.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .env-pill-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+  .env-mini{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px;background:#f4f6f5;border:1px solid #e5e9e7;color:#334155;white-space:nowrap;overflow:hidden}
+  .env-mini.ok{background:#ecfdf5;border-color:#bbf7d0;color:#15803d}
+  .env-mini.err{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+  .env-mini i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+  .env-foot{margin-top:auto;padding-top:6px;border-top:1px dashed #ebe6db;font-size:11.5px;color:var(--primary);font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .env-node.is-err .env-foot{color:var(--err)}
+  .env-node.is-warn .env-foot{color:var(--warn)}
+
+  .bench-strip{margin-top:12px;padding:10px 14px;border-radius:11px;background:#ecfdf5;border:1px solid #a7f3d0;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px}
+  .bench-strip.err{background:#fef2f2;border-color:#fecaca;color:var(--err)}
+
+  .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:9px;align-items:start}
+  .check-item{border:1px solid var(--line);border-radius:11px;padding:10px 12px;display:flex;align-items:flex-start;gap:9px;background:#fcfbf8}
+  .check-item.err{border-color:#fca5a5;background:#fff5f5}
+  .check-item.warn{border-color:#fcd34d;background:#fffbeb}
+  .check-name{font-weight:600;font-size:13.5px}
+  .check-detail{font-size:12px;color:var(--muted);overflow-wrap:anywhere;word-break:normal}
+  .fix-hint{margin-top:4px;padding:4px 7px;border-radius:6px;background:#fff8eb;border:1px solid #fde68a;font-size:11.5px;color:#92400e;line-height:1.45}
+
+  .perf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 12px;align-items:end}
+  .perf-grid label{display:block;margin-bottom:4px;font-weight:600;font-size:12px;color:#4b5563;white-space:nowrap}
+  .perf-grid select.input{height:36px;padding:5px 9px;font-size:13px}
+  .bench-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;background:#fff;border-radius:9px;overflow:hidden;border:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .bench-table th,.bench-table td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  .bench-table th.num,.bench-table td.num{text-align:right}
+  .bench-table th.ctr,.bench-table td.ctr{text-align:center}
+  .bench-table th{background:#f3f0e8;color:var(--muted);font-weight:600}
+  .bench-table tr.best{background:#ecfdf5;font-weight:700}
+
+  /* 表单 */
+  .field{margin-bottom:14px}
+  .field label{display:block;font-weight:600;font-size:13.5px;margin-bottom:6px}
+  .input{width:100%;padding:9px 12px;border:1.5px solid var(--line-strong);border-radius:10px;font-size:13.5px;background:#fff;color:var(--text)}
+  .input:focus{outline:none;border-color:var(--primary)}
+  .subject-pills{display:flex;flex-wrap:wrap;gap:7px}
+  .subj{padding:6px 14px;border-radius:999px;border:1.5px solid var(--line-strong);background:#fff;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--text);transition:.14s}
+  .subj.active{background:var(--primary);border-color:var(--primary);color:#fff}
+
+  /* 极简单行协作条 */
+  .invite-bar{background:linear-gradient(90deg,#edf7f2,#f3f8ff);border:1px solid #c6e5d5;border-radius:12px;padding:8px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .invite-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px}
+  .lan-url{font-family:Consolas,"Cascadia Mono",monospace;font-size:13.5px;font-weight:700;color:var(--primary);background:#fff;padding:3px 10px;border-radius:8px;border:1px solid #cce6d8}
+
+  /* ==================== Step 3：横向数据流实时架构图 + 真实数据脉冲 ==================== */
+  .pipe-dash{margin-top:12px;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;background:#faf8f3;transition:border-color .2s,background .2s}
+  .pipe-dash.running{border-color:#6ee7b7;background:#f4fbf7}
+  .pipe-dash.warn{border-color:#f59e0b;background:#fffbf0}
+  .pipe-dash.error{border-color:#fca5a5;background:#fff5f5}
+  .pipe-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+  .pipe-head-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+  .pipe-meta{font-size:11.5px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .pipe-meta-chip{display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11.5px;color:#374151;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .pipe-meta-chip.cost{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+  .pipe-meta-chip.warn{background:#fffbeb;border-color:#fcd34d;color:#b45309}
+  .vlm-price-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:#faf8f3;border:1px solid var(--line);border-radius:10px;padding:8px 11px;margin-bottom:10px;font-size:12px}
+  .vlm-price-custom{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px;padding:9px 11px;background:#faf8f3;border:1px dashed var(--line-strong);border-radius:10px}
+
+  .prog-bar{height:7px;background:#e8e4da;border-radius:999px;overflow:hidden}
+  .prog-bar i{display:block;height:100%;background:linear-gradient(90deg,#1f7a53,#34b37c);border-radius:999px;transition:width .3s,background .25s}
+  .prog-bar.warn i{background:linear-gradient(90deg,#d97706,#f59e0b)}
+  .prog-bar.error i{background:linear-gradient(90deg,#b91c1c,#ef4444)}
+  .prog-nums{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
+
+  .arch-stage-box{margin-top:11px;padding:12px 13px;background:rgba(255,255,255,.84);border:1px solid var(--line);border-radius:13px}
+  .arch-stage-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:9px;font-size:11.5px;color:var(--muted)}
+  .arch-legend-items{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+  .arch-lg{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+
+  .arch-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;background:#cbd5e1}
+  .arch-dot.active{background:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.22);animation:archPulse 1.25s ease-in-out infinite}
+  .arch-dot.done{background:#16a34a}
+  .arch-dot.warn{background:#d97706}
+  .arch-dot.err{background:#dc2626}
+  @keyframes archPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.24);opacity:.72}}
+
+  /* 通用覆盖 SVG 流向画布（动态对齐 DOM 锚点） */
+  .flow-stage{position:relative}
+  .flow-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:1}
+  .flow-svg.over-particles{z-index:5}
+  .pipe-base{fill:none;stroke:#d6dde6;stroke-width:2.1;stroke-linecap:round;transition:stroke .25s,stroke-width .2s}
+  .pipe-base.done{stroke:#4ade80}
+  .pipe-base.active{stroke:#16a34a;stroke-width:2.4}
+  .pipe-base.blue{stroke:#60a5fa}
+  .pipe-base.active.blue{stroke:#2563eb}
+  .pipe-base.warn{stroke:#f59e0b}
+  .pipe-base.err{stroke:#ef4444}
+  .pipe-stream{fill:none;stroke:#16a34a;stroke-width:2.6;stroke-linecap:round;stroke-dasharray:6 10;opacity:0;transition:opacity .25s}
+  .pipe-stream.blue{stroke:#2563eb}
+  .pipe-stream.violet{stroke:#7c3aed}
+  .pipe-stream.flowing{opacity:.78;animation:streamDash .85s linear infinite}
+  .pipe-burst{fill:none;stroke:#10b981;stroke-width:4;stroke-linecap:round;opacity:0;transition:opacity .35s}
+  .pipe-burst.blue{stroke:#3b82f6}
+  .pipe-burst.violet{stroke:#8b5cf6}
+  .pipe-burst.flash{opacity:.48}
+  @keyframes streamDash{from{stroke-dashoffset:16}to{stroke-dashoffset:0}}
+
+  /* 横向 4 列真实数据流拓扑（零交叉：左→右→下行入审阅） */
+  .pipe-dag{
+    position:relative;z-index:2;
+    display:grid;
+    grid-template-columns:148px 168px minmax(0,1.55fr) 178px;
+    grid-template-rows:auto auto;
+    column-gap:38px;
+    row-gap:16px;
+    align-items:center;
+  }
+  #nodeOrient{grid-column:1;grid-row:1 / 3}
+  #nodeM1{grid-column:2;grid-row:1 / 3}
+  #nodeM2{grid-column:3;grid-row:1;align-self:stretch}
+  .pipe-lower-track{grid-column:3;grid-row:2;display:grid;grid-template-columns:1fr 1fr;column-gap:34px;align-items:stretch}
+  #nodeOut{grid-column:4;grid-row:1;align-self:stretch}
+  #nodeReview{grid-column:4;grid-row:2;align-self:stretch}
+
+  .arch-node{
+    position:relative;background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:10px 11px;
+    display:flex;flex-direction:column;gap:6px;min-width:0;
+    box-shadow:0 2px 8px rgba(29,36,32,.04);transition:border-color .22s,box-shadow .22s,background .22s,transform .15s;
+  }
+  .arch-node.is-active{border-color:#2ea371;background:#fbfffd;box-shadow:0 4px 14px rgba(31,122,83,.11)}
+  .arch-node.is-done{border-color:#bbf7d0;background:#fff}
+  .arch-node.is-warn{border-color:#f59e0b;background:#fffdf6}
+  .arch-node.is-err{border-color:#f87171;background:#fff7f7}
+  .arch-node.is-idle{border-color:var(--line);background:#fcfbf8;opacity:.88}
+  .arch-node.clickable{cursor:pointer}
+  .arch-node.clickable:hover{border-color:var(--primary);box-shadow:0 6px 16px rgba(31,122,83,.14);transform:translateY(-1px)}
+
+  /* 节点收到真实数据包时的瞬时脉冲光环 */
+  @keyframes recvGlow{
+    0%{box-shadow:0 0 0 0 rgba(16,185,129,.48),0 2px 10px rgba(16,185,129,.16)}
+    100%{box-shadow:0 0 0 11px rgba(16,185,129,0),0 2px 8px rgba(29,36,32,.04)}
+  }
+  .arch-node.recv-pulse{animation:recvGlow .65s ease-out}
+  @keyframes recvGlowBlue{
+    0%{box-shadow:0 0 0 0 rgba(37,99,235,.46),0 2px 10px rgba(37,99,235,.15)}
+    100%{box-shadow:0 0 0 11px rgba(37,99,235,0),0 2px 8px rgba(29,36,32,.04)}
+  }
+  .arch-node.recv-pulse-blue{animation:recvGlowBlue .65s ease-out}
+
+  .an-head{display:flex;align-items:center;justify-content:space-between;gap:5px}
+  .an-title{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:800;color:var(--text);white-space:nowrap;min-width:0}
+  .an-tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;white-space:nowrap;flex:none}
+  .arch-node.is-active .an-tag{background:#dcfce7;color:#15803d;border-color:#bbf7d0}
+  .arch-node.is-err .an-tag{background:#fee2e2;color:#b91c1c;border-color:#fecaca}
+  .arch-node.is-warn .an-tag{background:#fef3c7;color:#b45309;border-color:#fde68a}
+
+  .an-stat{font-size:12px;font-weight:700;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:6px;font-variant-numeric:tabular-nums}
+  .an-stat small{font-weight:600;color:var(--muted);font-size:11px}
+  .an-meters-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .an-meters-2{display:grid;grid-template-columns:1fr;gap:5px}
+  .an-m{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .an-m-top{display:flex;align-items:center;justify-content:space-between;gap:4px;font-size:11px;line-height:1.25;font-variant-numeric:tabular-nums}
+  .an-m-lbl{color:#64748b;font-weight:600;white-space:nowrap}
+  .an-m-val{color:var(--text);font-weight:700;white-space:nowrap}
+  .an-m-val.ok{color:#15803d}
+  .an-m-val.warn{color:#b45309}
+  .an-m-val.err{color:#b91c1c}
+  .an-bar{height:4.5px;background:#ece8df;border-radius:999px;overflow:hidden}
+  .an-bar i{display:block;height:100%;border-radius:999px;background:#1f7a53;transition:width .28s ease}
+  .an-bar.blue i{background:#2563eb}
+  .an-bar.amber i{background:#d97706}
+  .an-bar.err i{background:#dc2626}
+  .an-chips{display:flex;flex-wrap:wrap;gap:4px}
+  .an-chip{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .an-chip.choice{background:#ecfdf5;color:#15803d;border:1px solid #bbf7d0}
+  .an-chip.fill{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+  .an-chip.id{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+  .an-foot{font-size:10.5px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;gap:6px;padding-top:4px;border-top:1px dashed #ebe6db;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .an-foot b{color:var(--primary)}
+
+  /* SVG 管道中间的数字小胶囊 */
+  .edge-pill{
+    position:absolute;z-index:4;transform:translate(-50%,-50%);pointer-events:none;
+    font-size:10px;font-weight:700;line-height:1.15;white-space:nowrap;
+    padding:1px 6px;border-radius:999px;background:#fff;border:1px solid #dce3ec;color:#475569;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);font-variant-numeric:tabular-nums;transition:all .2s;
+  }
+  .edge-pill.active{border-color:#86efac;color:#15803d;background:#f0fdf4}
+  .edge-pill.blue{border-color:#93c5fd;color:#1d4ed8;background:#eff6ff}
+  .edge-pill.err{border-color:#fca5a5;color:#b91c1c;background:#fef2f2}
+
+  /* 诊断错误卡 */
+  .diag-box{margin-top:11px;border:1.5px solid #f87171;background:#fff5f5;border-radius:12px;padding:12px 14px}
+  .diag-box.warn{border-color:#f59e0b;background:#fffbeb}
+  .diag-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .diag-title{font-weight:800;font-size:14px;color:var(--err)}
+  .diag-box.warn .diag-title{color:var(--warn)}
+  .diag-code{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;background:#fee2e2;color:#991b1b;white-space:nowrap}
+  .diag-box.warn .diag-code{background:#fef3c7;color:#92400e}
+  .diag-row{font-size:12.5px;margin:3px 0;line-height:1.5}
+
+  /* 总览双栏 */
+  .overview-grid{display:grid;grid-template-columns:1.7fr 1fr;gap:14px}
+  .task-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:11px}
+  .task-card{border:1.5px solid var(--line);border-radius:13px;padding:14px 15px;background:#fcfbf8;display:flex;flex-direction:column;gap:8px;transition:.18s}
+  .task-card.running{border-color:#86efac;background:#f7fdf9}
+  .task-card h3{margin:0;font-size:15px}
+  .task-desc{font-size:12px;color:var(--muted)}
+  .person-row{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-radius:9px;background:#faf8f3;border:1px solid var(--line);margin-bottom:7px;font-size:13.5px}
+  .online-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:12.5px;font-weight:600;margin:0 5px 5px 0}
+
+  /* 模型训练 */
+  .train-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px}
+  .train-opt-row{display:grid;grid-template-columns:minmax(220px,320px) 1fr;gap:12px;align-items:center}
+  .train-mod{border:1.5px solid var(--line);border-radius:13px;padding:12px 13px;background:#fcfbf8;cursor:pointer;transition:.16s;display:flex;flex-direction:column;gap:5px}
+  .train-mod:hover{border-color:var(--line-strong)}
+  .train-mod.active{border-color:var(--primary);background:var(--primary-soft)}
+  .train-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+  .train-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .train-table th,.train-table td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  .train-table th{color:var(--muted);font-weight:600;background:#faf8f3}
+
+  .log-box{background:#1c211e;color:#d6e3dc;font-family:Consolas,monospace;font-size:12px;padding:11px 13px;border-radius:10px;max-height:180px;overflow:auto;white-space:pre-wrap;margin-top:8px}
+  .live-banner{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:#1f2421;color:#fff;padding:9px 16px;border-radius:999px;box-shadow:0 10px 28px rgba(0,0,0,.22);display:none;align-items:center;gap:9px;font-size:13px;max-width:92vw;z-index:50}
+  .live-banner.show{display:flex}
+  .pulse-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 4px rgba(74,222,128,.25);flex:none}
+  .live-src{background:rgba(255,255,255,.15);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;flex:none}
+
+  dialog{border:none;border-radius:16px;padding:20px 22px;max-width:460px;width:92vw;box-shadow:0 20px 50px rgba(0,0,0,.24)}
+  dialog.guide-dlg{max-width:780px}
+  dialog::backdrop{background:rgba(20,25,22,.46);backdrop-filter:blur(4px)}
+  .hidden{display:none !important}
+  .muted{color:var(--muted);font-size:12.5px}
+  .anatomy-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:center;margin-top:12px}
+  .paper-svg{width:100%;border-radius:12px;border:1.5px solid var(--line);background:#fffdf8}
+  .paper-zone{transition:opacity .2s,filter .2s}
+  .paper-zone.dim{opacity:.22}
+  .paper-zone.lit{opacity:1;filter:drop-shadow(0 0 6px rgba(31,122,83,.55))}
+  .guide-item{border:1.5px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:.16s;background:#fcfbf8}
+  .guide-item:hover,.guide-item.active{border-color:var(--primary);background:var(--primary-soft)}
+  .guide-item strong{display:block;font-size:13.5px;margin-bottom:2px}
+  .guide-item span{font-size:12px;color:var(--muted);line-height:1.48}
+  .tour-mask{position:fixed;inset:0;z-index:80;pointer-events:none}
+  .tour-box{position:fixed;z-index:81;border:2.5px solid #34d399;border-radius:13px;box-shadow:0 0 0 9999px rgba(15,23,42,.5),0 0 22px rgba(52,211,153,.6);pointer-events:none;transition:all .24s ease}
+  .tour-pop{position:fixed;z-index:82;width:min(320px,90vw);background:#fff;border-radius:14px;padding:14px 16px;box-shadow:0 16px 42px rgba(0,0,0,.26);border:1px solid var(--line)}
+  .tour-pop h4{margin:0 0 5px;font-size:14.5px}
+  .tour-pop p{margin:0 0 11px;font-size:12.5px;color:var(--muted);line-height:1.5}
+
+  @media(max-width:1040px){
+    .env-arch-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    .env-arch-wrap .flow-svg{display:none}
+    .pipe-dag{grid-template-columns:1fr;grid-template-rows:auto;row-gap:10px}
+    #nodeOrient,#nodeM1,#nodeM2,.pipe-lower-track,#nodeOut,#nodeReview{grid-column:1;grid-row:auto}
+    .pipe-lower-track{grid-template-columns:1fr;row-gap:10px}
+    #pipeArchStage .flow-svg,#pipeArchStage .edge-pill{display:none}
+    .train-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media(max-width:860px){
+    .overview-grid,.stepper,.anatomy-grid,.train-opt-row{grid-template-columns:1fr}
+    .perf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">改</div>
+      <div>
+        <h1>自动改卷工作台</h1>
+        <div class="sub" id="topSub">正在连接...</div>
+      </div>
+    </div>
+    <div class="row">
+      <button id="btnOpenVlm" class="btn sm hidden" type="button" title="配置大模型视觉 API">⚙ API</button>
+      <button id="btnOpenGuide" class="btn sm" type="button" title="操作引导">? 引导</button>
+      <span id="rolePill" class="role-pill host"><i class="dot"></i><span>主机</span></span>
+      <button id="btnUser" class="user-btn" type="button" title="点击修改你的称呼">未填写</button>
+    </div>
+  </header>
+
+  <nav id="hostStepper" class="stepper hidden">
+    <button class="step-tab" data-view="check" id="tabCheck" type="button">
+      <span class="step-num">1</span>
+      <div><div class="step-title">运行环境</div><div class="step-desc" id="tabCheckDesc">检查就绪状态</div></div>
+    </button>
+    <button class="step-tab" data-view="ingest" id="tabIngest" type="button">
+      <span class="step-num">2</span>
+      <div><div class="step-title">导入试卷</div><div class="step-desc" id="tabIngestDesc">选图入库</div></div>
+    </button>
+    <button class="step-tab" data-view="overview" id="tabOverview" type="button">
+      <span class="step-num">3</span>
+      <div><div class="step-title">识别与审阅</div><div class="step-desc" id="tabOverviewDesc">实时流向与协作</div></div>
+    </button>
+    <button class="step-tab" data-view="train" id="tabTrain" type="button">
+      <span class="step-num">4</span>
+      <div><div class="step-title">模型训练</div><div class="step-desc" id="tabTrainDesc">微调与换权重</div></div>
+    </button>
+  </nav>
+
+  <!-- ==================== 视图 1：架构图化运行环境（仅主机） ==================== -->
+  <section id="viewCheck" class="card hidden">
+    <div class="between">
+      <div>
+        <h2>运行环境</h2>
+        <p class="lead" id="checkSummary">正在检查系统各环节状态...</p>
+      </div>
+      <div class="row">
+        <button class="btn sm" id="btnRecheck" type="button">重新检查</button>
+        <button class="btn sm" id="btnRunBenchmark" type="button">🚀 一键测速</button>
+        <button class="btn primary sm hidden" id="btnToIngest" type="button">下一步 →</button>
+      </div>
+    </div>
+
+    <div id="repairBar" class="repair-bar hidden">
+      <strong style="color:var(--warn)">需处理：</strong>
+      <button class="btn primary sm hidden" id="btnRepairPip" type="button">安装缺失依赖</button>
+      <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">解压模型权重</button>
+      <button class="btn sm hidden" id="btnSetVlmKey" type="button">配置大模型 API</button>
+      <button class="btn sm" id="btnAskAgent" type="button">求助 AI (opencode)</button>
+    </div>
+
+    <!-- 4 段系统就绪架构图（点击任意节点直达对应配置） -->
+    <div class="env-arch-wrap flow-stage" id="envArchStage">
+      <svg class="flow-svg" id="envArchSvg"></svg>
+      <div class="env-arch-grid">
+        <div class="env-node is-ok" id="envNodeCompute" title="点击展开高级加速调参">
+          <div class="env-head">
+            <span class="env-title"><i class="arch-dot" id="envDotCompute"></i>① 算力底座</span>
+            <span class="badge ok" id="envBadgeCompute">检查中</span>
+          </div>
+          <div class="env-main" id="envComputeMain">探测硬件中...</div>
+          <div class="env-sub" id="envComputeSub"></div>
+          <div class="env-foot"><span id="envComputeFoot">点击调参 / 测速</span><span>→</span></div>
+        </div>
+
+        <div class="env-node is-ok" id="envNodeModels" title="点击查看或解压本地检测模型">
+          <div class="env-head">
+            <span class="env-title"><i class="arch-dot" id="envDotModels"></i>② 本地检测链</span>
+            <span class="badge ok" id="envBadgeModels">检查中</span>
+          </div>
+          <div class="env-main" id="envModelsMain">7 项模型权重</div>
+          <div class="env-pill-grid" id="envModelPills"></div>
+          <div class="env-foot"><span id="envModelsFoot">查看权重明细</span><span>→</span></div>
+        </div>
+
+        <div class="env-node is-ok" id="envNodeVlm" title="点击配置大模型视觉 API">
+          <div class="env-head">
+            <span class="env-title"><i class="arch-dot" id="envDotVlm"></i>③ 大模型转录</span>
+            <span class="badge ok" id="envBadgeVlm">检查中</span>
+          </div>
+          <div class="env-main" id="envVlmMain">视觉 API</div>
+          <div class="env-sub" id="envVlmSub"></div>
+          <div class="env-foot"><span id="envVlmFoot">点击配置 / 测连通</span><span>→</span></div>
+        </div>
+
+        <div class="env-node is-ok" id="envNodeReview" title="点击进入导入或审阅">
+          <div class="env-head">
+            <span class="env-title"><i class="arch-dot done" id="envDotReview"></i>④ 审阅协作</span>
+            <span class="badge ok" id="envBadgeReview">就绪</span>
+          </div>
+          <div class="env-main" id="envReviewMain">工作台 + 8904</div>
+          <div class="env-sub"><span class="an-chip choice">悬停看答案</span><span class="an-chip fill">局域网协同</span></div>
+          <div class="env-foot"><span id="envReviewFoot">前往审阅工作区</span><span>→</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 测速结论摘要条（有测速记录或测速中才展示） -->
+    <div id="benchResultWrap" class="bench-strip hidden">
+      <span id="benchSummaryText" style="font-weight:600;color:var(--primary)"></span>
+      <div class="row">
+        <button class="btn primary xs hidden" id="btnApplyBench" type="button">✓ 应用最优参数</button>
+      </div>
+    </div>
+
+    <!-- 高级调参折叠抽屉（默认收起，保持首屏极简） -->
+    <details class="clean-drawer" id="drawerPerf">
+      <summary>
+        <span>⚙ 高级调参（设备 / Batch / 线程 / API 并发）</span>
+        <span class="muted" id="perfQuickTag" style="font-weight:500">自动推荐</span>
+      </summary>
+      <div class="drawer-body">
+        <div class="muted" id="perfHwSummary" style="margin-bottom:10px">默认优先 GPU 加速，无显卡自动回退 CPU。</div>
+        <div class="perf-grid">
+          <div>
+            <label>推理设备</label>
+            <select id="selInferDevice" class="input">
+              <option value="auto">自动（优先 GPU）</option>
+              <option value="cuda:0">强制 GPU</option>
+              <option value="cpu">仅 CPU</option>
+            </select>
+          </div>
+          <div>
+            <label>YOLO 批大小</label>
+            <select id="selYoloBatch" class="input">
+              <option value="0">自动推荐</option>
+              <option value="1">1（省显存）</option>
+              <option value="2">2</option>
+              <option value="4">4（推荐）</option>
+              <option value="6">6（大显存）</option>
+              <option value="8">8</option>
+            </select>
+          </div>
+          <div>
+            <label>CPU 线程</label>
+            <select id="selCpuWorkers" class="input">
+              <option value="0">自动推荐</option>
+              <option value="1">1 线程</option>
+              <option value="2">2 线程</option>
+              <option value="4">4 线程</option>
+              <option value="6">6 线程</option>
+            </select>
+          </div>
+          <div>
+            <label>API 并发</label>
+            <select id="selApiConc" class="input">
+              <option value="2">2（保守）</option>
+              <option value="3">3</option>
+              <option value="4" selected>4（推荐）</option>
+              <option value="6">6（高速）</option>
+              <option value="8">8（极速）</option>
+            </select>
+          </div>
+        </div>
+        <div class="between">
+          <div class="row">
+            <button class="btn primary sm" id="btnSavePerf" type="button">保存加速配置</button>
+          </div>
+          <div class="row">
+            <input id="inputOpencode" class="input" style="width:240px;padding:6px 10px;font-size:12.5px" placeholder="opencode 路径（可选）">
+            <button class="btn sm" id="btnSaveOpencode" type="button">保存路径</button>
+          </div>
+        </div>
+        <div id="benchTableWrap"></div>
+      </div>
+    </details>
+
+    <!-- 全部自检明细折叠抽屉（全绿默认收起，有异常自动展开） -->
+    <details class="clean-drawer" id="drawerCheckDetails">
+      <summary>
+        <span>📋 完整自检明细</span>
+        <span class="muted" id="checkDetailTag">加载中...</span>
+      </summary>
+      <div class="drawer-body">
+        <div id="checkGrid" class="check-grid"></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ==================== 视图 2：极简导入试卷（两步合一） ==================== -->
+  <section id="viewIngest" class="card hidden">
+    <div class="between" style="margin-bottom:14px">
+      <div>
+        <h2>导入新试卷</h2>
+        <p class="lead">仅复制原图，自动去重</p>
+      </div>
+      <button class="btn sm ghost" id="btnSkipIngest" type="button">跳过，进入总览 →</button>
+    </div>
+
+    <div class="field">
+      <label>1. 试卷照片文件夹</label>
+      <div class="row">
+        <input id="inputSourceDir" class="input" style="flex:1;min-width:240px" placeholder="选择文件夹或粘贴路径">
+        <button class="btn" id="btnPickFolder" type="button">选择文件夹...</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>2. 学科</label>
+      <div id="subjectPills" class="subject-pills"></div>
+    </div>
+
+    <div class="field">
+      <label>3. 批次名 <span class="muted" style="font-weight:400">（可选，留空自动命名）</span></label>
+      <input id="inputBatchName" class="input" style="max-width:360px" placeholder="例如：高三期中物理">
+    </div>
+
+    <div class="row" style="margin-top:6px">
+      <button class="btn primary" id="btnIngestAndRun" type="button">▶ 导入并开始识别</button>
+      <button class="btn" id="btnDoIngest" type="button">仅入库</button>
+      <span id="ingestMsg" class="muted"></span>
+    </div>
+  </section>
+
+  <!-- ==================== 视图 3：识别流向架构图 & 多人协作 ==================== -->
+  <section id="viewOverview" class="hidden">
+    <div id="inviteBar" class="invite-bar hidden">
+      <div class="invite-left">
+        <strong>局域网协作</strong>
+        <span id="lanUrlText" class="lan-url">http://192.168.x.x:8888</span>
+        <span class="muted">同网电脑/平板浏览器打开即可协同审阅</span>
+      </div>
+      <button class="btn primary xs" id="btnCopyLan" type="button">复制网址</button>
+    </div>
+
+    <div class="card" id="batchCard">
+      <div class="between">
+        <div>
+          <h2 id="activeBatchTitle">尚未导入试卷</h2>
+          <div class="muted" id="activeBatchMeta">请先导入一批试卷</div>
+        </div>
+        <div class="row" id="hostBatchActions">
+          <select id="batchSelect" class="input" style="width:auto;min-width:175px;padding:6px 10px;font-size:13px"></select>
+          <button class="btn primary sm" id="btnStartRecognize" type="button">开始识别</button>
+          <button class="btn danger sm hidden" id="btnStopRecognize" type="button">■ 停止</button>
+          <button class="btn warn sm hidden" id="btnRetryFailed" type="button" title="仅重跑失败题块，不重复扣费">🔁 补跑失败</button>
+          <button class="btn sm" id="btnGoIngestNew" type="button">+ 导入</button>
+        </div>
+      </div>
+
+      <!-- 实时数据流架构图进度看板 -->
+      <div id="pipelineDashboard" class="pipe-dash hidden">
+        <div class="pipe-head">
+          <div class="pipe-head-left">
+            <strong id="pipeStageTitle" style="font-size:14.5px">识别流水线</strong>
+            <span id="pipeStageBadge" class="badge ok">就绪</span>
+            <span id="pipeSpeedEta" class="muted" style="font-size:12px"></span>
+          </div>
+          <div class="row">
+            <div class="pipe-meta" id="pipeMetaRow"></div>
+            <button class="btn xs ghost" id="btnToggleArch" type="button">收起架构图</button>
+          </div>
+        </div>
+        <div class="prog-nums" style="margin-bottom:5px">
+          <span id="pipeMainDesc" style="font-weight:500;color:#374151">准备中...</span>
+          <span id="pipeMainPct" style="color:var(--primary)">0%</span>
+        </div>
+        <div class="prog-bar" id="pipeMainBarWrap"><i id="pipeMainBar" style="width:0%"></i></div>
+
+        <div class="arch-stage-box" id="archStageBox">
+          <div class="arch-stage-bar">
+            <span style="font-weight:700;color:#374151">数据流向架构（实时数据驱动动效）</span>
+            <div class="arch-legend-items">
+              <span class="arch-lg"><i class="arch-dot active"></i>运行中</span>
+              <span class="arch-lg"><i class="arch-dot done"></i>已完成</span>
+              <span class="arch-lg"><i class="arch-dot warn"></i>待补跑</span>
+              <span class="arch-lg"><i class="arch-dot err"></i>异常</span>
+            </div>
+          </div>
+
+          <div class="flow-stage" id="pipeArchStage">
+            <svg class="flow-svg" id="pipeArchSvg"></svg>
+            <svg class="flow-svg over-particles" id="pipeParticleSvg"></svg>
+            <div id="pipeEdgePills"></div>
+
+            <div class="pipe-dag">
+              <!-- ① 原图纠偏 -->
+              <div class="arch-node is-idle" id="nodeOrient">
+                <div class="an-head">
+                  <span class="an-title"><i class="arch-dot" id="dotOrient"></i>① 原图纠偏</span>
+                  <span class="an-tag">Orient</span>
+                </div>
+                <div class="an-stat"><span id="anOrientVal">0 / 0 页</span><small id="anOrientPct">0%</small></div>
+                <div class="an-bar"><i id="anOrientBar" style="width:0%"></i></div>
+                <div class="an-foot"><span id="anOrientFoot">等待开始</span></div>
+              </div>
+
+              <!-- ② M1 版面分区 -->
+              <div class="arch-node is-idle" id="nodeM1">
+                <div class="an-head">
+                  <span class="an-title"><i class="arch-dot" id="dotM1"></i>② M1 版面</span>
+                  <span class="an-tag" id="tagM1Dev">YOLO</span>
+                </div>
+                <div class="an-stat"><span id="anM1Val">0 / 0 页</span><small id="anM1Pct">0%</small></div>
+                <div class="an-bar"><i id="anM1Bar" style="width:0%"></i></div>
+                <div class="an-chips">
+                  <span class="an-chip choice" id="anM1Choice">选 0</span>
+                  <span class="an-chip fill" id="anM1Fill">填 0</span>
+                  <span class="an-chip id" id="anM1Id">名 0</span>
+                </div>
+              </div>
+
+              <!-- ③ M2 选择题本地快车道 -->
+              <div class="arch-node is-idle" id="nodeM2">
+                <div class="an-head">
+                  <span class="an-title"><i class="arch-dot" id="dotM2"></i>③ M2 选择题</span>
+                  <span class="an-tag" id="anM2InTag">收 0 区</span>
+                </div>
+                <div class="an-meters-3">
+                  <div class="an-m">
+                    <div class="an-m-top"><span class="an-m-lbl">YOLO</span><span class="an-m-val" id="anM2YoloVal">0/0</span></div>
+                    <div class="an-bar"><i id="anM2YoloBar" style="width:0%"></i></div>
+                  </div>
+                  <div class="an-m">
+                    <div class="an-m-top"><span class="an-m-lbl">OCR 题号</span><span class="an-m-val" id="anM2OcrVal">0</span></div>
+                    <div class="an-bar blue"><i id="anM2OcrBar" style="width:0%"></i></div>
+                  </div>
+                  <div class="an-m">
+                    <div class="an-m-top"><span class="an-m-lbl">CNN 涂卡</span><span class="an-m-val ok" id="anM2CnnVal">0 题</span></div>
+                    <div class="an-bar"><i id="anM2CnnBar" style="width:0%"></i></div>
+                  </div>
+                </div>
+                <div class="an-foot"><span>本地直出 · 零 API 费</span><b id="anM2Pct">0%</b></div>
+              </div>
+
+              <!-- ④ M3 大题定位 + ⑤ 拼图大模型 API -->
+              <div class="pipe-lower-track">
+                <div class="arch-node is-idle" id="nodeM3">
+                  <div class="an-head">
+                    <span class="an-title"><i class="arch-dot" id="dotM3"></i>④ M3 大题</span>
+                    <span class="an-tag" id="anM3InTag">收 0 区</span>
+                  </div>
+                  <div class="an-meters-2">
+                    <div class="an-m">
+                      <div class="an-m-top"><span class="an-m-lbl">YOLO 定位</span><span class="an-m-val" id="anM3YoloVal">0/0 · 0题</span></div>
+                      <div class="an-bar"><i id="anM3YoloBar" style="width:0%"></i></div>
+                    </div>
+                    <div class="an-m">
+                      <div class="an-m-top"><span class="an-m-lbl">OCR 大题号</span><span class="an-m-val" id="anM3OcrVal">0/0</span></div>
+                      <div class="an-bar blue"><i id="anM3OcrBar" style="width:0%"></i></div>
+                    </div>
+                  </div>
+                  <div class="an-foot"><span id="anM3Foot">送下游 0 块</span><b id="anM3Pct">0%</b></div>
+                </div>
+
+                <div class="arch-node is-idle" id="nodeApi">
+                  <div class="an-head">
+                    <span class="an-title"><i class="arch-dot" id="dotApi"></i>⑤ 拼图 API</span>
+                    <span class="an-tag" id="stApiTag">4 并发</span>
+                  </div>
+                  <div class="an-meters-2">
+                    <div class="an-m">
+                      <div class="an-m-top"><span class="an-m-lbl" id="anApiIn">0 块→0 图</span><span class="an-m-val" id="anApiVal">0/0</span></div>
+                      <div class="an-bar" id="anApiBarWrap"><i id="anApiBar" style="width:0%"></i></div>
+                    </div>
+                  </div>
+                  <div class="an-foot"><span id="anApiFoot">已转 0 处</span><b id="anApiPct">0%</b></div>
+                </div>
+              </div>
+
+              <!-- ⑥ 实时合并落盘 -->
+              <div class="arch-node is-idle" id="nodeOut">
+                <div class="an-head">
+                  <span class="an-title"><i class="arch-dot" id="dotOut"></i>⑥ 实时落盘</span>
+                  <span class="an-tag" id="tagOutState">待命</span>
+                </div>
+                <div class="an-stat"><span id="anOutIn">0 / 0 页</span><small id="anOutPct">0%</small></div>
+                <div class="an-bar" id="anOutBarWrap"><i id="anOutBar" style="width:0%"></i></div>
+                <div class="an-foot"><span id="anOutSub">选 0 · 填 0/0</span></div>
+              </div>
+
+              <!-- ⑦ 人工复审（点击直达 8904） -->
+              <div class="arch-node is-idle clickable" id="nodeReview" title="点击直接打开 8904 人工复审页">
+                <div class="an-head">
+                  <span class="an-title"><i class="arch-dot" id="dotReview"></i>⑦ 人工复审</span>
+                  <span class="an-tag" id="tagReviewState">8904</span>
+                </div>
+                <div class="an-stat"><span id="anReviewVal">已审 0 / 0 页</span><small id="anReviewPct">0%</small></div>
+                <div class="an-bar"><i id="anReviewBar" style="width:0%"></i></div>
+                <div class="an-foot"><span id="anReviewFoot">等待识别落盘</span><b>进去审 →</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="pipelineDiagBox" class="diag-box hidden"></div>
+
+        <details id="pipelineRawDetails" style="margin-top:9px">
+          <summary class="muted" style="cursor:pointer;font-size:12px">查看运行记录（排障用）</summary>
+          <div id="pipelineLogBox" class="log-box"></div>
+        </details>
+      </div>
+    </div>
+
+    <div class="overview-grid">
+      <div class="card">
+        <div class="between" style="margin-bottom:10px">
+          <div>
+            <h2>审核任务</h2>
+            <div class="muted">点「进去审」自动领取下一张未审试卷</div>
+          </div>
+          <button class="btn xs" id="btnRefreshOverview" type="button">刷新</button>
+        </div>
+        <div id="taskGrid" class="task-grid"></div>
+        <details id="secondaryWrap" class="hidden" style="margin-top:12px;padding-top:9px;border-top:1px dashed var(--line)">
+          <summary class="muted" style="cursor:pointer;font-size:12px">更多可选工具：批量标框 (M1/M2/M3) 与涂卡审核（训练用）</summary>
+          <div class="row" style="margin-top:9px">
+            <button class="btn xs" type="button" data-open-annotate="m1">M1 版面</button>
+            <button class="btn xs" type="button" data-open-annotate="m2">M2 选择</button>
+            <button class="btn xs" type="button" data-open-annotate="m3">M3 大题</button>
+          </div>
+          <div id="secondaryTaskGrid" class="task-grid" style="margin-top:9px"></div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2>协作动态</h2>
+        <div class="muted" style="margin-bottom:10px">在线成员与累计审阅量</div>
+        <div style="margin-bottom:12px">
+          <div style="font-weight:600;font-size:12.5px;color:var(--muted);margin-bottom:5px">在线</div>
+          <div id="onlineList"><span class="muted">仅你在线</span></div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:12.5px;color:var(--muted);margin-bottom:5px">审阅榜</div>
+          <div id="leaderboard"><div class="muted">暂无记录</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== 视图 4：精简模型微调训练（仅主机） ==================== -->
+  <section id="viewTrain" class="hidden">
+    <div class="card">
+      <div class="between">
+        <div>
+          <h2>模型微调训练</h2>
+          <p class="lead">同步已审标框 → 选模块微调 → 核对后手动启用权重</p>
+        </div>
+        <div class="row">
+          <button class="btn primary sm" id="btnSyncBatchTrain" type="button">① 同步已审标框</button>
+          <button class="btn sm" id="btnRefreshTrain" type="button">刷新</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span id="trainSyncMsg" class="muted"></span>
+        <details style="margin-left:auto">
+          <summary class="muted" style="cursor:pointer;font-size:12px">标框工具 (M1/M2/M3)</summary>
+          <div class="row" style="margin-top:6px">
+            <button class="btn xs" type="button" data-open-annotate="m1">M1 标框</button>
+            <button class="btn xs" type="button" data-open-annotate="m2">M2 标框</button>
+            <button class="btn xs" type="button" data-open-annotate="m3">M3 标框</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div id="trainModuleGrid" class="train-grid"></div>
+
+    <details class="clean-drawer" id="drawerOptionalChoiceTrain" style="margin-top:0;margin-bottom:14px">
+      <summary>
+        <span>可选模块：选择题涂卡 CNN（涂卡一般无需重新训练）</span>
+        <span class="muted" id="choiceTrainTag">默认折叠 · 可选</span>
+      </summary>
+      <div class="drawer-body">
+        <div class="train-opt-row">
+          <div id="trainOptionalChoiceHost"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+            <div class="muted">涂卡 CNN 预训练泛化已较稳定，日常只需微调上方 M1/M2/M3 标框即可；如需微调涂卡，可先核对涂卡数据再选中左侧卡片训练。</div>
+            <button class="btn sm" id="btnOpenChoiceFromTrain" type="button">打开涂卡审核 (8905)</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <div class="card">
+      <div class="between">
+        <div class="row">
+          <select id="trainTaskSelect" class="input" style="width:auto;padding:7px 10px;font-size:13px">
+            <option value="m1">M1 版面分区</option>
+            <option value="m2">M2 选择题框</option>
+            <option value="m3">M3 填空大题框</option>
+            <optgroup label="可选模块（一般无需训练）">
+              <option value="choice">选择题涂卡 CNN（可选）</option>
+            </optgroup>
+          </select>
+          <select id="trainDeviceSelect" class="input" style="width:auto;padding:7px 10px;font-size:13px">
+            <option value="0">GPU (CUDA)</option>
+            <option value="cpu">CPU</option>
+          </select>
+          <span class="muted" id="trainHwInfo">检测设备中...</span>
+        </div>
+        <div class="row">
+          <button class="btn primary sm" id="btnStartTrain" type="button">▶ 开始微调</button>
+          <button class="btn danger sm hidden" id="btnStopTrain" type="button">■ 停止</button>
+          <button class="btn sm" id="btnOpenMonitor" type="button">监控 (8901)</button>
+        </div>
+      </div>
+
+      <details class="clean-drawer" style="margin-top:12px">
+        <summary>
+          <span>⚙ 高级训练参数</span>
+          <span class="muted" id="trainParamPreview">默认推荐配置</span>
+        </summary>
+        <div class="drawer-body">
+          <div class="train-form">
+            <div>
+              <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">轮数 (Epochs)</label>
+              <input id="trainEpochs" type="number" min="1" max="300" value="50" class="input" style="padding:7px 9px">
+            </div>
+            <div id="trainImgszWrap">
+              <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">尺寸 (imgsz)</label>
+              <select id="trainImgsz" class="input" style="padding:7px 9px">
+                <option value="1024" selected>1024（推荐）</option>
+                <option value="640">640（更快）</option>
+                <option value="1280">1280（高精度）</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">批大小 (Batch)</label>
+              <input id="trainBatch" type="number" min="1" max="128" value="8" class="input" style="padding:7px 9px">
+            </div>
+            <div>
+              <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">学习率 (LR)</label>
+              <input id="trainLr" type="text" value="0.0001" class="input" style="padding:7px 9px">
+            </div>
+            <div>
+              <label class="muted" style="display:block;margin-bottom:4px;font-weight:600">训练备注</label>
+              <input id="trainPurpose" type="text" value="工作台微调" maxlength="24" class="input" style="padding:7px 9px">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <div id="trainProgressWrap" class="hidden" style="margin-top:10px">
+        <div class="prog-nums" style="margin-bottom:5px">
+          <span id="trainProgLabel">准备中...</span>
+          <span id="trainProgMetrics" class="muted"></span>
+        </div>
+        <div class="prog-bar"><i id="trainProgBar" style="width:0%"></i></div>
+      </div>
+      <div id="trainLogBox" class="log-box hidden"></div>
+    </div>
+
+    <div class="card">
+      <div class="between" style="margin-bottom:8px">
+        <h2>训练记录与权重切换</h2>
+        <span class="muted">启用新权重自动备份旧版，可随时回退</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="train-table">
+          <thead>
+            <tr><th>模块</th><th>记录</th><th>样本</th><th>指标</th><th>状态</th><th>操作</th></tr>
+          </thead>
+          <tbody id="trainRunsBody">
+            <tr><td colspan="6" class="muted">暂无训练记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="liveBanner" class="live-banner">
+  <span class="pulse-dot"></span>
+  <span id="liveSource" class="live-src">实时</span>
+  <span id="liveText">就绪</span>
+</div>
+
+<!-- 新手引导弹窗 -->
+<dialog id="guideDialog" class="guide-dlg">
+  <div class="between" style="margin-bottom:6px">
+    <h3 style="margin:0;font-size:16px">30 秒看懂操作流程</h3>
+    <button class="btn sm" id="btnCloseGuide" type="button">关闭</button>
+  </div>
+  <div class="muted">移到右侧任意一项，左侧示意卷亮起对应区域。</div>
+  <div class="anatomy-grid">
+    <svg class="paper-svg" viewBox="0 0 320 420" aria-label="示意答题卡">
+      <rect x="12" y="12" width="296" height="396" rx="10" fill="#fff" stroke="#d6d0c4" stroke-width="1.5"/>
+      <g id="zoneReview" class="paper-zone">
+        <rect x="20" y="20" width="280" height="380" rx="8" fill="#ecfdf5" fill-opacity=".35" stroke="#1f7a53" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="32" y="42" font-size="12" font-weight="700" fill="#1f7a53">整页人工复审</text>
+      </g>
+      <rect x="30" y="54" width="260" height="34" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="1.2"/>
+      <text x="42" y="75" font-size="11.5" fill="#92400e">姓名：张三　学号：20260108</text>
+      <g id="zoneChoice" class="paper-zone">
+        <rect x="30" y="102" width="260" height="106" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="40" y="120" font-size="11.5" font-weight="700" fill="#1d4ed8">选择题填涂区（纯本地 CNN）</text>
+        <g font-size="11" fill="#1e3a8a">
+          <text x="42" y="144">1.</text><rect x="60" y="133" width="22" height="13" rx="2" fill="#1e3a8a"/><text x="67" y="143" fill="#fff">A</text><rect x="88" y="133" width="22" height="13" rx="2" fill="#fff" stroke="#93c5fd"/><text x="95" y="143">B</text>
+          <text x="42" y="168">2.</text><rect x="60" y="157" width="22" height="13" rx="2" fill="#fff" stroke="#93c5fd"/><text x="67" y="167">A</text><rect x="88" y="157" width="22" height="13" rx="2" fill="#1e3a8a"/><text x="95" y="167" fill="#fff">B</text>
+        </g>
+      </g>
+      <g id="zoneBox" class="paper-zone">
+        <rect x="30" y="222" width="260" height="164" rx="6" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.8"/>
+        <text x="40" y="241" font-size="11.5" font-weight="700" fill="#6d28d9">手写大题区（大模型转录）</text>
+        <rect x="42" y="254" width="236" height="50" rx="4" fill="#fff" stroke="#a78bfa" stroke-dasharray="4 3"/>
+        <text x="52" y="276" font-size="11" fill="#4c1d95">第 14 题：(1) 2.5 m/s²　(2) 向下</text>
+        <rect x="42" y="314" width="236" height="54" rx="4" fill="#fff" stroke="#a78bfa" stroke-dasharray="4 3"/>
+        <text x="52" y="336" font-size="11" fill="#4c1d95">第 15 题：F = ma ...</text>
+      </g>
+    </svg>
+
+    <div>
+      <div class="guide-item active" data-zone="review">
+        <strong>① 人工复审（日常主入口）</strong>
+        <span>鼠标滑到填空题框即弹出答案，未填空位标「未作答」，点框改字；按 <b>L</b> 跳低置信度项，按 <b>D</b> 保存翻下一页。</span>
+      </div>
+      <div class="guide-item" data-zone="box">
+        <strong>② 原地调框（按 E 切换）</strong>
+        <span>发现框歪或漏框，在复审页按 <b>E</b> 直接拖边缩放、画新框、右键单击删框。</span>
+      </div>
+      <div class="guide-item" data-zone="choice">
+        <strong>③ 涂卡批量审核</strong>
+        <span>集中核对选择题填涂，鼠标划过确认，认错点一下修改。</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary sm" id="btnStartTour" type="button">▶ 分步高亮引导</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<div id="tourMask" class="tour-mask hidden">
+  <div id="tourBox" class="tour-box"></div>
+  <div id="tourPop" class="tour-pop" style="pointer-events:auto">
+    <h4 id="tourTitle">引导</h4>
+    <p id="tourDesc"></p>
+    <div class="between">
+      <span id="tourStep" class="muted" style="font-size:12px"></span>
+      <div class="row">
+        <button class="btn xs" id="tourSkip" type="button">结束</button>
+        <button class="btn primary xs" id="tourNext" type="button">下一步 →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 称呼弹窗 -->
+<dialog id="nameDialog">
+  <h3 style="margin:0 0 6px">你的称呼</h3>
+  <p class="muted" style="margin:0 0 12px">用于区分多人协同审阅记录。</p>
+  <input id="nameInput" class="input" placeholder="输入姓名或昵称" maxlength="20">
+  <div class="row" style="justify-content:flex-end;margin-top:14px">
+    <button class="btn primary sm" id="btnSaveName" type="button">确定</button>
+  </div>
+</dialog>
+
+<!-- 大模型 API 设置弹窗 -->
+<dialog id="vlmDialog" style="width:min(490px,92vw)">
+  <div class="between" style="margin-bottom:8px">
+    <h3 style="margin:0;font-size:16px">大模型视觉 API 配置</h3>
+    <button class="btn xs" id="btnCloseVlm" type="button">关闭</button>
+  </div>
+  <p class="muted" style="margin:0 0 12px">支持豆包、小米 MiMo、DeepSeek、通义、智谱及 OpenAI 兼容中转站。</p>
+  <div class="field" style="margin-bottom:10px">
+    <label>运营商</label>
+    <select id="vlmProvider" class="input"></select>
+    <div id="vlmNote" class="muted" style="font-size:11.5px;margin-top:3px"></div>
+  </div>
+  <div class="field" style="margin-bottom:10px">
+    <label>站点地址 (Base URL)</label>
+    <input id="vlmBaseUrl" class="input" placeholder="https://...">
+  </div>
+  <div class="field" style="margin-bottom:10px">
+    <label>模型名称 (Model ID)</label>
+    <input id="vlmModel" class="input" placeholder="如 doubao-seed-2-1-lite-260915">
+  </div>
+  <div class="field" style="margin-bottom:10px">
+    <label>API Key <span id="vlmKeyHint" class="muted" style="font-weight:400"></span></label>
+    <input id="vlmApiKey" type="password" class="input" placeholder="留空则保留当前已存密钥">
+  </div>
+  <div class="vlm-price-bar">
+    <span id="vlmPriceText" class="muted" style="font-size:12px">正在读取本地官方定价...</span>
+    <div class="row" style="gap:6px">
+      <button class="btn xs ghost" id="btnToggleCustomPrice" type="button">手动填价</button>
+      <button class="btn xs" id="btnRefreshPrice" type="button" title="从各模型官网重新抓取定价并永久保存到本地">↻ 更新官网价格</button>
+    </div>
+  </div>
+  <div id="vlmCustomPriceBox" class="vlm-price-custom hidden">
+    <div class="field"><label style="font-size:11.5px">输入单价 (元/百万)</label><input id="vlmPriceIn" class="input" type="number" step="0.01" min="0" placeholder="0.80"></div>
+    <div class="field"><label style="font-size:11.5px">输出单价 (元/百万)</label><input id="vlmPriceOut" class="input" type="number" step="0.01" min="0" placeholder="2.70"></div>
+    <button class="btn sm" id="btnSaveCustomPrice" type="button">保存单价</button>
+  </div>
+  <div id="vlmStatus" style="font-size:12.5px;min-height:18px;margin-bottom:10px"></div>
+  <div class="row" style="justify-content:flex-end">
+    <button class="btn sm" id="btnTestVlm" type="button">测试连通性</button>
+    <button class="btn primary sm" id="btnSaveVlm" type="button">保存</button>
+  </div>
+</dialog>
+
+<!-- 解压权重密码弹窗 -->
+<dialog id="pwdDialog">
+  <h3 style="margin:0 0 6px">解压加密模型权重</h3>
+  <p class="muted" style="margin:0 0 12px">输入密码后自动解压到 <code>models/</code>。</p>
+  <input id="pwdInput" type="password" class="input" placeholder="输入解压密码">
+  <div id="pwdErr" style="color:var(--err);font-size:12.5px;margin-top:6px"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:14px">
+    <button class="btn sm" id="btnCancelPwd" type="button">取消</button>
+    <button class="btn primary sm" id="btnConfirmPwd" type="button">开始解压</button>
+  </div>
+</dialog>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const CLIENT_ID = (() => {
+  let id = sessionStorage.getItem('wbClientId');
+  if (!id) { id = 'u_' + Math.random().toString(36).slice(2, 10); sessionStorage.setItem('wbClientId', id); }
+  return id;
+})();
+
+let OVERVIEW = null;
+let CHECK = null;
+let CURRENT_VIEW = 'overview';
+let SELECTED_SUBJECT = localStorage.getItem('wbLastSubject') || '物理';
+let INITIALIZED = false;
+let ARCH_COLLAPSED = localStorage.getItem('wbArchCollapsed') === '1';
+let OVERVIEW_INFLIGHT = false;
+let OVERVIEW_TIMER = null;
+let OVERVIEW_TIMER_MS = 0;
+
+function getUserName() { return (localStorage.getItem('reviewUserName') || '').trim(); }
+function setUserName(name) {
+  localStorage.setItem('reviewUserName', name.trim());
+  $('btnUser').textContent = '👤 ' + (name.trim() || '填写称呼');
+  pingPresence('总览');
+}
+
+function showBanner(source, text, durationMs = 4200) {
+  $('liveSource').textContent = source === 'cli' ? 'CLI 联动' : '实时';
+  $('liveText').textContent = text;
+  $('liveBanner').classList.add('show');
+  clearTimeout(showBanner._t);
+  if (durationMs > 0) showBanner._t = setTimeout(() => $('liveBanner').classList.remove('show'), durationMs);
+}
+
+function highlightElement(id, durationMs = 2600) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.add('spotlight');
+  clearTimeout(el._st);
+  el._st = setTimeout(() => el.classList.remove('spotlight'), durationMs);
+}
+
+function setView(view) {
+  if (!OVERVIEW?.is_host && view !== 'overview') view = 'overview';
+  CURRENT_VIEW = view;
+  $('viewCheck').classList.toggle('hidden', view !== 'check');
+  $('viewIngest').classList.toggle('hidden', view !== 'ingest');
+  $('viewOverview').classList.toggle('hidden', view !== 'overview');
+  $('viewTrain').classList.toggle('hidden', view !== 'train');
+  document.querySelectorAll('.step-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
+  requestAnimationFrame(() => {
+    if (view === 'check') drawEnvArchConnectors();
+    if (view === 'overview') PipeFlow.relayout();
+  });
+}
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    ...opts,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `请求失败 (${r.status})`);
+  return data;
+}
+
+/* ==================== 通用 SVG 动态连线与真实数据脉冲引擎 ==================== */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  return el;
+}
+
+function anchorPoint(stageRect, el, side, ratio = 0.5) {
+  const r = el.getBoundingClientRect();
+  const x = r.left - stageRect.left;
+  const y = r.top - stageRect.top;
+  if (side === 'right') return { x: x + r.width, y: y + r.height * ratio };
+  if (side === 'left') return { x, y: y + r.height * ratio };
+  if (side === 'bottom') return { x: x + r.width * ratio, y: y + r.height };
+  if (side === 'top') return { x: x + r.width * ratio, y };
+  return { x: x + r.width / 2, y: y + r.height / 2 };
+}
+
+function bezierPath(a, b, vertical = false) {
+  if (vertical) {
+    const dy = (b.y - a.y) * 0.5;
+    return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${a.x.toFixed(1)} ${(a.y + dy).toFixed(1)}, ${b.x.toFixed(1)} ${(b.y - dy).toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+  }
+  const dx = Math.max(18, Math.abs(b.x - a.x) * 0.48);
+  return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${(a.x + dx).toFixed(1)} ${a.y.toFixed(1)}, ${(b.x - dx).toFixed(1)} ${b.y.toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+}
+
+/* Step 1：环境配置 4 节点架构连线 */
+let ENV_STATES = { compute: 'ok', models: 'ok', vlm: 'ok', review: 'ok' };
+function drawEnvArchConnectors() {
+  const stage = $('envArchStage');
+  const svg = $('envArchSvg');
+  if (!stage || !svg || stage.offsetWidth === 0) return;
+  const sr = stage.getBoundingClientRect();
+  svg.innerHTML = '';
+  const defs = svgEl('defs');
+  [
+    ['envArrOk', '#16a34a'],
+    ['envArrWarn', '#d97706'],
+    ['envArrErr', '#dc2626'],
+    ['envArrIdle', '#94a3b8'],
+  ].forEach(([id, color]) => {
+    const m = svgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto' });
+    m.appendChild(svgEl('path', { d: 'M 0 1 L 9 5 L 0 9 z', fill: color }));
+    defs.appendChild(m);
+  });
+  svg.appendChild(defs);
+
+  const pairs = [
+    ['envNodeCompute', 'envNodeModels', ENV_STATES.compute, ENV_STATES.models],
+    ['envNodeModels', 'envNodeVlm', ENV_STATES.models, ENV_STATES.vlm],
+    ['envNodeVlm', 'envNodeReview', ENV_STATES.vlm, ENV_STATES.review],
+  ];
+  pairs.forEach(([fromId, toId, sA, sB]) => {
+    const aEl = $(fromId), bEl = $(toId);
+    if (!aEl || !bEl) return;
+    const a = anchorPoint(sr, aEl, 'right', 0.5);
+    const b = anchorPoint(sr, bEl, 'left', 0.5);
+    if (b.x - a.x < 10) return;
+    const d = bezierPath(a, { x: b.x - 4, y: b.y }, false);
+    const bad = sA === 'err' || sB === 'err';
+    const warn = !bad && (sA === 'warn' || sB === 'warn');
+    const cls = bad ? 'err' : (warn ? 'warn' : 'done');
+    const arrId = bad ? 'envArrErr' : (warn ? 'envArrWarn' : 'envArrOk');
+    svg.appendChild(svgEl('path', { d, class: `pipe-base ${cls}`, 'marker-end': `url(#${arrId})` }));
+    if (!bad && !warn) {
+      svg.appendChild(svgEl('path', { d, class: 'pipe-stream flowing', style: 'opacity:.32' }));
+    }
+  });
+}
+
+/* Step 3：真实数据驱动流动动画引擎 */
+const PipeFlow = (() => {
+  const EDGES = [
+    { id: 'orient_m1',  from: 'nodeOrient', fromSide: 'right',  fromRatio: 0.5,  to: 'nodeM1',     toSide: 'left',  toRatio: 0.5,  color: 'green',  vertical: false },
+    { id: 'm1_m2',      from: 'nodeM1',     fromSide: 'right',  fromRatio: 0.34, to: 'nodeM2',     toSide: 'left',  toRatio: 0.5,  color: 'green',  vertical: false },
+    { id: 'm1_m3',      from: 'nodeM1',     fromSide: 'right',  fromRatio: 0.68, to: 'nodeM3',     toSide: 'left',  toRatio: 0.5,  color: 'blue',   vertical: false },
+    { id: 'm2_out',     from: 'nodeM2',     fromSide: 'right',  fromRatio: 0.5,  to: 'nodeOut',    toSide: 'left',  toRatio: 0.36, color: 'green',  vertical: false },
+    { id: 'm3_api',     from: 'nodeM3',     fromSide: 'right',  fromRatio: 0.5,  to: 'nodeApi',    toSide: 'left',  toRatio: 0.5,  color: 'blue',   vertical: false },
+    { id: 'api_out',    from: 'nodeApi',    fromSide: 'right',  fromRatio: 0.42, to: 'nodeOut',    toSide: 'left',  toRatio: 0.72, color: 'violet', vertical: false },
+    { id: 'out_review', from: 'nodeOut',    fromSide: 'bottom', fromRatio: 0.5,  to: 'nodeReview', toSide: 'top',   toRatio: 0.5,  color: 'green',  vertical: true },
+  ];
+
+  const PALETTE = {
+    green:  { fill: '#10b981', glow: 'rgba(16,185,129,0.34)', textBg: '#ecfdf5', textBorder: '#34d399', textColor: '#065f46', pulseCls: 'recv-pulse' },
+    blue:   { fill: '#2563eb', glow: 'rgba(37,99,235,0.32)',  textBg: '#eff6ff', textBorder: '#60a5fa', textColor: '#1e40af', pulseCls: 'recv-pulse-blue' },
+    violet: { fill: '#7c3aed', glow: 'rgba(124,58,237,0.32)', textBg: '#f5f3ff', textBorder: '#a78bfa', textColor: '#5b21b6', pulseCls: 'recv-pulse' },
+  };
+
+  let edgeEls = {};
+  let edgeMeta = {};
+  let particles = [];
+  let rafId = null;
+  let lastBatchId = '';
+  let prevSnap = null;
+  let lastLayoutKey = '';
+
+  function ensureDefs(svg) {
+    const defs = svgEl('defs');
+    [
+      ['arrIdle', '#cbd5e1'],
+      ['arrGreen', '#16a34a'],
+      ['arrBlue', '#2563eb'],
+      ['arrViolet', '#7c3aed'],
+      ['arrWarn', '#d97706'],
+      ['arrErr', '#dc2626'],
+    ].forEach(([id, color]) => {
+      const m = svgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto' });
+      m.appendChild(svgEl('path', { d: 'M 0 1 L 9 5 L 0 9 z', fill: color }));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+  }
+
+  function relayout(force = false) {
+    const stage = $('pipeArchStage');
+    const svg = $('pipeArchSvg');
+    const pillsHost = $('pipeEdgePills');
+    if (!stage || !svg || !pillsHost || stage.offsetWidth === 0 || ARCH_COLLAPSED) return;
+    const sr = stage.getBoundingClientRect();
+    const layoutKey = `${Math.round(sr.width)}x${Math.round(sr.height)}`;
+    if (!force && lastLayoutKey === layoutKey && Object.keys(edgeEls).length === EDGES.length) {
+      return;
+    }
+    lastLayoutKey = layoutKey;
+    svg.innerHTML = '';
+    pillsHost.innerHTML = '';
+    ensureDefs(svg);
+    edgeEls = {};
+
+    EDGES.forEach(e => {
+      const fEl = $(e.from), tEl = $(e.to);
+      if (!fEl || !tEl) return;
+      const a = anchorPoint(sr, fEl, e.fromSide, e.fromRatio);
+      const bRaw = anchorPoint(sr, tEl, e.toSide, e.toRatio);
+      const b = e.vertical ? { x: bRaw.x, y: bRaw.y - 4 } : { x: bRaw.x - 4, y: bRaw.y };
+      const d = bezierPath(a, b, e.vertical);
+
+      const base = svgEl('path', { d, class: 'pipe-base' });
+      const burst = svgEl('path', { d, class: `pipe-burst ${e.color === 'blue' ? 'blue' : (e.color === 'violet' ? 'violet' : '')}` });
+      const stream = svgEl('path', { d, class: `pipe-stream ${e.color === 'blue' ? 'blue' : (e.color === 'violet' ? 'violet' : '')}` });
+      svg.appendChild(base);
+      svg.appendChild(burst);
+      svg.appendChild(stream);
+
+      const len = base.getTotalLength();
+      const midPt = base.getPointAtLength(len * 0.5);
+      const pill = document.createElement('div');
+      pill.className = 'edge-pill';
+      pill.style.left = midPt.x.toFixed(1) + 'px';
+      pill.style.top = (midPt.y + (e.vertical ? 0 : -11)).toFixed(1) + 'px';
+      if (e.vertical) pill.style.left = (midPt.x + 30).toFixed(1) + 'px';
+      pillsHost.appendChild(pill);
+
+      edgeEls[e.id] = { cfg: e, base, burst, stream, pill, len };
+      const meta = edgeMeta[e.id];
+      if (meta) applyEdgeVisual(e.id, meta);
+    });
+  }
+
+  function applyEdgeVisual(edgeId, meta) {
+    edgeMeta[edgeId] = meta;
+    const ref = edgeEls[edgeId];
+    if (!ref) return;
+    const { cfg, base, stream, pill } = ref;
+    const colorCls = cfg.color === 'blue' ? 'blue' : '';
+    const st = meta.state || 'idle';
+    base.setAttribute('class', `pipe-base ${st} ${colorCls}`);
+    const marker = st === 'err' ? 'arrErr'
+      : st === 'warn' ? 'arrWarn'
+      : (st === 'active' || st === 'done')
+        ? (cfg.color === 'blue' ? 'arrBlue' : (cfg.color === 'violet' ? 'arrViolet' : 'arrGreen'))
+        : 'arrIdle';
+    base.setAttribute('marker-end', `url(#${marker})`);
+    stream.setAttribute('class', `pipe-stream ${cfg.color === 'blue' ? 'blue' : (cfg.color === 'violet' ? 'violet' : '')}${meta.flowing ? ' flowing' : ''}`);
+    if (meta.label) {
+      pill.textContent = meta.label;
+      pill.style.display = '';
+      pill.className = 'edge-pill' + (st === 'err' ? ' err' : (st === 'active' || st === 'done' ? (cfg.color === 'blue' ? ' blue' : ' active') : ''));
+    } else {
+      pill.style.display = 'none';
+    }
+  }
+
+  function pulseNode(nodeId, pulseCls) {
+    const el = $(nodeId);
+    if (!el) return;
+    el.classList.remove('recv-pulse', 'recv-pulse-blue');
+    void el.offsetWidth;
+    el.classList.add(pulseCls || 'recv-pulse');
+  }
+
+  function emitPacket(edgeId, deltaLabel = '', count = 1) {
+    const ref = edgeEls[edgeId];
+    const pSvg = $('pipeParticleSvg');
+    if (!ref || !pSvg || ARCH_COLLAPSED) return;
+    const pal = PALETTE[ref.cfg.color] || PALETTE.green;
+
+    // 管道瞬时高亮
+    ref.burst.classList.add('flash');
+    clearTimeout(ref._bt);
+    ref._bt = setTimeout(() => ref.burst.classList.remove('flash'), 420);
+
+    const n = Math.max(1, Math.min(3, count));
+    for (let k = 0; k < n; k++) {
+      const g = svgEl('g');
+      const halo = svgEl('circle', { r: 8.5, fill: pal.glow });
+      const core = svgEl('circle', { r: 4.2, fill: pal.fill, stroke: '#ffffff', 'stroke-width': 1.5 });
+      g.appendChild(halo);
+      g.appendChild(core);
+      if (k === 0 && deltaLabel) {
+        const bw = Math.max(26, deltaLabel.length * 7.2 + 10);
+        const tagG = svgEl('g', { class: 'pkt-tag' });
+        const bg = svgEl('rect', { x: (-bw / 2).toFixed(1), y: -23, width: bw.toFixed(1), height: 15, rx: 7.5, fill: pal.textBg, stroke: pal.textBorder, 'stroke-width': 1 });
+        const txt = svgEl('text', { x: 0, y: -12.3, 'text-anchor': 'middle', 'font-size': 9.2, 'font-weight': 800, fill: pal.textColor });
+        txt.textContent = deltaLabel;
+        tagG.appendChild(bg);
+        tagG.appendChild(txt);
+        g.appendChild(tagG);
+      }
+      pSvg.appendChild(g);
+      particles.push({
+        edgeId,
+        g,
+        tagG: g.querySelector('.pkt-tag'),
+        targetNode: ref.cfg.to,
+        pulseCls: pal.pulseCls,
+        start: performance.now() + k * 170,
+        dur: 1180 + k * 65,
+      });
+    }
+    if (!rafId) rafId = requestAnimationFrame(tick);
+  }
+
+  function tick(now) {
+    const keep = [];
+    for (const p of particles) {
+      const ref = edgeEls[p.edgeId];
+      if (!ref || !p.g.parentNode) { p.g.remove(); continue; }
+      const rawT = (now - p.start) / p.dur;
+      if (rawT < 0) {
+        p.g.setAttribute('opacity', '0');
+        keep.push(p);
+        continue;
+      }
+      if (rawT >= 1) {
+        p.g.remove();
+        pulseNode(p.targetNode, p.pulseCls);
+        continue;
+      }
+      // 平滑缓出插值；+Δ 标签在管道中段稳定停留清晰可读，靠近目标卡片前柔和淡出避免遮字
+      const t = 1 - Math.pow(1 - rawT, 2.1);
+      const pt = ref.base.getPointAtLength(t * ref.len);
+      const op = rawT < 0.12 ? rawT / 0.12 : (rawT > 0.86 ? (1 - rawT) / 0.14 : 1);
+      p.g.setAttribute('transform', `translate(${pt.x.toFixed(1)},${pt.y.toFixed(1)})`);
+      p.g.setAttribute('opacity', op.toFixed(2));
+      if (p.tagG) {
+        const tagOp = rawT < 0.14 ? rawT / 0.14 : (rawT > 0.64 ? Math.max(0, (0.82 - rawT) / 0.18) : 1);
+        p.tagG.setAttribute('opacity', tagOp.toFixed(2));
+      }
+      keep.push(p);
+    }
+    particles = keep;
+    rafId = particles.length ? requestAnimationFrame(tick) : null;
+  }
+
+  /** 根据真实计数增量（prevSnap -> snap）发射对应连线的真实数据包动效 */
+  function ingestSnapshot(batchId, snap, running) {
+    if (batchId !== lastBatchId) {
+      lastBatchId = batchId;
+      prevSnap = null;
+    }
+    if (!prevSnap) {
+      prevSnap = { ...snap, _running: running };
+      // 若首次看到正在运行中的任务，对当前活跃传输边发一束引导脉冲，一眼看出数据正往哪流
+      if (running) {
+        if (snap.orientDone > 0) emitPacket('orient_m1', `${snap.orientDone}页`, 1);
+        if (snap.m1Choice > 0) emitPacket('m1_m2', `${snap.m1Choice}区`, 1);
+        if (snap.m1Fill > 0) emitPacket('m1_m3', `${snap.m1Fill}区`, 1);
+        if (snap.choiceItems > 0) emitPacket('m2_out', `${snap.choiceItems}题`, 1);
+        if (snap.tilesQueued > 0) emitPacket('m3_api', `${snap.tilesQueued}块`, 1);
+        if (snap.apiSuccess > 0) emitPacket('api_out', `${snap.apiSuccess}图`, 1);
+        if (snap.pagesDone > 0) emitPacket('out_review', `${snap.pagesDone}页`, 1);
+      }
+      return;
+    }
+
+    // 任务刚从空闲切入运行：清零基线，让第一张完成的图就触发脉冲
+    if (running && !prevSnap._running) {
+      prevSnap = {
+        orientDone: 0, m1Pages: 0, m1Choice: 0, m1Fill: 0,
+        choiceItems: 0, tilesQueued: 0, apiSuccess: 0, transCnt: 0,
+        pagesDone: 0, reviewedPages: snap.reviewedPages, _running: true,
+      };
+    }
+
+    const dOrient = snap.orientDone - prevSnap.orientDone;
+    const dM1Choice = snap.m1Choice - prevSnap.m1Choice;
+    const dM1Fill = snap.m1Fill - prevSnap.m1Fill;
+    const dM1Pages = snap.m1Pages - prevSnap.m1Pages;
+    const dChoice = snap.choiceItems - prevSnap.choiceItems;
+    const dTiles = snap.tilesQueued - prevSnap.tilesQueued;
+    const dApiOk = snap.apiSuccess - prevSnap.apiSuccess;
+    const dTrans = snap.transCnt - prevSnap.transCnt;
+    const dPages = snap.pagesDone - prevSnap.pagesDone;
+    const dRev = snap.reviewedPages - prevSnap.reviewedPages;
+
+    if (dOrient > 0) emitPacket('orient_m1', `+${dOrient}页`, Math.min(3, dOrient));
+    if (dM1Choice > 0) emitPacket('m1_m2', `+${dM1Choice}区`, Math.min(3, dM1Choice));
+    else if (dM1Pages > 0 && snap.m1Choice > 0) emitPacket('m1_m2', `+${dM1Pages}页`, 1);
+    if (dM1Fill > 0) emitPacket('m1_m3', `+${dM1Fill}区`, Math.min(3, dM1Fill));
+    if (dChoice > 0) emitPacket('m2_out', `+${dChoice}题`, Math.min(3, Math.ceil(dChoice / 6)));
+    if (dTiles > 0) emitPacket('m3_api', `+${dTiles}块`, Math.min(3, Math.ceil(dTiles / 2)));
+    if (dTrans > 0) emitPacket('api_out', `+${dTrans}处`, Math.min(3, Math.ceil(dTrans / 3)));
+    else if (dApiOk > 0) emitPacket('api_out', `+${dApiOk}图`, Math.min(3, dApiOk));
+    if (dRev > 0) emitPacket('out_review', `已审+${dRev}`, Math.min(3, dRev));
+    else if (dPages > 0) emitPacket('out_review', `+${dPages}页`, Math.min(2, dPages));
+
+    prevSnap = { ...snap, _running: running };
+  }
+
+  function triggerReviewPulse(label = '开始审阅') {
+    emitPacket('out_review', label, 2);
+  }
+
+  return { relayout, applyEdgeVisual, ingestSnapshot, triggerReviewPulse };
+})();
+
+window.addEventListener('resize', () => {
+  if (CURRENT_VIEW === 'check') drawEnvArchConnectors();
+  if (CURRENT_VIEW === 'overview') PipeFlow.relayout(true);
+});
+
+/* ==================== Step 1：架构图化环境渲染 ==================== */
+function renderCheck(rep) {
+  CHECK = rep;
+  const items = rep.items || [];
+  const hw = rep.hardware || {};
+  const infer = rep.infer_settings || {};
+  const tab = $('tabCheck');
+  tab.classList.toggle('ok', rep.ok);
+  tab.classList.toggle('err', !rep.ok);
+  $('tabCheckDesc').textContent = rep.ok ? '全部就绪' : `${rep.error_count} 项待修`;
+
+  const devShort = hw.cuda ? `${hw.gpu_name} (${hw.vram_gb}G)` : `CPU ${hw.cpu_count || ''}线程`;
+  $('checkSummary').textContent = rep.ok
+    ? `全部就绪 · ${devShort}${rep.has_valid_api_key ? ' · 大模型 API 已配' : ' · 请配置大模型 API'}`
+    : `发现 ${rep.error_count} 项缺失，点下方红色节点或按钮一键修复`;
+  $('btnToIngest').classList.toggle('hidden', !rep.ok);
+
+  const needRepair = !rep.ok || rep.warning_count > 0;
+  $('repairBar').classList.toggle('hidden', !needRepair);
+  $('btnRepairPip').classList.toggle('hidden', !(rep.missing_packages && rep.missing_packages.length));
+  $('btnUnpackWeights').classList.toggle('hidden', !(rep.missing_weights && rep.missing_weights.length && rep.has_encrypted_weights));
+  const vlmKeyItem = items.find(x => x.id === 'vlm_api_key' || x.id === 'ark_key');
+  $('btnSetVlmKey').classList.toggle('hidden', !vlmKeyItem || vlmKeyItem.ok);
+
+  // 节点 1：算力底座（Python + 依赖库 + GPU/CPU）
+  const pkgItems = items.filter(x => x.category === 'runtime' || x.category === 'packages');
+  const pkgErr = pkgItems.filter(x => x.severity === 'error');
+  const pkgWarn = pkgItems.filter(x => x.severity === 'warn');
+  const compState = pkgErr.length ? 'err' : (pkgWarn.length ? 'warn' : 'ok');
+  ENV_STATES.compute = compState;
+  $('envNodeCompute').className = `env-node is-${compState}`;
+  $('envDotCompute').className = `arch-dot ${compState === 'ok' ? 'done' : compState}`;
+  $('envBadgeCompute').className = `badge ${compState}`;
+  $('envBadgeCompute').textContent = compState === 'ok' ? (hw.cuda ? 'GPU' : 'CPU') : (compState === 'warn' ? '兼容提醒' : `缺 ${pkgErr.length} 项`);
+  $('envComputeMain').textContent = devShort;
+  const pyItem = items.find(x => x.id === 'python');
+  const pyVer = (pyItem?.detail || '').match(/Python\s+[\d.]+/)?.[0] || 'Python';
+  const reqTotal = items.filter(x => x.id?.startsWith('pkg_')).length;
+  const reqOk = items.filter(x => x.id?.startsWith('pkg_') && x.ok).length;
+  $('envComputeSub').innerHTML = `
+    <span class="an-chip ${pkgErr.length ? 'id' : 'choice'}">${esc(pyVer)}</span>
+    <span class="an-chip ${reqOk < reqTotal ? 'id' : 'choice'}">依赖 ${reqOk}/${reqTotal}</span>
+    ${pkgWarn.length ? `<span class="an-chip fill" style="background:#fffbeb;color:#b45309;border-color:#fcd34d">兼容提醒 ${pkgWarn.length}</span>` : ''}
+  `;
+  $('envComputeFoot').textContent = pkgErr.length ? '点击展开或上方一键安装' : `Batch ${infer.yolo_batch || '自动'} · 并发 ${infer.api_concurrency || 4}`;
+
+  // 节点 2：本地检测链（orient / m1 / m2 / m3 / choice / paddle_ocr）
+  const wSpecs = [
+    ['weight_orient', '纠偏'],
+    ['weight_m1', 'M1'],
+    ['weight_m2', 'M2'],
+    ['weight_m3', 'M3'],
+    ['paddle_ocr', 'OCR'],
+    ['weight_choice', 'CNN'],
+  ];
+  const wItems = items.filter(x => x.category === 'weights');
+  const wMiss = wItems.filter(x => !x.ok);
+  const modState = wMiss.length ? 'err' : 'ok';
+  ENV_STATES.models = modState;
+  $('envNodeModels').className = `env-node is-${modState}`;
+  $('envDotModels').className = `arch-dot ${modState === 'ok' ? 'done' : 'err'}`;
+  $('envBadgeModels').className = `badge ${modState}`;
+  $('envBadgeModels').textContent = modState === 'ok' ? '就绪' : `缺 ${wMiss.length} 项`;
+  $('envModelsMain').textContent = modState === 'ok' ? `${wItems.length}/${wItems.length} 权重齐全` : `缺少 ${wMiss.length} 个模型文件`;
+  $('envModelPills').innerHTML = wSpecs.map(([id, lbl]) => {
+    const it = items.find(x => x.id === id);
+    const ok = Boolean(it && it.ok);
+    return `<span class="env-mini ${ok ? 'ok' : 'err'}"><i></i>${esc(lbl)}</span>`;
+  }).join('');
+  $('envModelsFoot').textContent = modState === 'ok' ? '本地 0 费用 · 查看明细' : '点击输入密码解压权重';
+
+  // 节点 3：大模型转录 API
+  const vlmOk = Boolean(rep.has_valid_api_key);
+  const vlmState = vlmOk ? 'ok' : 'warn';
+  ENV_STATES.vlm = vlmState;
+  $('envNodeVlm').className = `env-node is-${vlmState}`;
+  $('envDotVlm').className = `arch-dot ${vlmOk ? 'done' : 'warn'}`;
+  $('envBadgeVlm').className = `badge ${vlmState}`;
+  $('envBadgeVlm').textContent = vlmOk ? '已配置' : '待配置';
+  const vlmTitle = (vlmKeyItem?.name || '大模型 API').replace(/^大模型视觉 API\s*/, '').replace(/[()（）]/g, '') || '视觉大模型';
+  $('envVlmMain').textContent = vlmTitle;
+  const vlmModelOnly = (vlmKeyItem?.detail || '').replace(/^已配置\s*/, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+  $('envVlmSub').innerHTML = vlmOk
+    ? `<span class="an-chip choice" title="${esc(vlmKeyItem?.detail || '')}">${esc(vlmModelOnly || '密钥就绪')}</span>`
+    : `<span class="an-chip id">${rep.placeholder_api_key ? '仍为占位符密钥' : '未填 API Key'}</span>`;
+  $('envVlmFoot').textContent = vlmOk ? '更换服务商 / 测试连通' : '点击配置 API Key';
+
+  // 节点 4：审阅协作
+  ENV_STATES.review = 'ok';
+  $('envReviewFoot').textContent = OVERVIEW?.active_batch ? '进入识别与审阅' : '进入导入试卷';
+
+  // 完整自检明细抽屉（仅存在阻塞缺失项 error 时自动展开，保持首屏极简）
+  const okCnt = items.filter(x => x.severity === 'ok').length;
+  $('checkDetailTag').textContent = `${okCnt}/${items.length} 正常` + (rep.warning_count ? ` · ${rep.warning_count} 提醒` : '') + (rep.error_count ? ` · ${rep.error_count} 缺失` : '');
+  if (rep.error_count > 0) $('drawerCheckDetails').open = true;
+
+  $('checkGrid').innerHTML = items.map(it => `
+    <div class="check-item ${it.severity}">
+      <span class="badge ${it.severity}">${it.severity === 'ok' ? '正常' : it.severity === 'warn' ? '提醒' : '缺失'}</span>
+      <div style="flex:1;min-width:0">
+        <div class="check-name">${esc(it.name)}</div>
+        <div class="check-detail">${esc(it.detail)}</div>
+        ${it.fix ? `<div class="fix-hint"><b>修复：</b>${esc(it.fix)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  if (rep.opencode_path && !$('inputOpencode').value) {
+    $('inputOpencode').placeholder = '已检测：' + rep.opencode_path;
+  }
+  syncPerfPanel(hw, infer);
+  requestAnimationFrame(drawEnvArchConnectors);
+}
+
+let LAST_BENCH_REC = null;
+function syncPerfPanel(hw, infer) {
+  if (hw) {
+    $('perfHwSummary').textContent = hw.cuda
+      ? `GPU：${hw.gpu_name}（${hw.vram_gb} GB）· CPU ${hw.cpu_count} 线程`
+      : `CPU 模式（${hw.cpu_count || '?'} 线程，未检测到 CUDA GPU）`;
+  }
+  if (infer) {
+    if ($('selInferDevice')) $('selInferDevice').value = infer.infer_device || 'auto';
+    if ($('selYoloBatch')) $('selYoloBatch').value = String(infer.yolo_batch || 0);
+    if ($('selCpuWorkers')) $('selCpuWorkers').value = String(infer.cpu_workers || 0);
+    if ($('selApiConc')) $('selApiConc').value = String(infer.api_concurrency || 4);
+    const devTxt = infer.infer_device === 'cpu' ? '仅 CPU' : (infer.infer_device === 'cuda:0' ? '强制 GPU' : '自动 GPU');
+    $('perfQuickTag').textContent = `${devTxt} · Batch ${infer.yolo_batch || '自动'} · 并发 ${infer.api_concurrency || 4}`;
+    if (infer.last_benchmark && !LAST_BENCH_REC) {
+      const lb = infer.last_benchmark;
+      $('benchResultWrap').className = 'bench-strip';
+      $('benchSummaryText').textContent = `上次测速最优：${lb.label || ''}（${lb.sec_per_page} 秒/页 · ${lb.pages_per_min} 页/分）`;
+    }
+  }
+}
+
+function renderBenchmarkJob(bjob) {
+  if (!bjob) return;
+  const running = !!bjob.running;
+  $('btnRunBenchmark').disabled = running;
+  $('btnRunBenchmark').textContent = running ? '测速中...' : '🚀 一键测速';
+  if (running) {
+    $('benchResultWrap').className = 'bench-strip';
+    $('btnApplyBench').classList.add('hidden');
+    $('benchSummaryText').textContent = (bjob.logs || []).slice(-1)[0] || '正在测速（零 API 费用）...';
+    return;
+  }
+  if (bjob.status === 'error' && bjob.error) {
+    $('benchResultWrap').className = 'bench-strip err';
+    $('btnApplyBench').classList.add('hidden');
+    $('benchSummaryText').textContent = `测速失败：${bjob.error}`;
+    return;
+  }
+  if (bjob.status === 'done' && bjob.result) {
+    const res = bjob.result;
+    LAST_BENCH_REC = res.recommended || null;
+    $('benchResultWrap').className = 'bench-strip';
+    $('benchSummaryText').textContent = res.summary || '测速完成';
+    $('btnApplyBench').classList.toggle('hidden', !LAST_BENCH_REC);
+    const rows = res.rows || [];
+    const bestLabel = LAST_BENCH_REC?.label || '';
+    $('benchTableWrap').innerHTML = `
+      <table class="bench-table">
+        <thead><tr><th>组合</th><th class="ctr">设备</th><th class="ctr">Batch</th><th class="ctr">线程</th><th class="num">秒/页</th><th class="num">页/分</th><th class="num">显存</th><th class="ctr">状态</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="${r.label === bestLabel ? 'best' : ''}">
+              <td>${esc(r.label)}${r.label === bestLabel ? ' ★' : ''}</td>
+              <td class="ctr">${esc(r.device)}</td>
+              <td class="ctr">${r.yolo_batch}</td>
+              <td class="ctr">${r.cpu_workers}</td>
+              <td class="num">${r.ok ? r.sec_per_page + 's' : '-'}</td>
+              <td class="num">${r.ok ? r.pages_per_min : '-'}</td>
+              <td class="num">${r.peak_vram_mb ? r.peak_vram_mb + ' MB' : '-'}</td>
+              <td class="ctr">${r.ok ? '<span class="badge ok">稳定</span>' : `<span class="badge err">${esc(r.error || '失败')}</span>`}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+}
+
+/* ==================== Step 3：实时流水线架构图渲染 ==================== */
+function fmtSec(sec) {
+  if (sec === null || sec === undefined || isNaN(sec)) return '';
+  const s = Math.max(0, Math.round(Number(sec)));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m${s % 60}s`;
+}
+
+function setArchNodeState(nodeId, dotId, state, extraCls = '') {
+  const node = $(nodeId), dot = $(dotId);
+  if (node) node.className = `arch-node is-${state || 'idle'}${extraCls ? ' ' + extraCls : ''}`;
+  if (dot) dot.className = 'arch-dot' + (state && state !== 'idle' ? ' ' + state : '');
+}
+
+function fmtDeviceShort(raw, hw) {
+  let s = String(raw || '').trim();
+  if ((!s || /^cuda(:\d+)?$/i.test(s)) && hw?.cuda && hw.gpu_name) {
+    s = `${hw.gpu_name}${hw.vram_gb ? ` (${hw.vram_gb} GB)` : ''}`;
+  }
+  if (!s) return '';
+  const vramM = s.match(/\(([\d.]+)\s*GB\)/i);
+  const vram = vramM ? `${parseFloat(vramM[1])}G` : '';
+  let body = s
+    .replace(/^GPU:\s*/i, '')
+    .replace(/\s*\([^)]*GB\)\s*/ig, '')
+    .replace(/\bNVIDIA\s+GeForce\s+/i, '')
+    .replace(/\bNVIDIA\s+/i, '')
+    .replace(/\bAMD\s+Radeon\s+/i, 'Radeon ')
+    .replace(/\s+Laptop\s+GPU$/i, '')
+    .replace(/\s+GPU$/i, '')
+    .trim();
+  if (/^cuda/i.test(body)) body = 'GPU';
+  return vram ? `${body} · ${vram}` : body;
+}
+
+function fmtModelShort(providerLabel, modelId) {
+  const m = String(modelId || '').trim();
+  const prov = String(providerLabel || '').trim();
+  if (!m) return prov;
+  let shortM = m.replace(/-\d{6,8}$/, '');
+  if (prov) {
+    shortM = shortM.replace(/^(doubao|volc|deepseek|qwen|glm|mimo)[-_]/i, '');
+    return `${prov} · ${shortM}`;
+  }
+  return shortM;
+}
+
+let LAST_SPEED_UI_TS = 0;
+
+function applyArchCollapseUI() {
+  $('archStageBox').classList.toggle('hidden', ARCH_COLLAPSED);
+  $('btnToggleArch').textContent = ARCH_COLLAPSED ? '展开架构图' : '收起架构图';
+  if (!ARCH_COLLAPSED) requestAnimationFrame(() => PipeFlow.relayout(true));
+}
+
+function renderPipelineDashboard(data) {
+  const ab = data.active_batch;
+  const rawJob = data.pipeline_job || {};
+  const jobMatchesBatch = !ab || !rawJob.batch_id || rawJob.batch_id === ab.batch_id;
+  const job = jobMatchesBatch ? rawJob : {};
+  const rs = data.recognition_summary || (jobMatchesBatch ? job.result_summary : null) || null;
+  const running = !!rawJob.running && jobMatchesBatch;
+  const anyJobRunning = !!rawJob.running;
+
+  const pageFailCnt = Number(((rs && rs.stats) || {}).page_failures || 0);
+  const apiFailCnt = Number(((rs && rs.stats) || {}).api_failures || 0);
+  const failedItemsCnt = Number((rs && rs.failed_items) || 0);
+  const hasFailed = Boolean(rs && (failedItemsCnt > 0 || apiFailCnt > 0 || pageFailCnt > 0));
+  const retryBtn = $('btnRetryFailed');
+  retryBtn.classList.toggle('hidden', !ab || !hasFailed || anyJobRunning);
+  if (hasFailed) {
+    retryBtn.textContent = pageFailCnt > 0
+      ? `🔁 补跑失败 (${pageFailCnt}页)`
+      : (failedItemsCnt > 0 ? `🔁 补跑失败 (${failedItemsCnt}处)` : '🔁 补跑失败');
+    retryBtn.title = pageFailCnt > 0
+      ? '仅补跑本地检测失败的页面，已成功页与已转录内容自动复用不重复扣费'
+      : '仅重跑失败题块，已成功项不重复扣费';
+  }
+  $('btnStopRecognize').classList.toggle('hidden', !anyJobRunning);
+
+  const showDash = running || (job.status && job.status !== 'idle') || (rs && rs.stats);
+  $('pipelineDashboard').classList.toggle('hidden', !showDash);
+  if (!showDash) return;
+
+  const isErrState = !running && (job.status === 'error' || String(rs?.status || '').includes('识别失败'));
+  const isWarnState = !running && !isErrState && (job.status === 'warn' || hasFailed);
+
+  $('pipelineDashboard').className = 'pipe-dash' + (
+    running ? ' running' : (isErrState ? ' error' : (isWarnState ? ' warn' : ''))
+  );
+
+  // 若正在运行或出错，自动展开架构图便于观察
+  if ((running || isErrState) && ARCH_COLLAPSED) {
+    ARCH_COLLAPSED = false;
+  }
+  applyArchCollapseUI();
+
+  const prog = job.progress || {};
+  const st = (rs && rs.stats) || {};
+  const pick = (k, fallback = 0) => {
+    if (running && prog[k] !== undefined && prog[k] !== null) return Number(prog[k]) || 0;
+    if (st[k] !== undefined && st[k] !== null) return Number(st[k]) || 0;
+    if (prog[k] !== undefined && prog[k] !== null) return Number(prog[k]) || 0;
+    return Number(fallback) || 0;
+  };
+  const pctOf = (a, b) => (b > 0 ? Math.max(0, Math.min(100, Math.round((a / b) * 100))) : 0);
+
+  const pagesTotal = Math.max(1, pick('pages_total', ab?.total_images || st.pages || 0));
+  const pagesDone = running ? Number(prog.pages_done || 0) : pick('pages', prog.pages_done || 0);
+  const pageFail = pick('page_failures', 0);
+  const orientDone = Math.max(pagesDone - pageFail, pick('orient_done', pagesDone - pageFail));
+  const m1Pages = Math.max(pagesDone - pageFail, pick('m1_pages_done', pagesDone - pageFail));
+  const m1Choice = pick('m1_choice_zones', 0);
+  const m1Fill = pick('m1_fill_zones', 0);
+  const m1Identity = pick('m1_identity_zones', 0);
+
+  const m2ZonesYolo = Math.max(pick('m2_zones_yolo_done', 0), pick('m2_zones_done', 0));
+  const m2ZonesDone = pick('m2_zones_done', m2ZonesYolo);
+  const m2Ocr = pick('m2_ocr_done', pick('choice_items', 0));
+  const choiceItems = pick('choice_items', pick('m2_cnn_done', 0));
+
+  const m3ZonesYolo = Math.max(pick('m3_zones_yolo_done', 0), pick('m3_zones_done', 0));
+  const m3ZonesDone = pick('m3_zones_done', m3ZonesYolo);
+  const m3Ocr = pick('m3_ocr_done', 0);
+  const fillItems = pick('fill_items', 0);
+  const idItems = pick('identity_items', m1Identity);
+  const tilesQueued = pick('tiles_queued', fillItems + idItems);
+
+  const gridsTotal = running ? Number(prog.grids_total || 0) : pick('grids', prog.grids_total || 0);
+  const apiSuccess = running ? Number(prog.api_success || 0) : pick('api_success', prog.api_success || 0);
+  const apiFail = running ? Number(prog.api_failures || 0) : pick('api_failures', prog.api_failures || 0);
+  const apiInflight = running ? Number(prog.api_inflight || 0) : 0;
+  const transCnt = running ? Number(prog.items_with_transcription || 0) : pick('items_with_transcription', prog.items_with_transcription || 0);
+
+  const reviewTask = (data.tasks || []).find(t => t.id === 'review') || {};
+  const reviewedPages = Number(reviewTask.done || 0);
+  const reviewTotal = Number(reviewTask.total || pagesDone || pagesTotal);
+
+  let pct = 0;
+  if (!running && !isErrState && !isWarnState && (job.status === 'done' || rs)) {
+    pct = 100;
+  } else {
+    const detFrac = Math.min(1, pagesDone / pagesTotal);
+    const apiFrac = gridsTotal > 0 ? Math.min(1, apiSuccess / gridsTotal) : (detFrac >= 1 ? 1 : 0);
+    pct = Math.round((detFrac * 0.60 + apiFrac * 0.40) * 100);
+    if (running && pct < 4) pct = 4;
+  }
+  $('pipeMainBar').style.width = pct + '%';
+  $('pipeMainPct').textContent = pct + '%';
+  $('pipeMainBarWrap').className = 'prog-bar' + (isErrState ? ' error' : (isWarnState ? ' warn' : ''));
+
+  let stageTitle = '识别完成';
+  if (running) {
+    if (job.kind === 'retry') stageTitle = '补跑失败图块';
+    else if (orientDone === 0 && m1Pages === 0 && gridsTotal === 0) {
+      stageTitle = prog.stage === '加载本地检测模型' ? '加载本地模型' : '准备模型与环境';
+    } else if (pagesDone < pagesTotal) {
+      stageTitle = '并行识别与转录中';
+    } else if (gridsTotal > 0 && (apiSuccess + apiFail) < gridsTotal) {
+      stageTitle = '等待大模型返回';
+    } else {
+      stageTitle = '正在汇总落盘';
+    }
+  } else if (isErrState) {
+    stageTitle = '识别失败';
+  } else if (isWarnState) {
+    stageTitle = '部分待补跑';
+  }
+  $('pipeStageTitle').textContent = stageTitle;
+  const badgeEl = $('pipeStageBadge');
+  if (running) { badgeEl.className = 'badge ok'; badgeEl.textContent = '运行中'; }
+  else if (isErrState) { badgeEl.className = 'badge err'; badgeEl.textContent = '异常'; }
+  else if (isWarnState) { badgeEl.className = 'badge warn'; badgeEl.textContent = '待补跑'; }
+  else { badgeEl.className = 'badge ok'; badgeEl.textContent = '已完成'; }
+
+  const metaParts = [];
+  const rawDev = prog.device_label || (rs?.settings?.device ? String(rs.settings.device).toUpperCase() : '');
+  const devChip = fmtDeviceShort(rawDev, data.hardware);
+  if (devChip) metaParts.push(`<span class="pipe-meta-chip" title="${esc(rawDev || devChip)}">${esc(devChip)}</span>`);
+  const modTxt = prog.model || rs?.model || '';
+  const provTxt = prog.provider_label || rs?.provider_label || '';
+  const modChip = fmtModelShort(provTxt, modTxt);
+  if (modChip) metaParts.push(`<span class="pipe-meta-chip" title="${esc(modTxt)}">${esc(modChip)}</span>`);
+  const costInfo = (running && prog.api_cost) ? prog.api_cost : (rs?.api_cost || prog.api_cost || null);
+  let costShortText = '';
+  if (costInfo && costInfo.found && (costInfo.total_tokens > 0 || !running)) {
+    const srcTag = costInfo.source === 'official_crawl'
+      ? `官网定价${costInfo.crawled_at ? ' ' + costInfo.crawled_at.slice(0, 10) : ''}（已永久缓存）`
+      : (costInfo.source === 'manual' ? '自定义单价' : '参考单价');
+    const perPageHint = costInfo.per_page_display ? ` · 均 ${costInfo.per_page_display}/页` : '';
+    const reuseHint = costInfo.all_reused ? ' · 本次命中本地缓存 0 扣费' : '';
+    const subHint = costInfo.subscription ? '（套餐订阅内）' : '';
+    const tip = `输入 ${Number(costInfo.prompt_tokens || 0).toLocaleString()} × ¥${costInfo.input_per_m}/M + 输出 ${Number(costInfo.completion_tokens || 0).toLocaleString()} × ¥${costInfo.output_per_m}/M = ${costInfo.cost_display}${perPageHint}${reuseHint} · ${srcTag}`;
+    costShortText = costInfo.subscription ? `套餐内 (${costInfo.cost_display})` : costInfo.cost_display;
+    const chipTxt = costInfo.all_reused
+      ? `费用 ${costShortText} · 缓存`
+      : `费用 ${costShortText}${subHint}`;
+    metaParts.push(`<span class="pipe-meta-chip cost" title="${esc(tip)}">${esc(chipTxt)}</span>`);
+  }
+  if (rs?.returned_model && rs.returned_model !== rs.model) {
+    metaParts.push(`<span class="pipe-meta-chip warn" title="${esc(String(rs.returned_model))}">实际: ${esc(fmtModelShort('', rs.returned_model))}</span>`);
+  }
+  const metaHtml = metaParts.join('');
+  if ($('pipeMetaRow').dataset.h !== metaHtml) {
+    $('pipeMetaRow').dataset.h = metaHtml;
+    $('pipeMetaRow').innerHTML = metaHtml;
+  }
+
+  const transTotalCur = Math.max(transCnt, tilesQueued);
+  if (running) {
+    if (orientDone === 0 && pagesDone === 0 && gridsTotal === 0) {
+      $('pipeMainDesc').textContent = prog.stage === '加载本地检测模型'
+        ? '正在将本地检测模型加载至计算设备...'
+        : '正在初始化识别环境与并行工作池...';
+    } else {
+      $('pipeMainDesc').textContent = `已落盘 ${pagesDone}/${pagesTotal} 页 · 选择 ${choiceItems} 题 · 手写 ${transCnt}/${transTotalCur} 处`
+        + (apiInflight > 0 ? ` · 大模型在途 ${apiInflight} 图` : '')
+        + (pageFail > 0 ? ` · 失败 ${pageFail} 页` : '');
+    }
+  } else {
+    $('pipeMainDesc').textContent = `${pagesDone}/${pagesTotal} 页 · 选择 ${choiceItems} 题 · 手写 ${transCnt} 处`
+      + (pageFail > 0 ? ` · 失败 ${pageFail} 页` : '')
+      + (hasFailed ? ` · 待补跑 ${rs?.failed_items || apiFail}` : '');
+  }
+  const nowPerf = performance.now();
+  if (!running || nowPerf - LAST_SPEED_UI_TS >= 900 || !$('pipeSpeedEta').textContent) {
+    LAST_SPEED_UI_TS = nowPerf;
+    const spdParts = [];
+    if (prog.pages_per_min > 0) spdParts.push(`${Number(prog.pages_per_min).toFixed(1)} 页/分`);
+    if (running && prog.eta_seconds !== null && prog.eta_seconds !== undefined) spdParts.push(`预计剩 ${fmtSec(prog.eta_seconds)}`);
+    else if (st.wall_seconds) spdParts.push(`耗时 ${fmtSec(st.wall_seconds)}`);
+    $('pipeSpeedEta').textContent = spdParts.join(' · ');
+  }
+
+  // ① 原图纠偏
+  const orientPct = pctOf(orientDone, pagesTotal);
+  const orientState = pageFail >= pagesTotal ? 'err' : (running && orientDone < pagesTotal ? 'active' : (orientDone > 0 ? (pageFail > 0 ? 'warn' : 'done') : 'idle'));
+  setArchNodeState('nodeOrient', 'dotOrient', orientState);
+  $('anOrientVal').textContent = `${orientDone} / ${pagesTotal} 页`;
+  $('anOrientPct').textContent = orientPct + '%';
+  $('anOrientBar').style.width = orientPct + '%';
+  $('anOrientFoot').textContent = pageFail > 0 ? `失败 ${pageFail} 页` : (running && orientDone < pagesTotal ? '读图拉正中' : (orientDone > 0 ? '全部拉正' : '等待中'));
+
+  // ② M1 版面
+  const m1Pct = pctOf(m1Pages, pagesTotal);
+  const m1State = running && orientDone > 0 && m1Pages < pagesTotal ? 'active' : (m1Pages > 0 ? 'done' : 'idle');
+  setArchNodeState('nodeM1', 'dotM1', m1State);
+  $('tagM1Dev').textContent = rawDev.toLowerCase().includes('gpu') || rawDev.toLowerCase().includes('cuda') ? 'GPU' : 'YOLO';
+  $('anM1Val').textContent = `${m1Pages} / ${pagesTotal} 页`;
+  $('anM1Pct').textContent = m1Pct + '%';
+  $('anM1Bar').style.width = m1Pct + '%';
+  $('anM1Choice').textContent = `选 ${m1Choice}`;
+  $('anM1Fill').textContent = `填 ${m1Fill}`;
+  $('anM1Id').textContent = `名 ${m1Identity}`;
+
+  // ③ M2 选择题
+  const m2YoloPct = pctOf(m2ZonesYolo, Math.max(1, m1Choice));
+  const m2DonePct = pctOf(m2ZonesDone, Math.max(1, m1Choice));
+  const m2State = running && m1Choice > 0 && m2ZonesDone < m1Choice ? 'active' : (m2ZonesDone > 0 || choiceItems > 0 ? 'done' : (m1Choice > 0 ? 'active' : 'idle'));
+  setArchNodeState('nodeM2', 'dotM2', m2State);
+  $('anM2InTag').textContent = `收 ${m1Choice} 区`;
+  $('anM2YoloVal').textContent = `${m2ZonesYolo}/${m1Choice}`;
+  $('anM2YoloBar').style.width = (m1Choice > 0 ? m2YoloPct : 0) + '%';
+  $('anM2OcrVal').textContent = `${m2Ocr} 号`;
+  $('anM2OcrBar').style.width = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  $('anM2CnnVal').textContent = `${choiceItems} 题`;
+  $('anM2CnnBar').style.width = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  $('anM2Pct').textContent = (m1Choice > 0 ? m2DonePct : 0) + '%';
+
+  // ④ M3 大题定位
+  const m3YoloPct = pctOf(m3ZonesYolo, Math.max(1, m1Fill));
+  const m3DonePct = pctOf(m3ZonesDone, Math.max(1, m1Fill));
+  const m3OcrPct = fillItems > 0 ? pctOf(m3Ocr, fillItems) : m3DonePct;
+  const m3State = running && m1Fill > 0 && m3ZonesDone < m1Fill ? 'active' : (m3ZonesDone > 0 || fillItems > 0 ? 'done' : (m1Fill > 0 ? 'active' : 'idle'));
+  setArchNodeState('nodeM3', 'dotM3', m3State);
+  $('anM3InTag').textContent = `收 ${m1Fill} 区`;
+  $('anM3YoloVal').textContent = `${m3ZonesYolo}/${m1Fill} · ${fillItems}题`;
+  $('anM3YoloBar').style.width = (m1Fill > 0 ? m3YoloPct : 0) + '%';
+  $('anM3OcrVal').textContent = `${m3Ocr}/${fillItems}`;
+  $('anM3OcrBar').style.width = (m1Fill > 0 ? m3OcrPct : 0) + '%';
+  $('anM3Foot').textContent = `下游 ${tilesQueued} 块`;
+  $('anM3Pct').textContent = (m1Fill > 0 ? m3DonePct : 0) + '%';
+
+  // ⑤ 拼图 & 大模型 API
+  const apiPct = gridsTotal > 0 ? pctOf(apiSuccess, gridsTotal) : 0;
+  const apiState = (isErrState || (!running && apiFail > 0 && apiSuccess === 0))
+    ? 'err'
+    : (apiFail > 0 ? (running ? 'warn' : 'err') : (running && (apiInflight > 0 || gridsTotal > apiSuccess) ? 'active' : (apiSuccess > 0 ? 'done' : 'idle')));
+  setArchNodeState('nodeApi', 'dotApi', apiState);
+  $('stApiTag').textContent = running && apiInflight > 0 ? `${apiInflight} 并发中` : `${prog.concurrency || st.concurrency || 4} 并发`;
+  $('anApiIn').textContent = `${tilesQueued}块→${gridsTotal}图`;
+  $('anApiVal').textContent = `${apiSuccess}/${gridsTotal}` + (apiFail > 0 ? ` (错${apiFail})` : '');
+  $('anApiVal').className = 'an-m-val' + (apiFail > 0 ? ' err' : (apiSuccess > 0 && apiSuccess >= gridsTotal ? ' ok' : ''));
+  $('anApiBar').style.width = apiPct + '%';
+  $('anApiBarWrap').className = 'an-bar' + (apiFail > 0 ? ' err' : '');
+  const apiCostSuffix = (costInfo && costInfo.found && costInfo.total_tokens > 0) ? ` · ${costInfo.cost_display}` : '';
+  $('anApiFoot').textContent = (apiInflight > 0 ? `在途 ${apiInflight} · 已转 ${transCnt}` : `已转 ${transCnt} 处`) + apiCostSuffix;
+  $('anApiPct').textContent = apiPct + '%';
+
+  // ⑥ 实时落盘
+  const transDenom = Math.max(transCnt, tilesQueued);
+  const outPct = transDenom > 0 ? pctOf(transCnt, transDenom) : pctOf(pagesDone, pagesTotal);
+  const outState = isErrState ? 'err' : (isWarnState ? 'warn' : (running ? 'active' : (pagesDone > 0 ? 'done' : 'idle')));
+  setArchNodeState('nodeOut', 'dotOut', outState);
+  $('tagOutState').textContent = running ? '写入中' : (isErrState ? '失败' : (isWarnState ? '待补跑' : '已落盘'));
+  $('anOutIn').textContent = `${pagesDone} / ${pagesTotal} 页`;
+  $('anOutPct').textContent = outPct + '%';
+  $('anOutBar').style.width = outPct + '%';
+  $('anOutBarWrap').className = 'an-bar' + (isErrState ? ' err' : (isWarnState ? ' amber' : ''));
+  $('anOutSub').textContent = `选 ${choiceItems} · 手写 ${transCnt}/${transDenom}`;
+
+  // ⑦ 人工复审（可点击直接开 8904）
+  const revPct = reviewTotal > 0 ? pctOf(reviewedPages, reviewTotal) : 0;
+  const revReady = Boolean(reviewTask.available || pagesDone > 0);
+  const revState = !revReady ? 'idle' : (reviewedPages >= reviewTotal && reviewTotal > 0 ? 'done' : (reviewTask.running ? 'active' : 'done'));
+  setArchNodeState('nodeReview', 'dotReview', revState, 'clickable');
+  $('tagReviewState').textContent = reviewTask.running ? '审阅中' : '8904';
+  $('anReviewVal').textContent = `已审 ${reviewedPages} / ${reviewTotal} 页`;
+  $('anReviewPct').textContent = revPct + '%';
+  $('anReviewBar').style.width = revPct + '%';
+  $('anReviewFoot').textContent = !revReady ? '等待落盘' : (reviewedPages >= reviewTotal && reviewTotal > 0 ? '全部审完' : '点击核对');
+
+  // 更新 7 条管道状态与实数标签 + 触发真实增量粒子脉冲
+  requestAnimationFrame(() => {
+    PipeFlow.relayout();
+    PipeFlow.applyEdgeVisual('orient_m1', {
+      state: orientDone > 0 ? (running && m1Pages < pagesTotal ? 'active' : 'done') : 'idle',
+      flowing: running && orientDone > m1Pages,
+      label: orientDone > 0 ? `${orientDone}页` : '',
+    });
+    PipeFlow.applyEdgeVisual('m1_m2', {
+      state: m1Choice > 0 ? (running && m2ZonesDone < m1Choice ? 'active' : 'done') : 'idle',
+      flowing: running && m1Choice > m2ZonesDone,
+      label: m1Choice > 0 ? `${m1Choice}区` : '',
+    });
+    PipeFlow.applyEdgeVisual('m1_m3', {
+      state: m1Fill > 0 ? (running && m3ZonesDone < m1Fill ? 'active' : 'done') : 'idle',
+      flowing: running && m1Fill > m3ZonesDone,
+      label: m1Fill > 0 ? `${m1Fill}区` : '',
+    });
+    PipeFlow.applyEdgeVisual('m2_out', {
+      state: choiceItems > 0 ? (running && m2ZonesDone < m1Choice ? 'active' : 'done') : 'idle',
+      flowing: running && m2ZonesDone > 0 && m2ZonesDone < m1Choice,
+      label: choiceItems > 0 ? `${choiceItems}题` : '',
+    });
+    PipeFlow.applyEdgeVisual('m3_api', {
+      state: tilesQueued > 0 ? (running && pagesDone < pagesTotal ? 'active' : 'done') : 'idle',
+      flowing: running && tilesQueued > 0 && apiInflight > 0,
+      label: tilesQueued > 0 ? `${tilesQueued}块` : '',
+    });
+    PipeFlow.applyEdgeVisual('api_out', {
+      state: apiFail > 0 ? 'err' : (running && (apiInflight > 0 || apiSuccess < gridsTotal) && gridsTotal > 0 ? 'active' : (apiSuccess > 0 ? 'done' : 'idle')),
+      flowing: running && apiInflight > 0,
+      label: apiFail > 0 ? `错${apiFail}` : (gridsTotal > 0 ? `${apiSuccess}/${gridsTotal}` : ''),
+    });
+    PipeFlow.applyEdgeVisual('out_review', {
+      state: revReady ? (reviewTask.running ? 'active' : 'done') : 'idle',
+      flowing: running && pagesDone > 0 || Boolean(reviewTask.running && reviewedPages < reviewTotal),
+      label: revReady ? `${reviewedPages}/${reviewTotal}页` : '',
+    });
+
+    PipeFlow.ingestSnapshot(ab?.batch_id || '', {
+      orientDone, m1Pages, m1Choice, m1Fill,
+      choiceItems, tilesQueued, apiSuccess, transCnt,
+      pagesDone, reviewedPages,
+    }, running);
+  });
+
+  // 中文诊断卡片
+  const diagBox = $('pipelineDiagBox');
+  const errRep = job.error_report || null;
+  const exitInfo = job.exit_info || null;
+  const showDiag = Boolean(errRep || (job.returncode !== null && job.returncode !== undefined && job.returncode !== 0) || job.status === 'error' || (job.status === 'warn' && hasFailed));
+  diagBox.classList.toggle('hidden', !showDiag);
+  if (showDiag) {
+    const isWarnOnly = job.status === 'warn' && !errRep && (job.returncode === 0 || job.returncode == null);
+    diagBox.className = 'diag-box' + (isWarnOnly ? ' warn' : '');
+    const codeTag = (job.returncode !== null && job.returncode !== undefined)
+      ? `退出码 ${job.returncode} · ${exitInfo?.title || ''}`
+      : (isWarnOnly ? '待补跑提醒' : '错误诊断');
+    const modName = errRep?.module || (isWarnOnly ? '视觉大模型转录' : '自动识别');
+    const title = errRep?.title || exitInfo?.title || (isWarnOnly ? '部分图块未完成转录' : '运行异常');
+    const reason = errRep?.reason || exitInfo?.reason || (
+      pageFail > 0
+        ? `有 ${pageFail}/${pagesTotal} 页本地检测失败（其余成功页与已转录结果均已保留）。`
+        : `还有 ${rs?.failed_items || apiFail} 处待补跑（已成功项均保留）。`
+    );
+    const fix = errRep?.fix || exitInfo?.fix || (isWarnOnly ? '点击下方或右上角「🔁 补跑失败」，仅补跑失败页/失败题块，不重复扣费。' : '请前往「运行环境」检查修复。');
+    diagBox.innerHTML = `
+      <div class="diag-head">
+        <span class="diag-title">⚠ ${esc(title)}</span>
+        <span class="diag-code">${esc(codeTag)}</span>
+      </div>
+      <div class="diag-row"><b>模块：</b>${esc(modName)}</div>
+      <div class="diag-row"><b>原因：</b>${esc(reason)}</div>
+      <div class="diag-row"><b>建议：</b>${esc(fix)}</div>
+      <div class="row" style="margin-top:8px">
+        ${hasFailed && !anyJobRunning ? '<button class="btn warn xs" type="button" id="btnDiagRetryNow">🔁 立即补跑失败</button>' : ''}
+        <button class="btn xs" type="button" id="btnDiagGoCheck">检查环境</button>
+        <button class="btn xs" type="button" id="btnDiagOpenVlm">配置 API</button>
+        ${rs?.has_error_log ? '<button class="btn xs" type="button" id="btnDiagViewLog">错误日志</button>' : ''}
+      </div>
+    `;
+    const rBtn = $('btnDiagRetryNow');
+    if (rBtn) rBtn.onclick = () => $('btnRetryFailed').click();
+    const gBtn = $('btnDiagGoCheck');
+    if (gBtn) gBtn.onclick = () => { setView('check'); $('btnRecheck').click(); };
+    const vBtn = $('btnDiagOpenVlm');
+    if (vBtn) vBtn.onclick = () => openVlmDialog();
+    const lBtn = $('btnDiagViewLog');
+    if (lBtn) lBtn.onclick = async () => {
+      try {
+        const res = await api('/api/pipeline/errors');
+        $('pipelineRawDetails').open = true;
+        $('pipelineLogBox').textContent = res.content || '错误日志为空';
+      } catch (e) { alert(e.message); }
+    };
+  }
+
+  if (job.logs && job.logs.length) {
+    $('pipelineLogBox').textContent = job.logs.slice(-60).join('\n');
+    $('pipelineLogBox').scrollTop = $('pipelineLogBox').scrollHeight;
+  }
+}
+
+function renderSubjects(list) {
+  const subjects = list && list.length ? list : ['物理','数学','化学','生物','地理','其他'];
+  if (!subjects.includes(SELECTED_SUBJECT)) SELECTED_SUBJECT = subjects[0];
+  $('subjectPills').innerHTML = subjects.map(s => `
+    <button type="button" class="subj ${s === SELECTED_SUBJECT ? 'active' : ''}" data-subj="${esc(s)}">${esc(s)}</button>
+  `).join('');
+  $('subjectPills').querySelectorAll('.subj').forEach(btn => {
+    btn.onclick = () => {
+      SELECTED_SUBJECT = btn.dataset.subj;
+      localStorage.setItem('wbLastSubject', SELECTED_SUBJECT);
+      renderSubjects(subjects);
+    };
+  });
+}
+
+function renderOverview(data) {
+  OVERVIEW = data;
+  const isHost = !!data.is_host;
+
+  $('rolePill').className = 'role-pill ' + (isHost ? 'host' : 'collab');
+  $('rolePill').innerHTML = isHost ? '<i class="dot"></i><span>主机</span>' : '<i class="dot"></i><span>协作者</span>';
+  $('topSub').textContent = isHost ? `局域网 ${data.lan_url}` : `已连主机 ${window.location.host}`;
+
+  $('hostStepper').classList.toggle('hidden', !isHost);
+  $('inviteBar').classList.toggle('hidden', !isHost);
+  $('hostBatchActions').classList.toggle('hidden', !isHost);
+  $('btnOpenVlm').classList.toggle('hidden', !isHost);
+  $('lanUrlText').textContent = data.lan_url;
+
+  if (isHost && data.config?.opencode_path) {
+    $('inputOpencode').value = data.config.opencode_path;
+  }
+
+  const ab = data.active_batch;
+  const rs = data.recognition_summary;
+  if (ab) {
+    $('activeBatchTitle').textContent = `${ab.batch_id}（${ab.subject} · ${ab.total_images} 张）`;
+    const recText = rs?.status || (ab.has_recognition ? '已识别' : '待识别');
+    $('activeBatchMeta').textContent = `${ab.created_at} · ${recText}`;
+  } else {
+    $('activeBatchTitle').textContent = '尚未导入试卷';
+    $('activeBatchMeta').textContent = isHost ? '点右侧「+ 导入」开始' : '等待主机导入试卷';
+  }
+
+  const sel = $('batchSelect');
+  sel.innerHTML = (data.batches || []).map(b =>
+    `<option value="${esc(b.batch_id)}" ${ab && b.batch_id === ab.batch_id ? 'selected' : ''}>${esc(b.batch_id)} (${b.total_images}张)</option>`
+  ).join('') || '<option value="">暂无批次</option>';
+
+  const job = data.pipeline_job || {};
+  $('btnStartRecognize').disabled = !!job.running || !ab;
+  $('btnStartRecognize').textContent = job.running ? '识别中...' : (ab?.has_recognition ? '重新识别' : '开始识别');
+
+  renderPipelineDashboard(data);
+  if (isHost) {
+    syncPerfPanel(data.hardware, data.infer_settings);
+    if (data.benchmark_job) renderBenchmarkJob(data.benchmark_job);
+  }
+
+  // 自适应轮询：识别中 1.5s，平时 4.5s
+  scheduleOverviewPoll(!!job.running ? 1500 : 4500);
+
+  const hostForLinks = window.location.hostname || '127.0.0.1';
+  const renderCard = t => {
+    const pct = t.total > 0 ? Math.round((t.done / t.total) * 100) : 0;
+    const statusTag = t.running ? '<span class="badge ok">运行中</span>' : '';
+    return `
+      <div class="task-card ${t.running ? 'running' : ''}" id="task_${esc(t.id)}">
+        <div class="between">
+          <h3>${esc(t.name)}</h3>
+          ${statusTag}
+        </div>
+        <div class="task-desc">${esc(t.desc)}</div>
+        <div class="prog-nums">
+          <span>${t.done} / ${t.total} ${esc(t.unit)} (${pct}%)</span>
+          <span class="muted">剩 ${t.remaining}</span>
+        </div>
+        <div class="prog-bar"><i style="width:${pct}%"></i></div>
+        <div class="between" style="margin-top:auto;padding-top:4px">
+          <span class="muted" style="font-size:11.5px">${esc(t.extra)}</span>
+          <div class="row">
+            ${isHost && t.running ? `<button class="btn xs ghost" data-stop-task="${esc(t.id)}" type="button">停止</button>` : ''}
+            <button class="btn primary sm" data-open-task="${esc(t.id)}" ${t.available ? '' : 'disabled'} type="button">进去审 →</button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+  const primaryTasks = (data.tasks || []).filter(t => t.tier !== 'secondary');
+  const secondaryTasks = (data.tasks || []).filter(t => t.tier === 'secondary');
+  $('taskGrid').innerHTML = primaryTasks.map(renderCard).join('');
+  $('secondaryWrap').classList.toggle('hidden', !isHost || !secondaryTasks.length);
+  $('secondaryTaskGrid').innerHTML = secondaryTasks.map(renderCard).join('');
+
+  document.querySelectorAll('[data-open-task]').forEach(btn => {
+    btn.onclick = () => {
+      if (btn.dataset.openTask === 'review') PipeFlow.triggerReviewPulse('开始审阅');
+      openTask(btn.dataset.openTask, hostForLinks);
+    };
+  });
+  document.querySelectorAll('[data-stop-task]').forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        await api('/api/service/stop', { method: 'POST', body: JSON.stringify({ task_id: btn.dataset.stopTask }) });
+        await refreshOverview();
+      } catch (e) { alert(e.message); }
+    };
+  });
+
+  const online = data.online_users || [];
+  $('onlineList').innerHTML = online.length
+    ? online.map(u => `<span class="online-chip"><i class="dot"></i>${esc(u.name)}</span>`).join('')
+    : '<span class="muted">仅你在线</span>';
+
+  const lb = data.leaderboard || [];
+  $('leaderboard').innerHTML = lb.length
+    ? lb.map((p, idx) => `
+        <div class="person-row">
+          <span><strong>${idx + 1}. ${esc(p.name)}</strong></span>
+          <span style="color:var(--primary);font-weight:700">${p.count} 页</span>
+        </div>
+      `).join('')
+    : '<div class="muted">暂无审阅记录</div>';
+
+  renderSubjects(data.subjects);
+
+  if (!INITIALIZED) {
+    INITIALIZED = true;
+    if (!isHost) {
+      setView('overview');
+    } else if (data.last_check && !data.last_check.ok) {
+      renderCheck(data.last_check);
+      setView('check');
+    } else {
+      if (data.last_check) renderCheck(data.last_check);
+      setView(ab ? 'overview' : 'ingest');
+    }
+    if (!getUserName()) {
+      $('nameInput').value = isHost ? '主机' : '';
+      $('nameDialog').showModal();
+    }
+  }
+}
+
+async function openTask(taskId, hostForLinks, extra = {}) {
+  showBanner('gui', '正在打开审核页...', 5000);
+  const pendingWin = window.open('about:blank', '_blank');
+  if (pendingWin && pendingWin.document) {
+    try {
+      pendingWin.document.title = '正在打开...';
+      pendingWin.document.body.innerHTML = '<div style="font-family:sans-serif;padding:40px;color:#475569;text-align:center;">正在准备审核页面...</div>';
+    } catch (_) {}
+  }
+  try {
+    const res = await api('/api/service/ensure', { method: 'POST', body: JSON.stringify({ task_id: taskId, ...extra }) });
+    const who = getUserName();
+    const qs = who ? ('?reviewer=' + encodeURIComponent(who)) : '';
+    const url = `http://${hostForLinks}:${res.port}/${qs}`;
+    pingPresence(taskId);
+    if (pendingWin && !pendingWin.closed) pendingWin.location.href = url;
+    else window.location.href = url;
+    await refreshOverview();
+  } catch (err) {
+    if (pendingWin && !pendingWin.closed) pendingWin.close();
+    alert(err.message);
+  }
+}
+
+async function refreshOverview() {
+  if (OVERVIEW_INFLIGHT) return;
+  OVERVIEW_INFLIGHT = true;
+  try {
+    const data = await api('/api/overview');
+    renderOverview(data);
+  } catch (err) {
+    $('topSub').textContent = '连接失败：' + err.message;
+  } finally {
+    OVERVIEW_INFLIGHT = false;
+  }
+}
+
+function scheduleOverviewPoll(ms) {
+  if (OVERVIEW_TIMER && OVERVIEW_TIMER_MS === ms) return;
+  if (OVERVIEW_TIMER) clearInterval(OVERVIEW_TIMER);
+  OVERVIEW_TIMER_MS = ms;
+  OVERVIEW_TIMER = setInterval(() => { if (!document.hidden) refreshOverview(); }, ms);
+}
+
+async function pingPresence(task = '总览') {
+  try {
+    await fetch('/api/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: CLIENT_ID, name: getUserName() || '成员', task }),
+    });
+  } catch (_) {}
+}
+
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = e => {
+    try {
+      const ev = JSON.parse(e.data);
+      const isLiveProgressTick = ev.step === 'recognize' && ev.status === 'running' && !!ev.progress;
+      if (ev.message && !isLiveProgressTick) showBanner(ev.source || 'gui', ev.message, 4000);
+      if (ev.step === 'check') highlightElement('tabCheck');
+      else if (ev.step === 'ingest') highlightElement('tabIngest');
+      else if (ev.step === 'recognize') {
+        // 携带实时节点进度时直接秒级驱动架构图与真实数据脉冲，无需额外等 HTTP 轮询
+        if (ev.progress && OVERVIEW) {
+          OVERVIEW.pipeline_job = {
+            ...(OVERVIEW.pipeline_job || {}),
+            running: ev.status === 'running',
+            status: ev.status || 'running',
+            batch_id: ev.batch_id || OVERVIEW.active_batch?.batch_id || '',
+            progress: ev.progress,
+          };
+          renderPipelineDashboard(OVERVIEW);
+        } else {
+          refreshOverview();
+        }
+      } else if (ev.step === 'train') {
+        highlightElement('tabTrain');
+        if (CURRENT_VIEW === 'train' || TRAIN_DATA) refreshTrainOverview();
+      } else if (ev.step?.startsWith('service_')) {
+        highlightElement('task_' + ev.step.replace('service_', ''));
+        refreshOverview();
+      } else if (ev.step === 'overview') {
+        refreshOverview();
+      }
+    } catch (_) {}
+  };
+}
+
+/* ==================== 事件绑定 ==================== */
+$('btnUser').textContent = '👤 ' + (getUserName() || '填写称呼');
+$('btnUser').onclick = () => { $('nameInput').value = getUserName(); $('nameDialog').showModal(); };
+$('btnSaveName').onclick = () => { const v = $('nameInput').value.trim(); if (!v) return; setUserName(v); $('nameDialog').close(); };
+$('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnSaveName').click(); });
+
+document.querySelectorAll('.step-tab').forEach(btn => {
+  btn.onclick = async () => {
+    setView(btn.dataset.view);
+    if (btn.dataset.view === 'check' && !CHECK) {
+      try { renderCheck(await api('/api/check')); } catch (e) { alert(e.message); }
+    } else if (btn.dataset.view === 'train') {
+      await refreshTrainOverview();
+    }
+  };
+});
+
+// Step 1 架构图节点交互直达
+$('envNodeCompute').onclick = () => {
+  const d = $('drawerPerf');
+  d.open = !d.open;
+  if (d.open) d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+$('envNodeModels').onclick = () => {
+  if (CHECK && CHECK.missing_weights?.length && CHECK.has_encrypted_weights) {
+    $('btnUnpackWeights').click();
+  } else {
+    const d = $('drawerCheckDetails');
+    d.open = !d.open;
+    if (d.open) d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+};
+$('envNodeVlm').onclick = () => openVlmDialog();
+$('envNodeReview').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+
+// Step 3 架构图「⑦ 人工复审」节点点击直达 8904 + 真实数据脉冲
+$('nodeReview').onclick = () => {
+  const revTask = (OVERVIEW?.tasks || []).find(t => t.id === 'review');
+  if (!revTask?.available) { showBanner('gui', '请先完成自动识别落盘后再进入审阅', 3000); return; }
+  PipeFlow.triggerReviewPulse('开始审阅');
+  openTask('review', window.location.hostname || '127.0.0.1');
+};
+
+$('btnToggleArch').onclick = () => {
+  ARCH_COLLAPSED = !ARCH_COLLAPSED;
+  localStorage.setItem('wbArchCollapsed', ARCH_COLLAPSED ? '1' : '0');
+  applyArchCollapseUI();
+};
+
+document.querySelectorAll('[data-open-annotate]').forEach(btn => {
+  btn.onclick = () => openTask('annotate', window.location.hostname || '127.0.0.1', { m: btn.dataset.openAnnotate });
+});
+$('btnOpenChoiceFromTrain').onclick = () => openTask('choice', window.location.hostname || '127.0.0.1');
+
+$('btnRecheck').onclick = async () => {
+  $('btnRecheck').disabled = true;
+  showBanner('gui', '正在深度检查环境与模型...', 8000);
+  try { renderCheck(await api('/api/check?deep=1')); }
+  catch (e) { alert(e.message); }
+  finally { $('btnRecheck').disabled = false; }
+};
+
+$('btnSavePerf').onclick = async () => {
+  $('btnSavePerf').disabled = true;
+  try {
+    await api('/api/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        infer_device: $('selInferDevice').value,
+        yolo_batch: Number($('selYoloBatch').value) || 0,
+        cpu_workers: Number($('selCpuWorkers').value) || 0,
+        api_concurrency: Number($('selApiConc').value) || 4,
+      }),
+    });
+    showBanner('gui', '已保存加速配置', 3000);
+    if (CHECK) renderCheck(await api('/api/check'));
+  } catch (err) { alert('保存失败：' + err.message); }
+  finally { $('btnSavePerf').disabled = false; }
+};
+
+let BENCH_TIMER = null;
+async function pollBenchmarkStatus() {
+  try {
+    const res = await api('/api/benchmark/status');
+    renderBenchmarkJob(res.benchmark_job);
+    if (!res.benchmark_job?.running && BENCH_TIMER) {
+      clearInterval(BENCH_TIMER);
+      BENCH_TIMER = null;
+    }
+  } catch (_) {}
+}
+$('btnRunBenchmark').onclick = async () => {
+  $('btnRunBenchmark').disabled = true;
+  try {
+    await api('/api/benchmark/start', { method: 'POST', body: JSON.stringify({ samples: 4 }) });
+    await pollBenchmarkStatus();
+    if (BENCH_TIMER) clearInterval(BENCH_TIMER);
+    BENCH_TIMER = setInterval(pollBenchmarkStatus, 2000);
+  } catch (err) {
+    alert(err.message);
+    $('btnRunBenchmark').disabled = false;
+  }
+};
+$('btnApplyBench').onclick = async () => {
+  if (!LAST_BENCH_REC) return;
+  try {
+    await api('/api/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        infer_device: LAST_BENCH_REC.infer_device || 'auto',
+        yolo_batch: Number(LAST_BENCH_REC.yolo_batch) || 0,
+        cpu_workers: Number(LAST_BENCH_REC.cpu_workers) || 0,
+        api_concurrency: Number(LAST_BENCH_REC.api_concurrency) || 4,
+        last_benchmark: LAST_BENCH_REC,
+      }),
+    });
+    showBanner('gui', `已应用最优配置：${LAST_BENCH_REC.label}`, 4000);
+    if (CHECK) renderCheck(await api('/api/check'));
+  } catch (err) { alert('应用失败：' + err.message); }
+};
+
+$('btnToIngest').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+$('btnSkipIngest').onclick = () => setView('overview');
+$('btnGoIngestNew').onclick = () => setView('ingest');
+$('btnRefreshOverview').onclick = refreshOverview;
+
+$('btnRepairPip').onclick = async () => {
+  $('btnRepairPip').disabled = true;
+  showBanner('gui', '正在测速选源安装缺失依赖...', 15000);
+  try {
+    const res = await api('/api/repair/pip', { method: 'POST', body: '{}' });
+    alert(res.ok ? `安装完成（${res.mirror?.name || ''}）` : '自动安装失败，建议点「求助 AI」');
+    renderCheck(await api('/api/check'));
+  } catch (err) { alert(err.message); }
+  finally { $('btnRepairPip').disabled = false; }
+};
+$('btnUnpackWeights').onclick = () => { $('pwdErr').textContent = ''; $('pwdInput').value = ''; $('pwdDialog').showModal(); };
+$('btnCancelPwd').onclick = () => $('pwdDialog').close();
+$('btnConfirmPwd').onclick = async () => {
+  $('btnConfirmPwd').disabled = true;
+  $('pwdErr').textContent = '';
+  try {
+    const res = await api('/api/repair/weights', { method: 'POST', body: JSON.stringify({ password: $('pwdInput').value }) });
+    $('pwdDialog').close();
+    showBanner('gui', res.message || '解压完成', 4000);
+    renderCheck(await api('/api/check'));
+  } catch (err) { $('pwdErr').textContent = err.message; }
+  finally { $('btnConfirmPwd').disabled = false; }
+};
+$('btnAskAgent').onclick = async () => {
+  try { const res = await api('/api/repair/agent', { method: 'POST', body: '{}' }); alert(res.message); }
+  catch (err) { alert(err.message); }
+};
+$('btnSetVlmKey').onclick = () => openVlmDialog();
+$('btnSaveOpencode').onclick = async () => {
+  try {
+    await api('/api/config', { method: 'POST', body: JSON.stringify({ opencode_path: $('inputOpencode').value.trim() }) });
+    showBanner('gui', '已保存 opencode 路径');
+  } catch (err) { alert(err.message); }
+};
+
+$('btnPickFolder').onclick = async () => {
+  $('btnPickFolder').disabled = true;
+  try {
+    const res = await api('/api/pick-folder', { method: 'POST', body: '{}' });
+    if (res.path) $('inputSourceDir').value = res.path;
+  } catch (err) { alert(err.message); }
+  finally { $('btnPickFolder').disabled = false; }
+};
+
+async function doIngest(autoStart = false) {
+  const source_dir = $('inputSourceDir').value.trim();
+  if (!source_dir) { alert('请先选择试卷照片文件夹'); return; }
+  $('btnDoIngest').disabled = true;
+  $('btnIngestAndRun').disabled = true;
+  $('ingestMsg').textContent = '正在整理去重...';
+  try {
+    const res = await api('/api/ingest', {
+      method: 'POST',
+      body: JSON.stringify({ source_dir, subject: SELECTED_SUBJECT, batch_name: $('inputBatchName').value.trim() }),
+    });
+    $('ingestMsg').textContent = res.message;
+    await refreshOverview();
+    if (autoStart) {
+      await triggerRecognize();
+    }
+  } catch (err) {
+    $('ingestMsg').textContent = '失败：' + err.message;
+    alert(err.message);
+  } finally {
+    $('btnDoIngest').disabled = false;
+    $('btnIngestAndRun').disabled = false;
+  }
+}
+$('btnIngestAndRun').onclick = () => doIngest(true);
+$('btnDoIngest').onclick = () => doIngest(false);
+
+async function triggerRecognize() {
+  $('btnStartRecognize').disabled = true;
+  try {
+    await api('/api/pipeline/run', { method: 'POST', body: '{}' });
+    ARCH_COLLAPSED = false;
+    setView('overview');
+    await refreshOverview();
+  } catch (err) {
+    setView('overview');
+    await refreshOverview();
+    alert('无法启动识别：\n' + err.message);
+  }
+}
+$('btnStartRecognize').onclick = triggerRecognize;
+$('btnStopRecognize').onclick = async () => {
+  if (!confirm('确认停止当前自动识别？（已完成页会保留，下次可断点续跑）')) return;
+  $('btnStopRecognize').disabled = true;
+  try {
+    const res = await api('/api/pipeline/stop', { method: 'POST', body: '{}' });
+    showBanner('gui', res.message || '已停止识别');
+    await refreshOverview();
+  } catch (err) { alert(err.message); }
+  finally { $('btnStopRecognize').disabled = false; }
+};
+$('btnRetryFailed').onclick = async () => {
+  const pf = Number(((OVERVIEW?.recognition_summary?.stats) || {}).page_failures || 0);
+  const tip = pf > 0
+    ? `将仅补跑失败的 ${pf} 页（已成功的页面与已转录题块自动复用，不重复扣费），是否继续？`
+    : '仅补跑失败或未转录的题块？（已成功项不重复扣费）';
+  if (!confirm(tip)) return;
+  $('btnRetryFailed').disabled = true;
+  try {
+    await api('/api/pipeline/retry-failed', { method: 'POST', body: '{}' });
+    ARCH_COLLAPSED = false;
+    await refreshOverview();
+  } catch (err) { alert('补跑失败：' + err.message); }
+  finally { $('btnRetryFailed').disabled = false; }
+};
+
+$('batchSelect').onchange = async () => {
+  if (!$('batchSelect').value) return;
+  try {
+    await api('/api/batch/select', { method: 'POST', body: JSON.stringify({ batch_id: $('batchSelect').value }) });
+    await refreshOverview();
+  } catch (err) { alert(err.message); }
+};
+
+$('btnCopyLan').onclick = async () => {
+  const txt = $('lanUrlText').textContent;
+  try { await navigator.clipboard.writeText(txt); showBanner('gui', '已复制：' + txt); }
+  catch (_) { prompt('请复制局域网网址：', txt); }
+};
+
+// 新手引导
+function focusAnatomy(zone) {
+  document.querySelectorAll('.guide-item').forEach(el => el.classList.toggle('active', el.dataset.zone === zone));
+  const map = { review: 'zoneReview', choice: 'zoneChoice', box: 'zoneBox' };
+  Object.entries(map).forEach(([k, id]) => {
+    const g = $(id);
+    if (!g) return;
+    g.classList.toggle('lit', k === zone);
+    g.classList.toggle('dim', k !== zone);
+  });
+}
+document.querySelectorAll('.guide-item').forEach(el => {
+  el.addEventListener('mouseenter', () => focusAnatomy(el.dataset.zone));
+  el.addEventListener('click', () => focusAnatomy(el.dataset.zone));
+});
+$('btnOpenGuide').onclick = () => { focusAnatomy('review'); $('guideDialog').showModal(); };
+$('btnCloseGuide').onclick = () => { $('guideDialog').close(); localStorage.setItem('wbGuideSeen', '1'); };
+
+let TOUR_STEPS = [], TOUR_IDX = 0;
+function buildTourSteps() {
+  if (OVERVIEW?.is_host) {
+    return [
+      { view: 'overview', el: 'tabIngest', title: '① 导入试卷', desc: '选照片文件夹和学科，一键入库并自动识别。' },
+      { view: 'overview', el: 'batchCard', title: '② 看实时数据流向', desc: '架构图实时展示每一步进度，数据包沿连线真实流动。' },
+      { view: 'overview', el: 'task_review', title: '③ 进去人工复审', desc: '滑过填空框看答案，点框改字，按 E 调框，按 D 翻页。' },
+    ];
+  }
+  return [
+    { view: 'overview', el: 'btnUser', title: '① 填写称呼', desc: '用来统计每个人的审阅进度。' },
+    { view: 'overview', el: 'task_review', title: '② 点击进去审', desc: '自动领取无人占用的下一张试卷。' },
+  ];
+}
+function showTourStep(idx) {
+  TOUR_IDX = idx;
+  const st = TOUR_STEPS[idx];
+  if (!st) { endTour(); return; }
+  if (st.view) setView(st.view);
+  const target = $(st.el);
+  if (!target) { showTourStep(idx + 1); return; }
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => {
+    const r = target.getBoundingClientRect(), pad = 6;
+    const box = $('tourBox');
+    box.style.left = (r.left - pad) + 'px';
+    box.style.top = (r.top - pad) + 'px';
+    box.style.width = (r.width + pad * 2) + 'px';
+    box.style.height = (r.height + pad * 2) + 'px';
+    const pop = $('tourPop');
+    const popTop = r.bottom + 14 + 150 < window.innerHeight ? (r.bottom + 14) : Math.max(14, r.top - 165);
+    pop.style.top = popTop + 'px';
+    pop.style.left = Math.max(14, Math.min(window.innerWidth - 336, r.left)) + 'px';
+    $('tourTitle').textContent = st.title;
+    $('tourDesc').textContent = st.desc;
+    $('tourStep').textContent = `${idx + 1} / ${TOUR_STEPS.length}`;
+    $('tourNext').textContent = idx === TOUR_STEPS.length - 1 ? '完成 ✓' : '下一步 →';
+  }, 140);
+}
+function endTour() { $('tourMask').classList.add('hidden'); localStorage.setItem('wbGuideSeen', '1'); }
+$('btnStartTour').onclick = () => { $('guideDialog').close(); TOUR_STEPS = buildTourSteps(); $('tourMask').classList.remove('hidden'); showTourStep(0); };
+$('tourNext').onclick = () => showTourStep(TOUR_IDX + 1);
+$('tourSkip').onclick = endTour;
+
+// 大模型 API 配置弹窗
+let VLM_PRESETS_MAP = {};
+async function loadVlmPricePreview() {
+  const model = $('vlmModel').value.trim();
+  const provider = $('vlmProvider').value;
+  const el = $('vlmPriceText');
+  if (!model) { el.textContent = '填入模型名称后自动匹配官网单价'; return; }
+  try {
+    const res = await api(`/api/pricing?model=${encodeURIComponent(model)}&provider=${encodeURIComponent(provider)}`);
+    const p = res.price;
+    if (p) {
+      const src = p.source === 'official_crawl' ? '官网永久缓存' : (p.source === 'manual' ? '自定义' : '内置参考');
+      const cacheBit = (p.cache_hit_per_m !== null && p.cache_hit_per_m !== undefined) ? ` · 缓存 ¥${p.cache_hit_per_m}` : '';
+      el.textContent = `单价：输入 ¥${p.input_per_m} / 输出 ¥${p.output_per_m}${cacheBit}（每百万 · ${src}）`;
+      $('vlmPriceIn').value = p.input_per_m;
+      $('vlmPriceOut').value = p.output_per_m;
+    } else {
+      el.textContent = `未收录 ${model}，可点「更新官网价格」或「手动填价」`;
+      $('vlmPriceIn').value = '';
+      $('vlmPriceOut').value = '';
+    }
+  } catch (_) {
+    el.textContent = '定价读取失败';
+  }
+}
+async function openVlmDialog() {
+  $('vlmStatus').textContent = '';
+  $('vlmApiKey').value = '';
+  $('vlmCustomPriceBox').classList.add('hidden');
+  try {
+    const cfg = await api('/api/vlm/config');
+    VLM_PRESETS_MAP = {};
+    const sel = $('vlmProvider');
+    sel.innerHTML = (cfg.presets || []).map(p => {
+      VLM_PRESETS_MAP[p.id] = p;
+      return `<option value="${esc(p.id)}">${esc(p.label)}</option>`;
+    }).join('');
+    sel.value = cfg.provider || 'doubao';
+    $('vlmBaseUrl').value = cfg.base_url || '';
+    $('vlmModel').value = cfg.model || '';
+    $('vlmNote').textContent = (VLM_PRESETS_MAP[sel.value] && VLM_PRESETS_MAP[sel.value].note) || '';
+    $('vlmKeyHint').textContent = cfg.has_key ? `（已存 ${cfg.api_key_masked}）` : '（未配置）';
+    $('vlmDialog').showModal();
+    loadVlmPricePreview();
+  } catch (err) { alert('读取 API 配置失败：' + err.message); }
+}
+$('btnOpenVlm').onclick = openVlmDialog;
+$('btnCloseVlm').onclick = () => $('vlmDialog').close();
+$('vlmProvider').onchange = () => {
+  const p = VLM_PRESETS_MAP[$('vlmProvider').value] || {};
+  $('vlmNote').textContent = p.note || '';
+  if (p.id !== 'custom') {
+    $('vlmBaseUrl').value = p.base_url || '';
+    $('vlmModel').value = p.model || '';
+  } else if (!$('vlmBaseUrl').value || Object.values(VLM_PRESETS_MAP).some(x => x.id !== 'custom' && x.base_url === $('vlmBaseUrl').value)) {
+    $('vlmBaseUrl').value = '';
+  }
+  loadVlmPricePreview();
+};
+$('vlmModel').addEventListener('change', loadVlmPricePreview);
+$('btnToggleCustomPrice').onclick = () => $('vlmCustomPriceBox').classList.toggle('hidden');
+$('btnRefreshPrice').onclick = async () => {
+  const btn = $('btnRefreshPrice');
+  btn.disabled = true;
+  $('vlmPriceText').textContent = '正在从各官网抓取最新定价...';
+  try {
+    const res = await api('/api/pricing/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ model: $('vlmModel').value.trim(), provider: $('vlmProvider').value }),
+    });
+    $('vlmStatus').style.color = 'var(--primary)';
+    $('vlmStatus').textContent = '✓ ' + (res.message || '官网定价已永久更新');
+    await loadVlmPricePreview();
+    await refreshOverview();
+  } catch (err) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ 抓取失败：' + err.message;
+  } finally { btn.disabled = false; }
+};
+$('btnSaveCustomPrice').onclick = async () => {
+  const model = $('vlmModel').value.trim();
+  const pin = Number($('vlmPriceIn').value);
+  const pout = Number($('vlmPriceOut').value);
+  if (!model || isNaN(pin) || isNaN(pout) || pin < 0 || pout < 0) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ 请填写有效的模型名称与非负单价';
+    return;
+  }
+  try {
+    const res = await api('/api/pricing/override', {
+      method: 'POST',
+      body: JSON.stringify({ model, input_per_m: pin, output_per_m: pout }),
+    });
+    $('vlmStatus').style.color = 'var(--primary)';
+    $('vlmStatus').textContent = '✓ ' + (res.message || '已永久保存单价');
+    $('vlmCustomPriceBox').classList.add('hidden');
+    await loadVlmPricePreview();
+    await refreshOverview();
+  } catch (err) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ ' + err.message;
+  }
+};
+$('btnTestVlm').onclick = async () => {
+  $('btnTestVlm').disabled = true;
+  $('vlmStatus').style.color = 'var(--muted)';
+  $('vlmStatus').textContent = '正在测试视觉连通性...';
+  try {
+    const res = await api('/api/vlm/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: $('vlmProvider').value,
+        base_url: $('vlmBaseUrl').value.trim(),
+        model: $('vlmModel').value.trim(),
+        api_key: $('vlmApiKey').value.trim(),
+      }),
+    });
+    $('vlmStatus').style.color = 'var(--primary)';
+    $('vlmStatus').textContent = `✓ 连通成功${res.vision_verified ? '（支持看图）' : ''} · ${res.latency_ms}ms · ${res.returned_model || ''}${res.warning ? ' · ' + res.warning : ''}`;
+  } catch (err) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ ' + err.message;
+  } finally { $('btnTestVlm').disabled = false; }
+};
+$('btnSaveVlm').onclick = async () => {
+  $('btnSaveVlm').disabled = true;
+  $('vlmStatus').textContent = '';
+  try {
+    const res = await api('/api/vlm/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: $('vlmProvider').value,
+        base_url: $('vlmBaseUrl').value.trim(),
+        model: $('vlmModel').value.trim(),
+        api_key: $('vlmApiKey').value.trim(),
+      }),
+    });
+    $('vlmStatus').style.color = 'var(--primary)';
+    $('vlmStatus').textContent = '✓ ' + (res.message || '已保存');
+    if (res.config) $('vlmKeyHint').textContent = res.config.has_key ? `（已存 ${res.config.api_key_masked}）` : '（未配置）';
+    $('vlmApiKey').value = '';
+    if (CHECK) renderCheck(await api('/api/check'));
+  } catch (err) {
+    $('vlmStatus').style.color = 'var(--err)';
+    $('vlmStatus').textContent = '✗ ' + err.message;
+  } finally { $('btnSaveVlm').disabled = false; }
+};
+
+/* ==================== 模型微调训练 ==================== */
+let TRAIN_DATA = null;
+let SELECTED_TRAIN_TASK = 'm1';
+
+function updateTrainParamPreview() {
+  const ep = $('trainEpochs').value, bs = $('trainBatch').value, lr = $('trainLr').value;
+  $('trainParamPreview').textContent = `${ep} 轮 · Batch ${bs} · LR ${lr}`;
+}
+function applyTrainTaskDefaults(task) {
+  SELECTED_TRAIN_TASK = task;
+  $('trainTaskSelect').value = task;
+  const mod = (TRAIN_DATA?.modules || []).find(m => m.task === task);
+  const hw = TRAIN_DATA?.hardware || {};
+  const isCuda = $('trainDeviceSelect').value !== 'cpu' && !!hw.cuda;
+  if (mod) {
+    $('trainEpochs').value = mod.default_epochs || 50;
+    $('trainBatch').value = isCuda ? (mod.default_batch_gpu || 4) : (mod.default_batch_cpu || 2);
+    $('trainLr').value = String(mod.default_lr || 0.0001);
+    $('trainImgszWrap').classList.toggle('hidden', mod.kind !== 'yolo');
+  }
+  updateTrainParamPreview();
+  if (task === 'choice' && $('drawerOptionalChoiceTrain')) {
+    $('drawerOptionalChoiceTrain').open = true;
+  }
+  document.querySelectorAll('.train-mod').forEach(el => el.classList.toggle('active', el.dataset.task === task));
+}
+
+function renderTrainOverview(data) {
+  const firstLoad = !TRAIN_DATA;
+  TRAIN_DATA = data;
+  const hw = data.hardware || {};
+  $('trainHwInfo').textContent = hw.cuda ? 'CUDA 混合精度就绪' : 'CPU 模式（建议调小轮数）';
+  if (firstLoad) {
+    $('trainDeviceSelect').innerHTML = hw.cuda
+      ? `<option value="0" selected>GPU: ${esc(hw.gpu_name)}</option><option value="cpu">CPU</option>`
+      : `<option value="cpu" selected>CPU</option>`;
+  }
+
+  const renderModCard = m => {
+    const ds = m.dataset || {};
+    return `
+      <div class="train-mod ${m.task === SELECTED_TRAIN_TASK ? 'active' : ''}" data-task="${esc(m.task)}">
+        <div class="between">
+          <strong style="font-size:13.5px">${esc(m.name)}</strong>
+          <span class="badge ${ds.ready ? 'ok' : 'warn'}">${ds.ready ? '可训练' : '待补充'}</span>
+        </div>
+        <div style="font-size:12.5px;font-weight:600">已审 ${ds.reviewed || 0} / ${ds.total_images || 0}</div>
+        <div class="muted" style="font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.current_weight || '未就绪')}</div>
+        ${m.has_rollback ? `<button class="btn xs" type="button" data-rollback-task="${esc(m.task)}">↩ 回退旧版</button>` : ''}
+      </div>
+    `;
+  };
+  const allMods = data.modules || [];
+  const coreMods = allMods.filter(m => m.task !== 'choice');
+  const choiceMod = allMods.find(m => m.task === 'choice');
+
+  $('trainModuleGrid').innerHTML = coreMods.map(renderModCard).join('');
+  if (choiceMod && $('trainOptionalChoiceHost')) {
+    const cds = choiceMod.dataset || {};
+    $('choiceTrainTag').textContent = `已审 ${cds.reviewed || 0} / ${cds.total_images || 0} · 可选`;
+    $('trainOptionalChoiceHost').innerHTML = renderModCard(choiceMod);
+  }
+
+  const bindTrainCards = rootEl => {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('.train-mod').forEach(card => {
+      card.onclick = e => { if (!e.target.closest('button')) applyTrainTaskDefaults(card.dataset.task); };
+    });
+    rootEl.querySelectorAll('[data-rollback-task]').forEach(btn => {
+      btn.onclick = async () => {
+        const task = btn.dataset.rollbackTask;
+        if (!confirm(`确认将 ${task.toUpperCase()} 回退到上一版权重？`)) return;
+        btn.disabled = true;
+        try {
+          const res = await api('/api/train/rollback', { method: 'POST', body: JSON.stringify({ task }) });
+          showBanner('gui', res.message || '已回退');
+          await refreshTrainOverview();
+        } catch (err) { alert(err.message); }
+        finally { btn.disabled = false; }
+      };
+    });
+  };
+  bindTrainCards($('trainModuleGrid'));
+  bindTrainCards($('trainOptionalChoiceHost'));
+  if (firstLoad) applyTrainTaskDefaults(SELECTED_TRAIN_TASK);
+
+  const job = data.train_job || {};
+  const running = !!job.running;
+  if (running && job.task === 'choice' && $('drawerOptionalChoiceTrain')) {
+    $('drawerOptionalChoiceTrain').open = true;
+  }
+  $('btnStartTrain').disabled = running;
+  $('btnStartTrain').textContent = running ? `训练中 (${job.task?.toUpperCase() || ''})...` : '▶ 开始微调';
+  $('btnStopTrain').classList.toggle('hidden', !running);
+  $('tabTrainDesc').textContent = running ? `训练 ${job.task?.toUpperCase() || ''} 中` : '微调与换权重';
+
+  if (running || (job.logs && job.logs.length)) {
+    $('trainProgressWrap').classList.remove('hidden');
+    const ep = job.completed_epochs || 0, totalEp = job.epochs || 1;
+    const pct = Math.min(100, Math.round((ep / Math.max(1, totalEp)) * 100));
+    $('trainProgBar').style.width = (running ? Math.max(3, pct) : pct) + '%';
+    $('trainProgLabel').textContent = `${job.run || ''} · ${ep}/${totalEp} 轮`;
+    const mt = job.metrics || {}, parts = [];
+    if (mt.mAP50 !== undefined) parts.push(`mAP50 ${(mt.mAP50 * 100).toFixed(1)}%`);
+    if (mt.exact !== undefined) parts.push(`精确 ${(mt.exact * 100).toFixed(2)}%`);
+    if (mt.box_loss !== undefined) parts.push(`loss ${mt.box_loss}`);
+    $('trainProgMetrics').textContent = parts.join(' · ');
+    $('trainLogBox').classList.remove('hidden');
+    $('trainLogBox').textContent = (job.logs || []).slice(-60).join('\n');
+    $('trainLogBox').scrollTop = $('trainLogBox').scrollHeight;
+  }
+
+  const runs = data.runs || [];
+  $('trainRunsBody').innerHTML = !runs.length
+    ? '<tr><td colspan="6" class="muted">暂无训练记录</td></tr>'
+    : runs.map(r => {
+      const cnt = r.counts || {};
+      const cntStr = (cnt.train || cnt.val) ? `${cnt.train || 0}/${cnt.val || 0}` : '-';
+      const mt = r.metrics || {};
+      let mStr = mt.completed_epochs ? `${mt.completed_epochs}轮` : '-';
+      if (mt.mAP50 !== undefined) mStr += ` · ${(mt.mAP50 * 100).toFixed(1)}%`;
+      if (mt.exact !== undefined) mStr += ` · ${(mt.exact * 100).toFixed(1)}%`;
+      const stBadge = r.is_deployed ? '<span class="badge ok">使用中</span>'
+        : r.status === 'running' ? '<span class="badge warn">训练中</span>'
+        : r.status === 'success' ? '<span class="badge ok">就绪</span>'
+        : `<span class="badge err" title="${esc(r.error || '')}">失败</span>`;
+      const act = r.is_deployed ? '<span class="muted">已启用</span>'
+        : r.can_deploy ? `<button class="btn primary xs" type="button" data-deploy-task="${esc(r.task)}" data-deploy-run="${esc(r.run)}">启用</button>` : '-';
+      return `<tr>
+        <td><strong>${esc(r.task_name)}</strong></td>
+        <td><code>${esc(r.run)}</code></td>
+        <td>${esc(cntStr)}</td>
+        <td>${esc(mStr)}</td>
+        <td>${stBadge}</td>
+        <td class="row">${act}<button class="btn xs" type="button" data-monitor-run="${esc(r.run)}">监控</button></td>
+      </tr>`;
+    }).join('');
+
+  $('trainRunsBody').querySelectorAll('[data-deploy-run]').forEach(btn => {
+    btn.onclick = async () => {
+      const task = btn.dataset.deployTask, run = btn.dataset.deployRun;
+      if (!confirm(`确认将 ${task.toUpperCase()} 切换为 ${run}？（自动备份旧权重）`)) return;
+      btn.disabled = true;
+      try {
+        const res = await api('/api/train/deploy', { method: 'POST', body: JSON.stringify({ task, run }) });
+        showBanner('gui', res.message || '权重已切换');
+        await refreshTrainOverview();
+      } catch (err) { alert(err.message); }
+      finally { btn.disabled = false; }
+    };
+  });
+  $('trainRunsBody').querySelectorAll('[data-monitor-run]').forEach(btn => {
+    btn.onclick = () => openMonitor(btn.dataset.monitorRun);
+  });
+}
+
+async function refreshTrainOverview() {
+  if (!OVERVIEW?.is_host) return;
+  try { renderTrainOverview(await api('/api/train/overview')); }
+  catch (err) { $('trainHwInfo').textContent = '读取失败：' + err.message; }
+}
+async function openMonitor(runName = '') {
+  const pendingWin = window.open('about:blank', '_blank');
+  try {
+    const res = await api('/api/train/monitor', { method: 'POST', body: JSON.stringify({ run: runName }) });
+    const url = `http://${window.location.hostname || '127.0.0.1'}:${res.port}/`;
+    if (pendingWin && !pendingWin.closed) pendingWin.location.href = url;
+    else window.open(url, '_blank');
+  } catch (err) {
+    if (pendingWin && !pendingWin.closed) pendingWin.close();
+    alert(err.message);
+  }
+}
+
+$('trainTaskSelect').onchange = () => applyTrainTaskDefaults($('trainTaskSelect').value);
+$('trainDeviceSelect').onchange = () => applyTrainTaskDefaults($('trainTaskSelect').value);
+['trainEpochs', 'trainBatch', 'trainLr'].forEach(id => $(id).addEventListener('input', updateTrainParamPreview));
+$('btnRefreshTrain').onclick = refreshTrainOverview;
+$('btnOpenMonitor').onclick = () => openMonitor(TRAIN_DATA?.train_job?.run || '');
+
+$('btnSyncBatchTrain').onclick = async () => {
+  $('btnSyncBatchTrain').disabled = true;
+  $('trainSyncMsg').textContent = '同步中...';
+  try {
+    const res = await api('/api/train/sync-batch', { method: 'POST', body: '{}' });
+    $('trainSyncMsg').textContent = res.message;
+    await refreshTrainOverview();
+  } catch (err) { $('trainSyncMsg').textContent = '失败：' + err.message; alert(err.message); }
+  finally { $('btnSyncBatchTrain').disabled = false; }
+};
+$('btnStartTrain').onclick = async () => {
+  const task = $('trainTaskSelect').value;
+  const payload = {
+    task, device: $('trainDeviceSelect').value,
+    epochs: Number($('trainEpochs').value) || 50,
+    imgsz: Number($('trainImgsz').value) || 1024,
+    batch: Number($('trainBatch').value) || 4,
+    lr: Number($('trainLr').value) || 0.0001,
+    purpose: $('trainPurpose').value.trim() || '工作台微调',
+  };
+  if (!confirm(`开始微调 ${task.toUpperCase()}（${payload.epochs} 轮）？`)) return;
+  $('btnStartTrain').disabled = true;
+  try {
+    const res = await api('/api/train/start', { method: 'POST', body: JSON.stringify(payload) });
+    showBanner('gui', `已启动训练：${res.run}`);
+    await refreshTrainOverview();
+  } catch (err) { alert(err.message); $('btnStartTrain').disabled = false; }
+};
+$('btnStopTrain').onclick = async () => {
+  if (!confirm('确认停止训练？')) return;
+  $('btnStopTrain').disabled = true;
+  try {
+    const res = await api('/api/train/stop', { method: 'POST', body: '{}' });
+    showBanner('gui', res.message || '已停止');
+    await refreshTrainOverview();
+  } catch (err) { alert(err.message); }
+  finally { $('btnStopTrain').disabled = false; }
+};
+
+// 容器尺寸监听，保证两套架构图 SVG 连线永不漂移
+if (typeof ResizeObserver !== 'undefined') {
+  const ro = new ResizeObserver(() => {
+    if (CURRENT_VIEW === 'check') drawEnvArchConnectors();
+    if (CURRENT_VIEW === 'overview') PipeFlow.relayout(true);
+  });
+  ro.observe($('envArchStage'));
+  ro.observe($('pipeArchStage'));
+}
+
+// 初始化
+refreshOverview().then(() => {
+  pingPresence('总览');
+  connectSSE();
+  scheduleOverviewPoll(4500);
+  setInterval(() => { if (!document.hidden && (CURRENT_VIEW === 'train' || TRAIN_DATA?.train_job?.running)) refreshTrainOverview(); }, 3500);
+  setInterval(() => pingPresence('总览'), 25000);
+});
+</script>
+</body>
+</html>
