@@ -43,7 +43,7 @@
       <button id="btnExportCsv" style="display:none;" title="导出整批成绩汇总 CSV"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>成绩</span></button>
       <button id="btnPrev">上一张</button>
       <button class="btn-primary" id="btnSubmitNext">确认并下一张 (D)</button>
-      <button class="btn-ai-soft" id="btnReviewAi" title="全局 AI 帮手（同构改题/调框/导入配置/离屏截图，不阻塞审阅）"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.2L5 10l5.1 1.8L12 17l1.9-5.2L19 10l-5.1-1.8Z"/><path d="M5 3v3"/><path d="M3.5 4.5h3"/><path d="M19 17v3"/><path d="M17.5 18.5h3"/></svg><span>AI 帮手</span></button>
+      <button class="btn-subtle" id="btnReviewAi" title="全局 AI 帮手（同构改题/调框/导入配置/离屏截图，不阻塞审阅）"><svg class="ui-ico" style="color:var(--accent)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.2L5 10l5.1 1.8L12 17l1.9-5.2L19 10l-5.1-1.8Z"/><path d="M5 3v3"/><path d="M3.5 4.5h3"/><path d="M19 17v3"/><path d="M17.5 18.5h3"/></svg><span>AI 帮手</span></button>
       <div class="more-wrap">
         <button id="btnMoreMenu" title="显示选项、快捷键与教程"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg><span>更多</span></button>
         <div class="more-menu" id="moreMenu">
@@ -108,7 +108,7 @@
     <div class="rev-ai-head" id="revAiDrawerHead" title="按住此处拖动位置 · 双击复位">
       <div style="display:flex;align-items:center;gap:6px">
         <span class="rev-ai-grip" aria-hidden="true"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" aria-hidden="true"><circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/></svg></span>
-        <svg class="ui-ico" style="color:#2563eb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.2L5 10l5.1 1.8L12 17l1.9-5.2L19 10l-5.1-1.8Z"/><path d="M5 3v3"/><path d="M3.5 4.5h3"/><path d="M19 17v3"/><path d="M17.5 18.5h3"/></svg>
+        <svg class="ui-ico" style="color:var(--accent)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.2L5 10l5.1 1.8L12 17l1.9-5.2L19 10l-5.1-1.8Z"/><path d="M5 3v3"/><path d="M3.5 4.5h3"/><path d="M19 17v3"/><path d="M17.5 18.5h3"/></svg>
         <strong style="font-size:13.5px">审阅 AI 帮手</strong>
         <span class="badge badge-todo" id="revAiBadge">就绪</span>
       </div>

@@ -164,11 +164,12 @@ function drawBaseCanvas() {
 
   visibleBoxIndices().forEach(idx => {
     const b = state.workingBoxes[idx];
-    const meta = BOX_META[b.cls] || { color: "#2563eb", name: String(b.cls) };
+    const meta = BOX_META[b.cls] || { color: "#64748b", name: String(b.cls) };
     const [x1, y1, x2, y2] = b.box;
     const isSel = state.mode === "edit" && idx === state.selectedBoxIdx;
-    ctx.lineWidth = (isSel ? 2.6 : 1.5) * inv;
-    ctx.strokeStyle = meta.color;
+    // 看答案模式：未选中填空/姓名框统一柔和中性灰蓝，彻底去掉扎眼的紫框与误导报错的红框；调框模式保留 7 类彩色区分
+    ctx.lineWidth = (state.mode === "edit" ? (isSel ? 2.6 : 1.5) : 1.35) * inv;
+    ctx.strokeStyle = state.mode === "edit" ? meta.color : "rgba(100, 116, 139, 0.50)";
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
     if (isSel) {
       ctx.fillStyle = meta.color + "1c";
@@ -294,15 +295,16 @@ function resolveFocusTargetSpec() {
 
   const pgGrade = getPageGrading(p);
   const isPinned = focusItem.id === lockedId;
-  // 参考选择题清透翠绿风格：默认统一清透绿蒙版，判分有错/漏选时对应暖橙/珊瑚红
-  let rgb = [22, 163, 74];
-  let fillA = isPinned ? 0.18 : 0.13;
+  const isIter = state.workMode === "iteration";
+  // 统一主交互色：改卷模式清透翠绿（与选择题同源），迭代模式冷静科技蓝；有判分错/漏时叠加语义红/橙
+  let rgb = isIter ? [37, 99, 235] : [22, 163, 74];
+  let fillA = isPinned ? 0.17 : 0.12;
   if (focusItem.kind === "choice") {
     const cg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
     if (cg && cg.status === "correct") { rgb = [22, 163, 74]; fillA = 0.18; }
     else if (cg && cg.status === "partial") { rgb = [234, 88, 12]; fillA = 0.18; }
     else if (cg && cg.status === "wrong") { rgb = [220, 38, 38]; fillA = 0.17; }
-    else { rgb = [21, 128, 61]; fillA = 0.16; }
+    else { rgb = isIter ? [37, 99, 235] : [21, 128, 61]; fillA = 0.15; }
   } else if (focusItem.kind === "fill") {
     const fg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
     if (fg && fg.blanks) {
@@ -311,8 +313,8 @@ function resolveFocusTargetSpec() {
       else if (sts.includes("partial") || sts.includes("pending")) { rgb = [234, 88, 12]; fillA = isPinned ? 0.16 : 0.12; }
     }
   } else if (focusItem.kind === "identity") {
-    rgb = [22, 163, 74];
-    fillA = 0.14;
+    rgb = isIter ? [37, 99, 235] : [22, 163, 74];
+    fillA = 0.13;
   }
   return { box: focusItem.box, rgb, fillA, isPinned };
 }

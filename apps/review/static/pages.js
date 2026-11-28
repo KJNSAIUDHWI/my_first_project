@@ -151,6 +151,7 @@ function updateTopbar() {
     wp.dataset.work = state.workMode;
     wp.querySelectorAll(".work-pill-btn").forEach(b => b.classList.toggle("active", b.dataset.work === state.workMode));
   }
+  document.body.dataset.work = state.workMode === "iteration" ? "iteration" : "grading";
   const sp = $("topScorePill");
   if (sp) {
     if (pgGrade && pgGrade.has_schema) {
@@ -399,7 +400,7 @@ function renderLeftList() {
       ? `<span class="badge badge-done">${uiIcon("check", "ui-ico-xs")}<span>已审</span></span>`
       : `<span class="badge badge-todo">待审</span>`;
     if (lockedOther) badgeHtml = `<span class="badge badge-lock" title="${escHtml(lk.user)} 正在审阅此页">${uiIcon("lock", "ui-ico-xs")}<span>${escHtml(lk.user)}</span></span>`;
-    else if (lockedMine && idx === state.pageIdx && !done) badgeHtml = `<span class="badge" style="background:#dbeafe;color:#1d4ed8;">${uiIcon("pen", "ui-ico-xs")}<span>审阅中</span></span>`;
+    else if (lockedMine && idx === state.pageIdx && !done) badgeHtml = `<span class="badge badge-active">${uiIcon("pen", "ui-ico-xs")}<span>审阅中</span></span>`;
 
     const subParts = [itemsCnt > 0 ? `${itemsCnt}题` : "无答题区"];
     if (done && doneRec && doneRec.reviewer) subParts.push(`${doneRec.reviewer}审`);
