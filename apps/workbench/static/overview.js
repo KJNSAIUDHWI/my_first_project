@@ -70,9 +70,9 @@ function renderPipelineDashboard(data) {
   const retryBtn = $('btnRetryFailed');
   retryBtn.classList.toggle('hidden', !ab || !hasFailed || anyJobRunning);
   if (hasFailed) {
-    retryBtn.textContent = pageFailCnt > 0
-      ? `🔁 补跑失败 (${pageFailCnt}页)`
-      : (failedItemsCnt > 0 ? `🔁 补跑失败 (${failedItemsCnt}处)` : '🔁 补跑失败');
+    retryBtn.innerHTML = pageFailCnt > 0
+      ? `${uiIcon('refresh')}<span>补跑失败 (${pageFailCnt}页)</span>`
+      : (failedItemsCnt > 0 ? `${uiIcon('refresh')}<span>补跑失败 (${failedItemsCnt}处)</span>` : `${uiIcon('refresh')}<span>补跑失败</span>`);
     retryBtn.title = pageFailCnt > 0
       ? '仅补跑本地检测失败的页面，已成功页与已转录内容自动复用不重复扣费'
       : '仅重跑失败题块，已成功项不重复扣费';
@@ -405,17 +405,17 @@ function renderPipelineDashboard(data) {
         ? `有 ${pageFail}/${pagesTotal} 页本地检测失败（其余成功页与已转录结果均已保留）。`
         : `还有 ${rs?.failed_items || apiFail} 处待补跑（已成功项均保留）。`
     );
-    const fix = errRep?.fix || exitInfo?.fix || (isWarnOnly ? '点击下方或右上角「🔁 补跑失败」，仅补跑失败页/失败题块，不重复扣费。' : '请前往「运行环境」检查修复。');
+    const fix = errRep?.fix || exitInfo?.fix || (isWarnOnly ? '点击下方或右上角「补跑失败」，仅补跑失败页/失败题块，不重复扣费。' : '请前往「运行环境」检查修复。');
     diagBox.innerHTML = `
       <div class="diag-head">
-        <span class="diag-title">⚠ ${esc(title)}</span>
+        <span class="diag-title h-ico">${uiIcon('alert')}<span>${esc(title)}</span></span>
         <span class="diag-code">${esc(codeTag)}</span>
       </div>
       <div class="diag-row"><b>模块：</b>${esc(modName)}</div>
       <div class="diag-row"><b>原因：</b>${esc(reason)}</div>
       <div class="diag-row"><b>建议：</b>${esc(fix)}</div>
       <div class="row" style="margin-top:8px">
-        ${hasFailed && !anyJobRunning ? '<button class="btn warn xs" type="button" id="btnDiagRetryNow">🔁 立即补跑失败</button>' : ''}
+        ${hasFailed && !anyJobRunning ? `<button class="btn warn xs" type="button" id="btnDiagRetryNow">${uiIcon('refresh', 'ui-ico-xs')}<span>立即补跑失败</span></button>` : ''}
         <button class="btn xs" type="button" id="btnDiagGoCheck">检查环境</button>
         <button class="btn xs" type="button" id="btnDiagOpenVlm">配置 API</button>
         ${rs?.has_error_log ? '<button class="btn xs" type="button" id="btnDiagViewLog">错误日志</button>' : ''}

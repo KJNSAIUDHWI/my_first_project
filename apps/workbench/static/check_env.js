@@ -153,7 +153,7 @@ function renderBenchmarkJob(bjob) {
   if (!bjob) return;
   const running = !!bjob.running;
   $('btnRunBenchmark').disabled = running;
-  $('btnRunBenchmark').textContent = running ? '测速中...' : '🚀 一键测速';
+  $('btnRunBenchmark').innerHTML = running ? `${uiIcon('loader')}<span>测速中...</span>` : `${uiIcon('gauge')}<span>一键测速</span>`;
   if (running) {
     $('benchResultWrap').className = 'bench-strip';
     $('btnApplyBench').classList.add('hidden');
@@ -180,7 +180,7 @@ function renderBenchmarkJob(bjob) {
         <tbody>
           ${rows.map(r => `
             <tr class="${r.label === bestLabel ? 'best' : ''}">
-              <td>${esc(r.label)}${r.label === bestLabel ? ' ★' : ''}</td>
+              <td>${esc(r.label)}${r.label === bestLabel ? ' <span class="badge ok">最优</span>' : ''}</td>
               <td class="ctr">${esc(r.device)}</td>
               <td class="ctr">${r.yolo_batch}</td>
               <td class="ctr">${r.cpu_workers}</td>

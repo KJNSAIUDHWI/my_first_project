@@ -51,7 +51,7 @@ function applyWorkModeUI(mode, animate = false, originPt = null) {
   if ($('tabOverviewTitle')) $('tabOverviewTitle').textContent = isGrading ? '改卷与导分' : '识别与审阅';
   if ($('tabOverviewDesc')) $('tabOverviewDesc').textContent = isGrading ? '进度 / 复审 / 成绩单' : '实时流向与协作';
   if ($('iterIngestMeta')) $('iterIngestMeta').classList.toggle('hidden', isGrading);
-  if ($('btnIngestAndRun')) $('btnIngestAndRun').textContent = isGrading ? '▶ 开始改试卷' : '▶ 导入并开始识别';
+  if ($('btnIngestAndRun')) $('btnIngestAndRun').innerHTML = isGrading ? `${uiIcon('play', 'ui-ico-xs')}<span>开始改试卷</span>` : `${uiIcon('play', 'ui-ico-xs')}<span>导入并开始识别</span>`;
   if ($('btnEnvPill')) $('btnEnvPill').classList.toggle('hidden', !OVERVIEW?.is_host || !isGrading);
 
   const secWrap = $('secondaryWrap');
@@ -109,7 +109,7 @@ function renderSchemaStrip(data) {
   const csvBtn = $('btnExportGradesCsv');
   if (s.configured) {
     badge.className = 'badge ok';
-    badge.textContent = `✓ 已配答案 · 满分 ${s.total_possible_score || 0}`;
+    badge.textContent = `已配答案 · 满分 ${s.total_possible_score || 0}`;
     meta.textContent = `选择 ${s.choice_count || 0} 题 · 填空 ${s.fill_blank_count || 0} 空（多选漏选 ${Math.round((s.multi_choice_partial_ratio ?? 0.5) * 100)}%）`;
   } else {
     badge.className = 'badge warn';
@@ -139,7 +139,7 @@ async function handleAnswerSourceFile(file) {
       await api('/api/schema', { method: 'POST', body: JSON.stringify({ batch_id: bid, schema: parsed }) });
       const st = $('schemaStrip');
       if (st) { st.classList.remove('confirm-pop'); void st.offsetWidth; st.classList.add('confirm-pop'); setTimeout(() => st.classList.remove('confirm-pop'), 650); }
-      showBanner('gui', `🎉 已直接导入标准答案 JSON：${file.name}`, 4500);
+      showBanner('gui', `已直接导入标准答案 JSON：${file.name}`, 4500);
       await refreshOverview();
       return;
     } catch (err) {
@@ -159,7 +159,7 @@ async function handleAnswerSourceFile(file) {
     if (!r.ok || !res.ok) throw new Error(res.error || '上传答案失败');
     const st = $('schemaStrip');
     if (st) { st.classList.remove('confirm-pop'); void st.offsetWidth; st.classList.add('confirm-pop'); setTimeout(() => st.classList.remove('confirm-pop'), 650); }
-    showBanner('gui', `🎉 已放入 ${res.manifest?.page_count || 1} 页答案，正在交由 AI 帮手整理判分标准...`, 6000);
+    showBanner('gui', `已放入 ${res.manifest?.page_count || 1} 页答案，正在交由 AI 帮手整理判分标准...`, 6000);
 
     // 默认直接唤醒可拖动 AI 帮手解析输出结构化 JSON；无本地 Agent 时打开判分规则弹窗走 VLM 兜底
     const hasAgent = Boolean(AGENTS_CACHE?.available?.length);
@@ -276,11 +276,11 @@ function renderMemCropStrip(data) {
   if ($('chkMemoryCrops')) $('chkMemoryCrops').checked = memOn;
   if (memBtn) {
     memBtn.classList.remove('hidden');
-    memBtn.textContent = memOn ? '⚡ 内存暂存' : '💾 硬盘缓存';
+    memBtn.innerHTML = memOn ? `${uiIcon('zap', 'ui-ico-xs')}<span>内存暂存</span>` : `${uiIcon('hardDrive', 'ui-ico-xs')}<span>硬盘缓存</span>`;
   }
   const plan = data.last_memory_plan || data.pipeline_job?.memory_preflight || null;
   if (plan && (!plan.batch_id || plan.batch_id === ab.batch_id)) {
-    const badge = plan.use_memory_crops ? '✅ 推荐内存暂存' : '⚠ 自动降级硬盘缓存';
+    const badge = plan.use_memory_crops ? '[推荐内存暂存]' : '[自动降级硬盘缓存]';
     if ($('memPlanText')) {
       $('memPlanText').textContent = `${badge} · 可用 ${(plan.available_ram_mb / 1024).toFixed(1)} GB · 预计稳态峰值 ~${plan.est_peak_mb} MB · 在途窗口 ${plan.max_inflight_grids} 拼图 · 省写 ~${plan.est_saved_files} 小文件 (${plan.benchmark_ms}ms 实测)`;
     }
@@ -311,7 +311,7 @@ $('chkMemoryCrops').onchange = async () => {
     await api('/api/config', { method: 'POST', body: JSON.stringify({ memory_crops: on }) });
     if (on) await runMemoryPreflight(false);
     else if ($('memPlanText')) $('memPlanText').textContent = '已切换为传统硬盘缓存（写入 crops/*.png 到磁盘）';
-    if ($('btnOpenMemDialog')) $('btnOpenMemDialog').textContent = on ? '⚡ 内存暂存' : '💾 硬盘缓存';
+    if ($('btnOpenMemDialog')) $('btnOpenMemDialog').innerHTML = on ? `${uiIcon('zap', 'ui-ico-xs')}<span>内存暂存</span>` : `${uiIcon('hardDrive', 'ui-ico-xs')}<span>硬盘缓存</span>`;
   } catch (err) { alert(err.message); }
 };
 

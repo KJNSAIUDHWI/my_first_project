@@ -19,15 +19,15 @@
     </div>
     <div id="workModePill" class="mode-capsule hidden" data-mode="grading" role="tablist" aria-label="工作模式切换" title="切换「改试卷模式（暖色）」与「模型迭代模式（冷色）」">
       <span class="mode-capsule-thumb" id="workModeThumb"></span>
-      <button class="mode-cap-btn active" type="button" data-work-mode="grading" role="tab" aria-selected="true">📝 改试卷</button>
-      <button class="mode-cap-btn" type="button" data-work-mode="iteration" role="tab" aria-selected="false">🔬 模型迭代</button>
+      <button class="mode-cap-btn active" type="button" data-work-mode="grading" role="tab" aria-selected="true"><i data-ico="fileCheck" class="ui-ico-sm"></i><span>改试卷</span></button>
+      <button class="mode-cap-btn" type="button" data-work-mode="iteration" role="tab" aria-selected="false"><i data-ico="flask" class="ui-ico-sm"></i><span>模型迭代</span></button>
     </div>
     <div class="row" style="gap:6px">
       <button id="btnEnvPill" class="env-status-pill ok hidden" type="button" title="查看运行环境与高级硬件调参"><i class="dot"></i><span id="envPillText">就绪</span></button>
-      <button id="btnLanShare" class="btn sm hidden" type="button" title="复制局域网网址，邀请同网设备一起审阅">🔗 协作</button>
-      <button id="btnOpenAi" class="btn sm hidden" type="button" title="打开可拖动 AI 帮手浮窗">🤖 AI 帮手</button>
-      <button id="btnOpenVlm" class="btn sm hidden" type="button" title="配置大模型视觉 API">⚙ API</button>
-      <button id="btnOpenGuide" class="btn sm" type="button" title="操作引导">? 引导</button>
+      <button id="btnLanShare" class="btn sm hidden" type="button" title="复制局域网网址，邀请同网设备一起审阅"><i data-ico="share"></i><span>协作</span></button>
+      <button id="btnOpenAi" class="btn sm hidden" type="button" title="打开可拖动 AI 帮手浮窗"><i data-ico="sparkles"></i><span>AI 帮手</span></button>
+      <button id="btnOpenVlm" class="btn sm hidden" type="button" title="配置大模型视觉 API"><i data-ico="settings"></i><span>API</span></button>
+      <button id="btnOpenGuide" class="btn sm" type="button" title="操作引导"><i data-ico="help"></i><span>引导</span></button>
       <span id="rolePill" class="role-pill collab hidden"><i class="dot"></i><span>协作者</span></span>
       <button id="btnUser" class="user-btn" type="button" title="点击修改你的称呼"><i class="dot" style="color:var(--primary)"></i><span id="btnUserLabel">主机</span></button>
     </div>
@@ -63,8 +63,8 @@
         <p class="lead" id="checkSummary">正在检查系统各环节状态...</p>
       </div>
       <div class="row">
-        <button class="btn sm" id="btnRecheck" type="button">重新检查</button>
-        <button class="btn sm" id="btnRunBenchmark" type="button">🚀 一键测速</button>
+        <button class="btn sm" id="btnRecheck" type="button"><i data-ico="refresh"></i><span>重新检查</span></button>
+        <button class="btn sm" id="btnRunBenchmark" type="button"><i data-ico="gauge"></i><span>一键测速</span></button>
         <button class="btn primary sm hidden" id="btnToIngest" type="button">下一步 →</button>
       </div>
     </div>
@@ -75,7 +75,7 @@
       <button class="btn primary sm hidden" id="btnRepairPip" type="button">安装缺失依赖</button>
       <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">解压模型权重</button>
       <button class="btn sm hidden" id="btnSetVlmKey" type="button">配置大模型 API</button>
-      <button class="btn sm" id="btnAskAgent" type="button">🤖 求助 AI</button>
+      <button class="btn sm" id="btnAskAgent" type="button"><i data-ico="sparkles"></i><span>求助 AI</span></button>
     </div>
 
     <!-- 4 段系统就绪架构图（点击任意节点直达对应配置） -->
@@ -128,14 +128,14 @@
     <div id="benchResultWrap" class="bench-strip hidden">
       <span id="benchSummaryText" style="font-weight:600;color:var(--primary)"></span>
       <div class="row">
-        <button class="btn primary xs hidden" id="btnApplyBench" type="button">✓ 应用最优参数</button>
+        <button class="btn primary xs hidden" id="btnApplyBench" type="button"><i data-ico="check" class="ui-ico-xs"></i><span>应用最优参数</span></button>
       </div>
     </div>
 
     <!-- 高级调参折叠抽屉（默认收起，保持首屏极简） -->
     <details class="clean-drawer" id="drawerPerf">
       <summary>
-        <span>⚙ 高级调参（设备 / Batch / 线程 / API 并发）</span>
+        <span><i data-ico="sliders"></i><span>高级调参（设备 / Batch / 线程 / API 并发）</span></span>
         <span class="muted" id="perfQuickTag" style="font-weight:500">自动推荐</span>
       </summary>
       <div class="drawer-body">
@@ -197,7 +197,7 @@
     <!-- 全部自检明细折叠抽屉（全绿默认收起，有异常自动展开） -->
     <details class="clean-drawer" id="drawerCheckDetails">
       <summary>
-        <span>📋 完整自检明细</span>
+        <span><i data-ico="clipboard"></i><span>完整自检明细</span></span>
         <span class="muted" id="checkDetailTag">加载中...</span>
       </summary>
       <div class="drawer-body">
@@ -222,7 +222,7 @@
         <div class="celebrate-layer" id="paperCelebrate"></div>
         <div class="drop-head">
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
-            <div class="drop-icon">📄</div>
+            <div class="drop-icon"><i data-ico="fileText" class="ui-ico-lg"></i></div>
             <div style="min-width:0">
               <div class="drop-title">1. 贴入试卷</div>
               <div class="drop-sub">支持文件夹批量，或拖/粘单张试卷图快速测试</div>
@@ -236,8 +236,8 @@
 
         <div class="row" style="gap:6px">
           <input id="inputSourceDir" class="input" style="flex:1;min-width:160px" placeholder="粘贴文件夹路径、单张图片路径，或直接拖图片进来...">
-          <button class="btn sm" id="btnPickFolder" type="button">📂 选文件夹</button>
-          <button class="btn sm" id="btnPickPaperFiles" type="button" title="选择单张或多张试卷照片直接测试">🖼 选图片</button>
+          <button class="btn sm" id="btnPickFolder" type="button"><i data-ico="folderOpen"></i><span>选文件夹</span></button>
+          <button class="btn sm" id="btnPickPaperFiles" type="button" title="选择单张或多张试卷照片直接测试"><i data-ico="image"></i><span>选图片</span></button>
           <input id="paperFilesInput" type="file" accept="image/*" multiple class="hidden">
         </div>
 
@@ -247,7 +247,7 @@
             <div class="drop-summary-title" id="paperSummaryTitle"></div>
             <div class="drop-summary-meta" id="paperSummaryMeta"></div>
           </div>
-          <button class="btn xs ghost" id="btnClearPaper" type="button" title="清空重选">✕</button>
+          <button class="btn xs ghost" id="btnClearPaper" type="button" title="清空重选"><i data-ico="x" class="ui-ico-xs"></i></button>
         </div>
 
         <div id="paperErrorTip" class="hidden" style="font-size:12px;color:var(--err);background:var(--err-soft);padding:6px 10px;border-radius:9px"></div>
@@ -263,7 +263,7 @@
         <div class="celebrate-layer" id="answerCelebrate"></div>
         <div class="drop-head">
           <div style="display:flex;align-items:center;gap:10px;min-width:0">
-            <div class="drop-icon">✅</div>
+            <div class="drop-icon"><i data-ico="bookCheck" class="ui-ico-lg"></i></div>
             <div style="min-width:0">
               <div class="drop-title">2. 贴入答案 <span class="muted" style="font-weight:500;font-size:12px">（可选）</span></div>
               <div class="drop-sub">拖入答案 PDF / 照片，或直接粘贴文字 / 截图</div>
@@ -283,12 +283,12 @@
             <div class="drop-summary-title" id="answerSummaryTitle"></div>
             <div class="drop-summary-meta" id="answerSummaryMeta"></div>
           </div>
-          <button class="btn xs ghost" id="btnClearAnswerStage" type="button" title="清空答案">✕</button>
+          <button class="btn xs ghost" id="btnClearAnswerStage" type="button" title="清空答案"><i data-ico="x" class="ui-ico-xs"></i></button>
         </div>
 
         <div class="drop-hint-row">
           <div class="row" style="gap:6px">
-            <button class="btn xs" id="btnPickAnswerFile" type="button">📄 选答案 PDF / 图片</button>
+            <button class="btn xs" id="btnPickAnswerFile" type="button"><i data-ico="upload" class="ui-ico-xs"></i><span>选答案 PDF / 图片</span></button>
             <input id="answerStageFileInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.json" class="hidden">
           </div>
           <span>留空也能直接改 · 贴入后自动交 AI 整理判分</span>
@@ -310,7 +310,7 @@
 
     <div class="between" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
       <div class="row" style="gap:10px">
-        <button class="btn primary" id="btnIngestAndRun" type="button" style="padding:10px 22px;font-size:14.5px">▶ 开始改试卷</button>
+        <button class="btn primary" id="btnIngestAndRun" type="button" style="padding:10px 22px;font-size:14.5px"><i data-ico="play" class="ui-ico-xs"></i><span>开始改试卷</span></button>
         <button class="btn" id="btnDoIngest" type="button">仅入库</button>
         <span id="ingestMsg" class="muted"></span>
       </div>
@@ -329,9 +329,9 @@
         <div class="row" id="hostBatchActions">
           <select id="batchSelect" class="input" style="width:auto;min-width:170px;padding:6px 10px;font-size:13px"></select>
           <button class="btn primary sm" id="btnStartRecognize" type="button">开始识别</button>
-          <button class="btn danger sm hidden" id="btnStopRecognize" type="button">■ 停止</button>
-          <button class="btn warn sm hidden" id="btnRetryFailed" type="button" title="仅重跑失败题块，不重复扣费">🔁 补跑失败</button>
-          <button class="btn sm" id="btnGoIngestNew" type="button">+ 新试卷</button>
+          <button class="btn danger sm hidden" id="btnStopRecognize" type="button"><i data-ico="stop" class="ui-ico-xs"></i><span>停止</span></button>
+          <button class="btn warn sm hidden" id="btnRetryFailed" type="button" title="仅重跑失败题块，不重复扣费"><i data-ico="refresh"></i><span>补跑失败</span></button>
+          <button class="btn sm" id="btnGoIngestNew" type="button"><i data-ico="plus" class="ui-ico-xs"></i><span>新试卷</span></button>
         </div>
       </div>
 
@@ -343,9 +343,9 @@
         </div>
         <div class="row" style="gap:6px">
           <input id="answerPdfInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.json" class="hidden">
-          <button class="btn primary xs" id="btnUploadAnswerPdf" type="button" title="选择或拖拽答案 PDF/图片，默认直接唤醒 AI 帮手整理">📄 贴入答案</button>
-          <button class="btn xs" id="btnToggleSchemaAdv" type="button">⚙ 判分规则</button>
-          <button class="btn xs hidden" id="btnExportGradesCsv" type="button" title="导出带总分与逐题得分的 Excel 成绩单 CSV">📊 导出成绩 CSV</button>
+          <button class="btn primary xs" id="btnUploadAnswerPdf" type="button" title="选择或拖拽答案 PDF/图片，默认直接唤醒 AI 帮手整理"><i data-ico="upload" class="ui-ico-xs"></i><span>贴入答案</span></button>
+          <button class="btn xs" id="btnToggleSchemaAdv" type="button"><i data-ico="sliders" class="ui-ico-xs"></i><span>判分规则</span></button>
+          <button class="btn xs hidden" id="btnExportGradesCsv" type="button" title="导出带总分与逐题得分的 Excel 成绩单 CSV"><i data-ico="barChart" class="ui-ico-xs"></i><span>导出成绩 CSV</span></button>
         </div>
       </div>
 
@@ -359,7 +359,7 @@
           </div>
           <div class="row" style="gap:6px">
             <div class="pipe-meta" id="pipeMetaRow"></div>
-            <button class="btn xs ghost hidden" id="btnOpenMemDialog" type="button" title="查看内存暂存 Crop 与预检详情">⚡ 内存暂存</button>
+            <button class="btn xs ghost hidden" id="btnOpenMemDialog" type="button" title="查看内存暂存 Crop 与预检详情"><i data-ico="zap" class="ui-ico-xs"></i><span>内存暂存</span></button>
             <button class="btn xs ghost" id="btnToggleArch" type="button">展开流向图</button>
           </div>
         </div>
@@ -545,12 +545,12 @@
     <div class="card train-db-card" id="trainDbCard">
       <div class="between">
         <div>
-          <h2>🗄️ 本地训练数据库（M1 / M2 / M3 / CNN 统一目录）</h2>
+          <h2 class="h-ico"><i data-ico="database" class="ui-ico-lg"></i><span>本地训练数据库（M1 / M2 / M3 / CNN 统一目录）</span></h2>
           <p class="lead">默认存放在本项目 <code>data/</code> 下；协作者仅改卷时可切回「改试卷模式」完全不建训练库。</p>
         </div>
         <div class="row">
-          <button class="btn sm" id="btnOpenTrainDbDir" type="button">📂 打开目录</button>
-          <button class="btn sm" id="btnPickTrainDbDir" type="button">📁 更改位置</button>
+          <button class="btn sm" id="btnOpenTrainDbDir" type="button"><i data-ico="folderOpen"></i><span>打开目录</span></button>
+          <button class="btn sm" id="btnPickTrainDbDir" type="button"><i data-ico="folder"></i><span>更改位置</span></button>
           <button class="btn xs" id="btnInitTrainDbDir" type="button">初始化子目录</button>
         </div>
       </div>
@@ -623,15 +623,15 @@
           <span class="muted" id="trainHwInfo">检测设备中...</span>
         </div>
         <div class="row">
-          <button class="btn primary sm" id="btnStartTrain" type="button">▶ 开始微调</button>
-          <button class="btn danger sm hidden" id="btnStopTrain" type="button">■ 停止</button>
+          <button class="btn primary sm" id="btnStartTrain" type="button"><i data-ico="play" class="ui-ico-xs"></i><span>开始微调</span></button>
+          <button class="btn danger sm hidden" id="btnStopTrain" type="button"><i data-ico="stop" class="ui-ico-xs"></i><span>停止</span></button>
           <button class="btn sm" id="btnOpenMonitor" type="button">监控 (8901)</button>
         </div>
       </div>
 
       <details class="clean-drawer" style="margin-top:12px">
         <summary>
-          <span>⚙ 高级训练参数</span>
+          <span><i data-ico="sliders"></i><span>高级训练参数</span></span>
           <span class="muted" id="trainParamPreview">默认推荐配置</span>
         </summary>
         <div class="drawer-body">
@@ -679,7 +679,7 @@
         <h2>训练记录与权重切换</h2>
         <span class="muted">启用新权重自动备份旧版，可随时回退</span>
       </div>
-      <div style="overflow-x:auto">
+      <div class="train-table-scroll">
         <table class="train-table">
           <thead>
             <tr><th>模块</th><th>记录</th><th>样本</th><th>指标</th><th>状态</th><th>操作</th></tr>
@@ -703,12 +703,12 @@
 <aside id="aiDrawer" class="ai-drawer hidden" aria-label="AI 帮手全局浮窗">
   <div class="ai-drawer-head" id="aiDrawerHead" title="按住此处可自由拖动窗口位置，双击还原默认位置">
     <div class="row" style="gap:6px;align-items:center">
-      <span class="ai-drag-grip" aria-hidden="true">⠿</span>
-      <strong style="font-size:14px">🤖 AI 帮手</strong>
-      <span class="badge" id="aiStatusBadge">就绪</span>
+      <span class="ai-drag-grip" aria-hidden="true"><i data-ico="grip"></i></span>
+      <strong class="h-ico" style="font-size:14px"><i data-ico="sparkles"></i><span>AI 帮手</span></strong>
+      <span class="badge ok" id="aiStatusBadge">就绪</span>
     </div>
     <div class="row" style="gap:5px">
-      <button class="btn xs" id="btnToggleAiCfg" type="button" title="切换 Agent、手动路径、扩展扫描与配置导入">⚙ 配置</button>
+      <button class="btn xs" id="btnToggleAiCfg" type="button" title="切换 Agent、手动路径、扩展扫描与配置导入"><i data-ico="sliders" class="ui-ico-xs"></i><span>配置</span></button>
       <button class="btn xs" id="btnCloseAiDlg" type="button">收起</button>
     </div>
   </div>
@@ -738,8 +738,8 @@
       <button class="btn xs" id="btnTestAgent" type="button">测连通</button>
     </div>
     <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
-      <button class="btn xs" id="btnDeepScanAgents" type="button" title="默认快探不扫盘，需要时可点此扩展扫描常见开发目录">🔍 扩展扫描(可选)</button>
-      <button class="btn xs" id="btnImportCfgFile" type="button" title="一键导入 .json 配置包或 .env 密钥文件">📥 导入配置/密钥</button>
+      <button class="btn xs" id="btnDeepScanAgents" type="button" title="默认快探不扫盘，需要时可点此扩展扫描常见开发目录"><i data-ico="search" class="ui-ico-xs"></i><span>扩展扫描(可选)</span></button>
+      <button class="btn xs" id="btnImportCfgFile" type="button" title="一键导入 .json 配置包或 .env 密钥文件"><i data-ico="download" class="ui-ico-xs"></i><span>导入配置/密钥</span></button>
       <input id="aiCfgFileInput" type="file" accept=".json,.env,.txt" class="hidden">
       <span id="aiAgentScanMsg" class="muted" style="font-size:11.5px"></span>
     </div>
@@ -758,7 +758,7 @@
       <label class="row" style="gap:5px;cursor:pointer;color:var(--muted)" title="默认只传文字状态，AI 有需要会自动调 capture 截屏；勾选后发送即附带实时离屏截图并精简提示词">
         <input id="chkAiAttachShot" type="checkbox"> 附带当前界面截图
       </label>
-      <button class="btn xs hidden" id="btnStopAi" type="button" style="color:var(--err);border-color:#fecaca">■ 停止本对话</button>
+      <button class="btn xs hidden" id="btnStopAi" type="button" style="color:var(--err);border-color:#fecaca"><i data-ico="stop" class="ui-ico-xs"></i><span>停止本对话</span></button>
     </div>
     <div class="row" style="gap:6px">
       <input id="aiNoteInput" type="text" placeholder="输入自然语言指令（支持直接导入配置/密钥、查错、操控界面）..." style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:9px;font-size:12.5px">
@@ -767,12 +767,12 @@
   </div>
   <div id="aiResizeHandle" class="ai-resize-handle" title="拖拽调整窗口大小"></div>
 </aside>
-<div id="aiFocusRing" class="ai-focus-ring hidden"><span id="aiFocusTag" class="ai-focus-tag">🤖 AI 聚焦</span></div>
+<div id="aiFocusRing" class="ai-focus-ring hidden"><span id="aiFocusTag" class="ai-focus-tag"><i data-ico="sparkles" class="ui-ico-xs"></i><span>AI 聚焦</span></span></div>
 
 <!-- 局域网协作分享弹窗（从正文剥离到顶栏） -->
 <dialog id="lanDialog">
   <div class="between" style="margin-bottom:8px">
-    <h3 style="margin:0;font-size:16px">🔗 局域网协同审阅</h3>
+    <h3 class="h-ico" style="margin:0;font-size:16px"><i data-ico="share"></i><span>局域网协同审阅</span></h3>
     <button class="btn xs" id="btnCloseLanDlg" type="button">关闭</button>
   </div>
   <p class="muted" style="margin:0 0 12px">同局域网内的电脑或平板浏览器打开下方网址，即可一起分工审阅试卷，不重复领卷。</p>
@@ -785,7 +785,7 @@
 <!-- 判分规则与答案详情弹窗（从主页面剥离，保持主界面极简） -->
 <dialog id="schemaRuleDialog" style="max-width:600px">
   <div class="between" style="margin-bottom:10px">
-    <h3 style="margin:0;font-size:16px">⚙ 判分规则与标准答案配置</h3>
+    <h3 class="h-ico" style="margin:0;font-size:16px"><i data-ico="sliders"></i><span>判分规则与标准答案配置</span></h3>
     <button class="btn xs" id="btnCloseSchemaRuleDlg" type="button">关闭</button>
   </div>
   <div class="field" style="margin-bottom:14px">
@@ -803,9 +803,9 @@
   <div class="field" style="margin-bottom:12px">
     <label style="font-size:13px">快速操作</label>
     <div class="row" style="gap:8px;flex-wrap:wrap">
-      <button class="btn sm" id="btnAskAiEditSchema" type="button">🤖 喊 AI 改规则 / 答案</button>
-      <button class="btn sm" id="btnParseSchemaVlm" type="button" title="无本地 CLI Agent 时直接用视觉大模型解析已传答案">⚡ VLM 直连解析</button>
-      <button class="btn sm" id="btnViewSchemaJson" type="button">👁 查看/编辑 JSON</button>
+      <button class="btn sm" id="btnAskAiEditSchema" type="button"><i data-ico="sparkles"></i><span>喊 AI 改规则 / 答案</span></button>
+      <button class="btn sm" id="btnParseSchemaVlm" type="button" title="无本地 CLI Agent 时直接用视觉大模型解析已传答案"><i data-ico="zap"></i><span>VLM 直连解析</span></button>
+      <button class="btn sm" id="btnViewSchemaJson" type="button"><i data-ico="eye"></i><span>查看/编辑 JSON</span></button>
       <button class="btn sm ghost" id="btnClearSchema" type="button" style="color:var(--err)">清除当前答案</button>
     </div>
   </div>
@@ -820,7 +820,7 @@
 <!-- 内存暂存 Crop 高级设置弹窗（静默护航，不打扰日常改卷界面） -->
 <dialog id="memPreflightDialog" style="max-width:520px">
   <div class="between" style="margin-bottom:8px">
-    <h3 style="margin:0;font-size:16px">⚡ 内存暂存 Crop 与运行预算</h3>
+    <h3 class="h-ico" style="margin:0;font-size:16px"><i data-ico="zap"></i><span>内存暂存 Crop 与运行预算</span></h3>
     <button class="btn xs" id="btnCloseMemDlg" type="button">关闭</button>
   </div>
   <p class="muted" style="margin:0 0 12px">改卷模式下默认启用内存暂存：切图与拼图在内存里直接发送给 API，识别完立刻释放，不在硬盘留大量零碎小图；若内存不足会自动降级硬盘缓存。</p>
@@ -829,7 +829,7 @@
   </label>
   <div id="memPlanText" style="padding:10px 12px;border-radius:10px;background:var(--soft);border:1px solid var(--line);font-size:12.5px;color:var(--text);margin-bottom:12px">正在准备内存预检...</div>
   <div class="row" style="justify-content:flex-end">
-    <button class="btn sm" id="btnRunMemPreflight" type="button">🧪 立即测一遍内存预算</button>
+    <button class="btn sm" id="btnRunMemPreflight" type="button"><i data-ico="gauge"></i><span>立即测一遍内存预算</span></button>
   </div>
 </dialog>
 
@@ -881,7 +881,7 @@
         <span>集中核对选择题填涂，鼠标划过确认，认错点一下修改。</span>
       </div>
       <div class="row" style="margin-top:10px">
-        <button class="btn primary sm" id="btnStartTour" type="button">▶ 分步高亮引导</button>
+        <button class="btn primary sm" id="btnStartTour" type="button"><i data-ico="play" class="ui-ico-xs"></i><span>分步高亮引导</span></button>
       </div>
     </div>
   </div>
@@ -967,6 +967,8 @@
   </div>
 </dialog>
 
+<script src="/shared/icons.js"></script>
+<script src="/shared/draggable_drawer.js"></script>
 <script src="/static/state.js"></script>
 <script src="/static/flow_graph.js"></script>
 <script src="/static/check_env.js"></script>

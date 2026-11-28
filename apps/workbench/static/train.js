@@ -91,7 +91,7 @@ function renderTrainOverview(data) {
     $('drawerOptionalChoiceTrain').open = true;
   }
   $('btnStartTrain').disabled = running;
-  $('btnStartTrain').textContent = running ? `训练中 (${job.task?.toUpperCase() || ''})...` : '▶ 开始微调';
+  $('btnStartTrain').innerHTML = running ? `${uiIcon('loader')}<span>训练中 (${esc(job.task?.toUpperCase() || '')})...</span>` : `${uiIcon('play', 'ui-ico-xs')}<span>开始微调</span>`;
   $('btnStopTrain').classList.toggle('hidden', !running);
   $('tabTrainDesc').textContent = running ? `训练 ${job.task?.toUpperCase() || ''} 中` : '微调与换权重';
 

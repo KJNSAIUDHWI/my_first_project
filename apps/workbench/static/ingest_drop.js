@@ -1,5 +1,5 @@
 'use strict';
-/* ==================== 双贴入区（试卷 + 答案）与爽感确认动效（回弹 + 🎉 + 绿勾） ==================== */
+/* ==================== 双贴入区（试卷 + 答案）与爽感确认动效（回弹 + 礼花 + 绿勾） ==================== */
 let STAGED_PAPER = null;   // { kind: 'path', path, name, image_count, sample_names } | { kind: 'files', files: [{ name, data_b64, size, thumbUrl }] }
 let STAGED_ANSWER = null;  // { kind: 'file', file, name, size, thumbUrl } | { kind: 'path', path, name, size } | { kind: 'text', text, length }
 
@@ -23,20 +23,20 @@ function spawnCelebrateBurst(hostEl) {
   if (!hostEl) return;
   hostEl.innerHTML = '';
   const pieces = [
-    { ch: '🎉', x1: -10, y1: -16, x2: -44, y2: -54, r1: '-18deg', r2: '-42deg' },
-    { ch: '✨', x1: 8,   y1: -20, x2: 26,  y2: -58, r1: '15deg',  r2: '45deg'  },
-    { ch: '🎉', x1: -24, y1: -8,  x2: -74, y2: -34, r1: '-25deg', r2: '-60deg' },
-    { ch: '✓',  x1: -2,  y1: -24, x2: -8,  y2: -64, r1: '0deg',   r2: '12deg', color: '#16a34a' },
-    { ch: '✨', x1: 14,  y1: -8,  x2: 42,  y2: -28, r1: '20deg',  r2: '55deg'  },
-    { ch: '🌟', x1: -18, y1: 6,   x2: -58, y2: 14,  r1: '-10deg', r2: '-35deg' },
+    { ico: 'sparkles', x1: -10, y1: -16, x2: -44, y2: -54, r1: '-18deg', r2: '-42deg', color: '#16a34a' },
+    { ico: 'sparkles', x1: 8,   y1: -20, x2: 26,  y2: -58, r1: '15deg',  r2: '45deg',  color: '#d97706' },
+    { ico: 'check',    x1: -24, y1: -8,  x2: -74, y2: -34, r1: '-25deg', r2: '-60deg', color: '#15803d' },
+    { ico: 'check',    x1: -2,  y1: -24, x2: -8,  y2: -64, r1: '0deg',   r2: '12deg',  color: '#16a34a' },
+    { ico: 'sparkles', x1: 14,  y1: -8,  x2: 42,  y2: -28, r1: '20deg',  r2: '55deg',  color: '#2563eb' },
+    { ico: 'zap',      x1: -18, y1: 6,   x2: -58, y2: 14,  r1: '-10deg', r2: '-35deg', color: '#f59e0b' },
   ];
   pieces.forEach((p, idx) => {
     const sp = document.createElement('span');
     sp.className = 'celebrate-bit';
-    sp.textContent = p.ch;
+    sp.innerHTML = uiIcon(p.ico, 'ui-ico');
     sp.style.right = '22px';
     sp.style.top = '18px';
-    if (p.color) { sp.style.color = p.color; sp.style.fontWeight = '900'; }
+    sp.style.color = p.color;
     sp.style.setProperty('--tx1', p.x1 + 'px');
     sp.style.setProperty('--ty1', p.y1 + 'px');
     sp.style.setProperty('--tx2', p.x2 + 'px');
@@ -66,8 +66,8 @@ function updateIngestReadyHint() {
   if (!hint) return;
   const pOk = Boolean(STAGED_PAPER || $('inputSourceDir').value.trim());
   const aOk = Boolean(STAGED_ANSWER);
-  if (pOk && aOk) hint.textContent = '✓ 试卷与答案都已就位，点左侧按钮即可一键开改';
-  else if (pOk) hint.textContent = '✓ 试卷已就位（答案可留空，也可现在贴入）';
+  if (pOk && aOk) hint.textContent = '试卷与答案都已就位，点左侧按钮即可一键开改';
+  else if (pOk) hint.textContent = '试卷已就位（答案可留空，也可现在贴入）';
   else hint.textContent = '放入试卷后即可一键开改';
 }
 
@@ -569,7 +569,7 @@ function showTourStep(idx) {
     $('tourTitle').textContent = st.title;
     $('tourDesc').textContent = st.desc;
     $('tourStep').textContent = `${idx + 1} / ${TOUR_STEPS.length}`;
-    $('tourNext').textContent = idx === TOUR_STEPS.length - 1 ? '完成 ✓' : '下一步 →';
+    $('tourNext').textContent = idx === TOUR_STEPS.length - 1 ? '完成' : '下一步 →';
   }, 140);
 }
 function endTour() { $('tourMask').classList.add('hidden'); localStorage.setItem('wbGuideSeen', '1'); }
@@ -648,12 +648,12 @@ $('btnRefreshPrice').onclick = async () => {
       body: JSON.stringify({ model: $('vlmModel').value.trim(), provider: $('vlmProvider').value }),
     });
     $('vlmStatus').style.color = 'var(--primary)';
-    $('vlmStatus').textContent = '✓ ' + (res.message || '官网定价已永久更新');
+    $('vlmStatus').textContent = '已完成：' + (res.message || '官网定价已永久更新');
     await loadVlmPricePreview();
     await refreshOverview();
   } catch (err) {
     $('vlmStatus').style.color = 'var(--err)';
-    $('vlmStatus').textContent = '✗ 抓取失败：' + err.message;
+    $('vlmStatus').textContent = '抓取失败：' + err.message;
   } finally { btn.disabled = false; }
 };
 $('btnSaveCustomPrice').onclick = async () => {
@@ -662,7 +662,7 @@ $('btnSaveCustomPrice').onclick = async () => {
   const pout = Number($('vlmPriceOut').value);
   if (!model || isNaN(pin) || isNaN(pout) || pin < 0 || pout < 0) {
     $('vlmStatus').style.color = 'var(--err)';
-    $('vlmStatus').textContent = '✗ 请填写有效的模型名称与非负单价';
+    $('vlmStatus').textContent = '请填写有效的模型名称与非负单价';
     return;
   }
   try {
@@ -671,13 +671,13 @@ $('btnSaveCustomPrice').onclick = async () => {
       body: JSON.stringify({ model, input_per_m: pin, output_per_m: pout }),
     });
     $('vlmStatus').style.color = 'var(--primary)';
-    $('vlmStatus').textContent = '✓ ' + (res.message || '已永久保存单价');
+    $('vlmStatus').textContent = '已保存：' + (res.message || '已永久保存单价');
     $('vlmCustomPriceBox').classList.add('hidden');
     await loadVlmPricePreview();
     await refreshOverview();
   } catch (err) {
     $('vlmStatus').style.color = 'var(--err)';
-    $('vlmStatus').textContent = '✗ ' + err.message;
+    $('vlmStatus').textContent = '保存失败：' + err.message;
   }
 };
 $('btnTestVlm').onclick = async () => {
@@ -695,10 +695,10 @@ $('btnTestVlm').onclick = async () => {
       }),
     });
     $('vlmStatus').style.color = 'var(--primary)';
-    $('vlmStatus').textContent = `✓ 连通成功${res.vision_verified ? '（支持看图）' : ''} · ${res.latency_ms}ms · ${res.returned_model || ''}${res.warning ? ' · ' + res.warning : ''}`;
+    $('vlmStatus').textContent = `连通成功${res.vision_verified ? '（支持看图）' : ''} · ${res.latency_ms}ms · ${res.returned_model || ''}${res.warning ? ' · ' + res.warning : ''}`;
   } catch (err) {
     $('vlmStatus').style.color = 'var(--err)';
-    $('vlmStatus').textContent = '✗ ' + err.message;
+    $('vlmStatus').textContent = '连通失败：' + err.message;
   } finally { $('btnTestVlm').disabled = false; }
 };
 $('btnSaveVlm').onclick = async () => {
@@ -715,13 +715,13 @@ $('btnSaveVlm').onclick = async () => {
       }),
     });
     $('vlmStatus').style.color = 'var(--primary)';
-    $('vlmStatus').textContent = '✓ ' + (res.message || '已保存');
+    $('vlmStatus').textContent = res.message || '已保存';
     if (res.config) $('vlmKeyHint').textContent = res.config.has_key ? `（已存 ${res.config.api_key_masked}）` : '（未配置）';
     $('vlmApiKey').value = '';
     if (CHECK) renderCheck(await api('/api/check'));
   } catch (err) {
     $('vlmStatus').style.color = 'var(--err)';
-    $('vlmStatus').textContent = '✗ ' + err.message;
+    $('vlmStatus').textContent = '保存失败：' + err.message;
   } finally { $('btnSaveVlm').disabled = false; }
 };
 

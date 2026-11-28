@@ -10,7 +10,7 @@ function syncAgentsUI(agentsInfo, cfg) {
   if (sel && agentsInfo?.list) {
     const curVal = sel.value || cfg?.ai_helper_provider || 'auto';
     sel.innerHTML = `<option value="auto">自动优选 (${esc(agentsInfo.recommended || '无')})</option>` +
-      agentsInfo.list.map(a => `<option value="${esc(a.id)}">${a.available ? '✓ ' : '✗ '}${esc(a.label)}</option>`).join('');
+      agentsInfo.list.map(a => `<option value="${esc(a.id)}">${a.available ? '[可用] ' : '[未装] '}${esc(a.label)}</option>`).join('');
     sel.value = curVal;
   }
   if ($('aiModeSelect') && cfg?.ai_default_mode && !$('aiModeSelect').dataset.userPicked) {
@@ -32,7 +32,7 @@ function updateAiProviderHint() {
   if (ag && ag.available) {
     hint.textContent = `当前引擎：${ag.label}（${ag.cli}）· 支持同构操控界面、导入配置/密钥与离屏截图`;
   } else {
-    hint.textContent = '未检测到所选 CLI Agent，点右上「⚙ 配置」可手动填路径或执行可选扩展扫描，也可直接复制提示词。';
+    hint.textContent = '未检测到所选 CLI Agent，点右上「配置」可手动填路径或执行可选扩展扫描，也可直接复制提示词。';
   }
   if ($('aiManualPathInput') && chosen !== 'auto') {
     const cfgPaths = OVERVIEW?.config?.agent_paths || {};
@@ -130,134 +130,29 @@ function renderAiPanel(aiJob) {
     return;
   }
   const html = msgs.map(m => {
-    const att = (m.attach && m.attach.length) ? ` · 📷 ${esc(m.attach.join(', '))}` : '';
+    const att = (m.attach && m.attach.length) ? ` · ${uiIcon('camera', 'ui-ico-xs')} ${esc(m.attach.join(', '))}` : '';
     return `<div class="ai-msg ${m.role === 'user' ? 'user' : 'assistant'}"><div class="ai-msg-meta">${m.role === 'user' ? '你' : 'AI 帮手'} · ${esc(m.ts || '')}${att}</div>${esc(m.text || '')}</div>`;
   });
   if (running) {
-    const liveTxt = aiJob.response || '⏳ AI 正在读取实时状态、分析并执行同构操作，你可以继续自由操作主界面...';
+    const liveTxt = aiJob.response || 'AI 正在读取实时状态、分析并执行同构操作，你可以继续自由操作主界面...';
     html.push(`<div id="aiResponseBox" class="ai-msg assistant"><div class="ai-msg-meta">AI 帮手 · 执行中</div>${esc(liveTxt)}</div>`);
   }
   body.innerHTML = html.join('');
   body.scrollTop = body.scrollHeight;
 }
 
-/* ==================== 可自由拖动 + 可缩放 AI 帮手浮窗 ==================== */
-const AI_RECT_KEY = 'wbAiDrawerRect';
-function clampAiDrawerRect(rect) {
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const w = Math.max(340, Math.min(vw - 16, Number(rect.width) || 430));
-  const h = Math.max(360, Math.min(vh - 16, Number(rect.height) || Math.min(620, vh - 88)));
-  const left = Math.max(8, Math.min(vw - Math.min(w, 160) - 8, Number(rect.left)));
-  const top = Math.max(8, Math.min(vh - 54, Number(rect.top)));
-  return { left: Math.round(left), top: Math.round(top), width: Math.round(w), height: Math.round(h) };
-}
-function applyAiDrawerRect(rect) {
-  const d = $('aiDrawer');
-  if (!d || !rect) return;
-  const c = clampAiDrawerRect(rect);
-  d.style.left = c.left + 'px';
-  d.style.top = c.top + 'px';
-  d.style.right = 'auto';
-  d.style.bottom = 'auto';
-  d.style.width = c.width + 'px';
-  d.style.height = c.height + 'px';
-}
-function restoreAiDrawerRect() {
-  try {
-    const raw = localStorage.getItem(AI_RECT_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
-      applyAiDrawerRect(saved);
-    }
-  } catch (_) {}
-}
-function resetAiDrawerRect() {
-  const d = $('aiDrawer');
-  if (!d) return;
-  localStorage.removeItem(AI_RECT_KEY);
-  d.style.left = '';
-  d.style.top = '';
-  d.style.right = '';
-  d.style.bottom = '';
-  d.style.width = '';
-  d.style.height = '';
-}
-(function initDraggableAiDrawer() {
-  const drawer = $('aiDrawer');
-  const head = $('aiDrawerHead');
-  const handle = $('aiResizeHandle');
-  if (!drawer || !head) return;
-
-  let mode = null; // 'drag' | 'resize'
-  let startX = 0, startY = 0, origLeft = 0, origTop = 0, origW = 0, origH = 0;
-
-  head.addEventListener('pointerdown', e => {
-    if (e.button !== 0 || e.target.closest('button,input,select,a')) return;
-    e.preventDefault();
-    const r = drawer.getBoundingClientRect();
-    mode = 'drag';
-    startX = e.clientX; startY = e.clientY;
-    origLeft = r.left; origTop = r.top; origW = r.width; origH = r.height;
-    applyAiDrawerRect({ left: origLeft, top: origTop, width: origW, height: origH });
-    drawer.classList.add('is-dragging');
-  });
-
-  head.addEventListener('dblclick', e => {
-    if (e.target.closest('button,input,select')) return;
-    resetAiDrawerRect();
-  });
-
-  if (handle) {
-    handle.addEventListener('pointerdown', e => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const r = drawer.getBoundingClientRect();
-      mode = 'resize';
-      startX = e.clientX; startY = e.clientY;
-      origLeft = r.left; origTop = r.top; origW = r.width; origH = r.height;
-      applyAiDrawerRect({ left: origLeft, top: origTop, width: origW, height: origH });
-      drawer.classList.add('is-dragging');
-    });
-  }
-
-  window.addEventListener('pointermove', e => {
-    if (!mode) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if (mode === 'drag') {
-      applyAiDrawerRect({ left: origLeft + dx, top: origTop + dy, width: origW, height: origH });
-    } else if (mode === 'resize') {
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const w = Math.max(340, Math.min(vw - origLeft - 8, origW + dx));
-      const h = Math.max(360, Math.min(vh - origTop - 8, origH + dy));
-      drawer.style.width = Math.round(w) + 'px';
-      drawer.style.height = Math.round(h) + 'px';
-    }
-  });
-
-  window.addEventListener('pointerup', () => {
-    if (!mode) return;
-    mode = null;
-    drawer.classList.remove('is-dragging');
-    const r = drawer.getBoundingClientRect();
-    try {
-      localStorage.setItem(AI_RECT_KEY, JSON.stringify({
-        left: Math.round(r.left), top: Math.round(r.top),
-        width: Math.round(r.width), height: Math.round(r.height),
-      }));
-    } catch (_) {}
-  });
-
-  window.addEventListener('resize', () => {
-    if (drawer.classList.contains('hidden')) return;
-    if (drawer.style.left) {
-      const r = drawer.getBoundingClientRect();
-      applyAiDrawerRect({ left: r.left, top: r.top, width: r.width, height: r.height });
-    }
-  });
-})();
+/* ==================== 可自由拖动 + 可缩放 AI 帮手浮窗（复用共享 draggable_drawer.js） ==================== */
+const WB_AI_DRAWER_CTRL = typeof window.initDraggableDrawer === 'function'
+  ? window.initDraggableDrawer({
+      drawer: $('aiDrawer'),
+      handle: $('aiDrawerHead'),
+      resizeHandle: $('aiResizeHandle'),
+      storageKey: 'wbAiDrawerRect',
+      minWidth: 340,
+      minHeight: 360,
+      defaultWidth: 430,
+    })
+  : { sync() {}, reset() {} };
 
 function openAiHelperDialog(forceOpen = false) {
   const drawer = $('aiDrawer');
@@ -265,7 +160,7 @@ function openAiHelperDialog(forceOpen = false) {
   if (forceOpen) drawer.classList.remove('hidden');
   else drawer.classList.toggle('hidden');
   if (!drawer.classList.contains('hidden')) {
-    restoreAiDrawerRect();
+    WB_AI_DRAWER_CTRL.sync();
     if (!AGENTS_CACHE) api('/api/agents').then(r => syncAgentsUI(r, OVERVIEW?.config)).catch(() => {});
     api('/api/ai/sessions').then(r => syncAiSessions(r.sessions || [])).catch(() => {});
     updateAiProviderHint();
@@ -315,8 +210,8 @@ if ($('btnTestAgent')) {
     $('aiAgentScanMsg').textContent = `测试 ${target}...`;
     try {
       const res = await api('/api/agents/test', { method: 'POST', body: JSON.stringify({ provider: target }) });
-      $('aiAgentScanMsg').textContent = `✓ ${target} 正常（${res.version || 'OK'}）`;
-    } catch (err) { $('aiAgentScanMsg').textContent = `✗ ${err.message}`; }
+      $('aiAgentScanMsg').textContent = `正常：${target}（${res.version || 'OK'}）`;
+    } catch (err) { $('aiAgentScanMsg').textContent = `异常：${err.message}`; }
   };
 }
 if ($('btnDeepScanAgents')) {
@@ -350,11 +245,11 @@ if ($('btnImportCfgFile')) {
         payload = { env };
       }
       const res = await api('/api/config/import', { method: 'POST', body: JSON.stringify(payload) });
-      $('aiAgentScanMsg').textContent = '✓ ' + (res.message || '导入完成');
+      $('aiAgentScanMsg').textContent = '已完成：' + (res.message || '导入完成');
       showBanner('ai', res.message || '配置/密钥已导入', 4500);
       await refreshOverview();
     } catch (err) {
-      $('aiAgentScanMsg').textContent = '✗ 导入失败：' + err.message;
+      $('aiAgentScanMsg').textContent = '导入失败：' + err.message;
     } finally { $('aiCfgFileInput').value = ''; }
   };
 }

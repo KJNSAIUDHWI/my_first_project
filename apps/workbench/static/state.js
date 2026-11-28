@@ -1,6 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+if (typeof hydrateIcons === 'function') hydrateIcons();
 
 const CLIENT_ID = (() => {
   let id = sessionStorage.getItem('wbClientId');
@@ -176,7 +177,7 @@ function castFocusOnElement(selector, label = '') {
     ring.style.top = Math.max(2, r.top - 5) + 'px';
     ring.style.width = (r.width + 10) + 'px';
     ring.style.height = (r.height + 10) + 'px';
-    if (tag) tag.textContent = '🤖 ' + (label || 'AI 聚焦');
+    if (tag) tag.innerHTML = `${uiIcon('sparkles', 'ui-ico-xs')}<span>${esc(label || 'AI 聚焦')}</span>`;
     ring.classList.remove('hidden');
     clearTimeout(_focusRingTimer);
     _focusRingTimer = setTimeout(() => ring.classList.add('hidden'), 4200);
