@@ -30,13 +30,13 @@ const KEYBIND_LABELS = [
   ["nextLowConf","一键定位下一个低置信度项"],
   ["deleteBox",  "删除选中框（调框模式，也可右键单击删）"],
   ["recognizeBox","调用 API 识别选中框（调框模式大题/姓名框）"],
-  ["cls_0",      "调框类别：姓名学号 (M1)"],
-  ["cls_1",      "调框类别：选择题区 (M1)"],
-  ["cls_4",      "调框类别：非选择题区 (M1)"],
-  ["cls_2",      "调框类别：选择-题号 (M2)"],
-  ["cls_3",      "调框类别：选择-选项 (M2)"],
-  ["cls_5",      "调框类别：大题-框 (M3)"],
-  ["cls_6",      "调框类别：大题-题号 (M3)"],
+  ["cls_0",      "调框类别：姓名学号"],
+  ["cls_1",      "调框类别：选择题区"],
+  ["cls_4",      "调框类别：非选答题区"],
+  ["cls_2",      "调框类别：选择题号"],
+  ["cls_3",      "调框类别：选择选项"],
+  ["cls_5",      "调框类别：单题框"],
+  ["cls_6",      "调框类别：单题题号"],
 ];
 
 function cloneDefaultKeybinds() {
@@ -90,14 +90,75 @@ function matchActionKey(act, keyLower) {
   return pair[0] === keyLower || pair[1] === keyLower;
 }
 
+const LAYER_META = {
+  m1: {
+    label: "版面总区",
+    code: "M1",
+    color: "#2563eb",
+    desc: "整页的三大分区：姓名学号、选择题区、非选答题区（大范围容器框，用虚线与单题区分）。",
+  },
+  m2: {
+    label: "选择细框",
+    code: "M2",
+    color: "#0891b2",
+    desc: "选择题区内部细分的每道小题号与涂卡选项框，平时默认隐藏以保持卷面清爽。",
+  },
+  m3: {
+    label: "非选单题",
+    code: "M3",
+    color: "#7c3aed",
+    desc: "非选答题区内部的每一道填空/简答/计算单题框及其对应印刷题号。",
+  },
+};
+const LAYER_ORDER = ["m1", "m2", "m3"];
+
 const BOX_META = {
-  0: { name: "姓名学号", stage: "m1", color: "#dc2626" },
-  1: { name: "选择题区", stage: "m1", color: "#16a34a" },
-  4: { name: "非选择题区", stage: "m1", color: "#2563eb" },
-  2: { name: "选择-题号", stage: "m2", color: "#0d9488" },
-  3: { name: "选择-选项", stage: "m2", color: "#059669" },
-  5: { name: "大题-框",   stage: "m3", color: "#7c3aed" },
-  6: { name: "大题-题号", stage: "m3", color: "#d97706" },
+  0: {
+    name: "姓名学号",
+    stage: "m1",
+    color: "#dc2626",
+    aiCapable: true,
+    desc: "框选考生姓名、学号或考号条栏。画完选中后按快捷键可直接调用 AI 识别文字。",
+  },
+  1: {
+    name: "选择题区",
+    stage: "m1",
+    color: "#16a34a",
+    isZone: true,
+    desc: "框住整块客观选择题的总区域；系统会在该区域内自动细切每道题号与涂卡选项。",
+  },
+  4: {
+    name: "非选答题区",
+    stage: "m1",
+    color: "#2563eb",
+    isZone: true,
+    desc: "框住整块非选择题的答题总区域（填空、实验、计算等大区）；具体每一道题请用下方「单题框」单独标出。",
+  },
+  2: {
+    name: "选择题号",
+    stage: "m2",
+    color: "#db2777",
+    desc: "框选选择题区里单个印刷题号（如 1、2、3），用于与旁边的涂卡选项一一配对。",
+  },
+  3: {
+    name: "选择选项",
+    stage: "m2",
+    color: "#0891b2",
+    desc: "框选单道选择题的一排涂卡选项（如 [A][B][C][D]），用于识别考生填涂结果。",
+  },
+  5: {
+    name: "单题框",
+    stage: "m3",
+    color: "#7c3aed",
+    aiCapable: true,
+    desc: "框住单独一道填空题或解答题的完整作答区。画完选中后按快捷键可直接调用 AI 识别手写答案。",
+  },
+  6: {
+    name: "单题题号",
+    stage: "m3",
+    color: "#ea580c",
+    desc: "框选单道非选择题的印刷题号（如 13.、20.），让系统自动将题号匹配给对应单题框。",
+  },
 };
 const CLS_ORDER = [0, 1, 4, 2, 3, 5, 6];
 
@@ -120,6 +181,7 @@ const state = {
   pinnedItemId: null,
   overviewFilter: "all", // "all" | "wrong" | "unanswered" | "edited"
   selectedBoxIdx: -1,
+  hoverBoxIdx: -1,
   workingBoxes: [],
   workingItems: [],
   boxesModified: false,

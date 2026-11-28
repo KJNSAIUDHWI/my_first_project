@@ -1,4 +1,78 @@
 /* ==================== 右侧栏（调框工具 / 右侧停靠整页答案总览栏） ==================== */
+let _revTipTimer = 0;
+let _revTipAnchor = null;
+
+function ensureRevHoverTip() {
+  let el = $("revHoverTip");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "revHoverTip";
+    el.className = "rev-hover-tip";
+    el.setAttribute("role", "tooltip");
+    el.setAttribute("aria-hidden", "true");
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function showRevHoverTip(anchor, opts) {
+  if (!anchor || !opts) return;
+  const el = ensureRevHoverTip();
+  _revTipAnchor = anchor;
+  const color = opts.color || "var(--accent)";
+  el.style.setProperty("--tip-color", color);
+  el.innerHTML = `
+    <div class="rev-tip-head">
+      <span class="rev-tip-title">${opts.dot ? `<span class="rev-tip-dot"></span>` : ""}${escHtml(opts.title || "")}</span>
+      ${opts.badge ? `<span class="rev-tip-badge">${escHtml(opts.badge)}</span>` : ""}
+    </div>
+    <div class="rev-tip-body">${escHtml(opts.body || "")}</div>
+  `;
+  const r = anchor.getBoundingClientRect();
+  el.style.left = "-9999px";
+  el.style.top = "-9999px";
+  el.classList.add("show");
+  el.setAttribute("aria-hidden", "false");
+  const tw = el.offsetWidth || 248;
+  const th = el.offsetHeight || 72;
+  let left = Math.round(r.left - tw - 10);
+  if (left < 10) left = Math.round(Math.min(window.innerWidth - tw - 10, r.right + 10));
+  let top = Math.round(r.top + r.height / 2 - th / 2);
+  top = Math.max(58, Math.min(window.innerHeight - th - 12, top));
+  el.style.left = left + "px";
+  el.style.top = top + "px";
+}
+
+function hideRevHoverTip() {
+  clearTimeout(_revTipTimer);
+  _revTipTimer = 0;
+  _revTipAnchor = null;
+  const el = $("revHoverTip");
+  if (el) {
+    el.classList.remove("show");
+    el.setAttribute("aria-hidden", "true");
+  }
+}
+
+function bindRevHoverTip(el, opts) {
+  if (!el || !opts) return;
+  const open = () => {
+    clearTimeout(_revTipTimer);
+    const tip = $("revHoverTip");
+    const alreadyOpen = Boolean(tip && tip.classList.contains("show"));
+    if (alreadyOpen) {
+      showRevHoverTip(el, opts);
+    } else {
+      _revTipTimer = setTimeout(() => showRevHoverTip(el, opts), 85);
+    }
+  };
+  el.addEventListener("mouseenter", open);
+  el.addEventListener("focus", open);
+  el.addEventListener("mouseleave", hideRevHoverTip);
+  el.addEventListener("blur", hideRevHoverTip);
+  el.addEventListener("mousedown", hideRevHoverTip);
+}
+
 function syncRightSidebarVisibility(triggerResize = true) {
   const sb = $("sidebarRight");
   if (!sb) return;
@@ -42,64 +116,104 @@ function compareQuestionItem(a, b) {
 }
 
 function renderRightPanel() {
+  hideRevHoverTip();
   const body = $("rightBody");
   body.innerHTML = "";
   const p = currentPage();
   if (!p) return;
 
   if (state.mode === "edit") {
+    const recogKey = primaryKeyLabel("recognizeBox");
+    const delKey = primaryKeyLabel("deleteBox");
+    const fitKey = primaryKeyLabel("fitCanvas");
+
     const secLayer = document.createElement("div");
     secLayer.className = "sec-card";
     secLayer.innerHTML = `
-      <div class="sec-title"><span>显示标框层级</span></div>
-      <div class="layer-row">
-        <label class="chk-label"><input type="checkbox" id="lyM1" ${state.showLayers.m1 ? "checked" : ""}> M1 版面</label>
-        <label class="chk-label"><input type="checkbox" id="lyM2" ${state.showLayers.m2 ? "checked" : ""}> M2 选择</label>
-        <label class="chk-label"><input type="checkbox" id="lyM3" ${state.showLayers.m3 ? "checked" : ""}> M3 大题</label>
-      </div>
+      <div class="sec-title"><span>显示图层</span><span class="sec-hint">${uiIcon("help", "ui-ico-xs")}<span>悬停看说明</span></span></div>
+      <div class="layer-row" id="editLayerRow"></div>
     `;
-    body.appendChild(secLayer);
-    ["m1", "m2", "m3"].forEach(k => {
-      secLayer.querySelector("#ly" + k.toUpperCase()).onchange = (e) => { state.showLayers[k] = e.target.checked; draw(); };
+    const layerRow = secLayer.querySelector("#editLayerRow");
+    LAYER_ORDER.forEach(k => {
+      const lm = LAYER_META[k];
+      const lbl = document.createElement("label");
+      lbl.className = "layer-pill" + (state.showLayers[k] ? " checked" : "");
+      lbl.innerHTML = `<input type="checkbox" id="ly${k.toUpperCase()}" ${state.showLayers[k] ? "checked" : ""}><span>${escHtml(lm.label)}</span>`;
+      const cb = lbl.querySelector("input");
+      cb.onchange = (e) => {
+        state.showLayers[k] = e.target.checked;
+        lbl.classList.toggle("checked", e.target.checked);
+        draw();
+      };
+      bindRevHoverTip(lbl, {
+        title: lm.label,
+        badge: lm.code + " 图层",
+        color: lm.color,
+        dot: true,
+        body: lm.desc,
+      });
+      layerRow.appendChild(lbl);
     });
+    body.appendChild(secLayer);
 
     const secCls = document.createElement("div");
     secCls.className = "sec-card";
-    secCls.innerHTML = `<div class="sec-title"><span>新建框类别</span></div>`;
-    const clsList = document.createElement("div");
-    clsList.className = "cls-list";
-    CLS_ORDER.forEach(cid => {
-      const m = BOX_META[cid];
-      const btn = document.createElement("button");
-      btn.className = "cls-btn" + (state.activeCls === cid ? " active" : "");
-      btn.innerHTML = `
-        <span class="cls-left"><span class="cls-dot" style="background:${m.color}"></span>${m.name} <small style="color:var(--muted)">(${m.stage.toUpperCase()})</small></span>
-        <span class="cls-key">${primaryKeyLabel("cls_" + cid)}</span>
-      `;
-      btn.onclick = () => {
-        state.activeCls = cid;
-        state.showLayers[m.stage] = true;
-        if (state.selectedBoxIdx >= 0 && state.workingBoxes[state.selectedBoxIdx] && state.workingBoxes[state.selectedBoxIdx].cls !== cid) {
-          state.selectedBoxIdx = -1;
-        }
-        renderRightPanel();
-        draw();
-      };
-      clsList.appendChild(btn);
+    secCls.innerHTML = `<div class="sec-title"><span>新建框类别</span><span class="sec-hint">按数字键快切</span></div>`;
+    LAYER_ORDER.forEach(stageKey => {
+      const lm = LAYER_META[stageKey];
+      const cids = CLS_ORDER.filter(cid => BOX_META[cid] && BOX_META[cid].stage === stageKey);
+      if (!cids.length) return;
+      const grp = document.createElement("div");
+      grp.className = "cls-group";
+      const gHead = document.createElement("div");
+      gHead.className = "cls-group-head";
+      gHead.innerHTML = `<span>${escHtml(lm.label)}</span>`;
+      grp.appendChild(gHead);
+      const clsList = document.createElement("div");
+      clsList.className = "cls-list";
+      cids.forEach(cid => {
+        const m = BOX_META[cid];
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.clsId = String(cid);
+        btn.className = "cls-btn" + (state.activeCls === cid ? " active" : "");
+        btn.style.setProperty("--cls-color", m.color);
+        btn.innerHTML = `
+          <span class="cls-left"><span class="cls-dot${m.isZone ? " zone" : ""}" style="background:${m.color}"></span><span class="cls-name">${escHtml(m.name)}</span></span>
+          <span class="cls-right">${m.aiCapable ? `<span class="cls-ai-tag">AI</span>` : ""}<span class="cls-key">${escHtml(primaryKeyLabel("cls_" + cid))}</span></span>
+        `;
+        btn.onclick = () => {
+          state.activeCls = cid;
+          state.showLayers[m.stage] = true;
+          if (state.selectedBoxIdx >= 0 && state.workingBoxes[state.selectedBoxIdx] && state.workingBoxes[state.selectedBoxIdx].cls !== cid) {
+            state.selectedBoxIdx = -1;
+          }
+          renderRightPanel();
+          draw();
+        };
+        bindRevHoverTip(btn, {
+          title: m.name,
+          badge: m.aiCapable ? `${lm.label} · 按 ${recogKey} 识别` : lm.label,
+          color: m.color,
+          dot: true,
+          body: m.desc,
+        });
+        clsList.appendChild(btn);
+      });
+      grp.appendChild(clsList);
+      secCls.appendChild(grp);
     });
-    secCls.appendChild(clsList);
     body.appendChild(secCls);
 
     const secAct = document.createElement("div");
     secAct.className = "sec-card";
     const selBox = state.selectedBoxIdx >= 0 ? state.workingBoxes[state.selectedBoxIdx] : null;
-    const selMeta = selBox ? (BOX_META[selBox.cls] || { name: String(selBox.cls) }) : null;
+    const selMeta = selBox ? (BOX_META[selBox.cls] || { name: String(selBox.cls), color: "#64748b" }) : null;
     const selConf = selBox ? (typeof selBox.confidence === "number" ? `${(selBox.confidence * 100).toFixed(1)}%` : "人工绘制") : "";
     const selBound = selBox ? findBoundItemForBox(selBox) : null;
     const selCanVlm = Boolean(selBox && isVlmRecogCls(selBox.cls));
     const selHasAns = Boolean(selBound && selBound.transcription);
     const pendingIndices = getPendingRecogBoxIndices();
-    const recogKey = primaryKeyLabel("recognizeBox");
     const busy = state.recognizingBusy;
     const selBtnLabel = busy
       ? `${uiIcon("loader", "ui-ico-sm ui-ico-spin")}<span>正在调用 API…</span>`
@@ -109,24 +223,75 @@ function renderRightPanel() {
 
     secAct.innerHTML = `
       <div class="sec-title"><span>快捷操作</span><span>共 ${state.workingBoxes.length} 框</span></div>
-      ${selBox ? `<div style="font-size:12px;margin-bottom:7px;color:var(--text);">当前选中：<b>${escHtml(selMeta.name)}</b> <span style="color:var(--muted);">（${escHtml(selConf)}）</span>${selBox._needsRecog ? ` <span style="color:#b45309;font-weight:700;">· 待识别</span>` : ""}</div>` : ""}
+      ${selBox ? `<div class="sel-box-pill"><span class="cls-dot${selMeta.isZone ? " zone" : ""}" style="--cls-color:${selMeta.color};background:${selMeta.color}"></span><b>${escHtml(selMeta.name)}</b><span style="color:var(--muted);">（${escHtml(selConf)}）</span>${selBox._needsRecog ? `<span style="color:#b45309;font-weight:700;">· 待识别</span>` : ""}</div>` : ""}
       <div style="display:flex;flex-direction:column;gap:6px;">
         ${selCanVlm ? `<button class="${(selBox._needsRecog || !selHasAns) ? "btn-ai" : "btn-ai-soft"}" id="btnRecogSel" ${busy ? "disabled" : ""} style="width:100%;padding:7px 10px;">${selBtnLabel}</button>` : ""}
-        ${pendingIndices.length > 0 ? `<button class="btn-ai-soft" id="btnRecogPending" ${busy ? "disabled" : ""} style="width:100%;padding:6px 10px;">${busy ? `${uiIcon("loader", "ui-ico-sm ui-ico-spin")}<span>识别中…</span>` : `${uiIcon("sparkles", "ui-ico-sm")}<span>一键识别本页全部待识别框 (${pendingIndices.length})</span>`}</button>` : ""}
+        ${pendingIndices.length > 0 ? `<button class="btn-ai-soft" id="btnRecogPending" ${busy ? "disabled" : ""} style="width:100%;padding:6px 10px;">${busy ? `${uiIcon("loader", "ui-ico-sm ui-ico-spin")}<span>识别中…</span>` : `${uiIcon("sparkles", "ui-ico-sm")}<span>一键识别全部待识别框 (${pendingIndices.length})</span>`}</button>` : ""}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button id="btnUndoBox" ${state.undoStack.length && !busy ? "" : "disabled"} style="flex:1;">${uiIcon("undo", "ui-ico-sm")}<span>撤销 (Ctrl+Z)</span></button>
-          <button class="btn-danger" id="btnDelBox" ${selBox && !busy ? "" : "disabled"} style="flex:1;">${uiIcon("trash", "ui-ico-sm")}<span>${selBound ? "删框并消卡" : "删除框"} (${escHtml(primaryKeyLabel("deleteBox"))})</span></button>
+          <button class="btn-danger" id="btnDelBox" ${selBox && !busy ? "" : "disabled"} style="flex:1;">${uiIcon("trash", "ui-ico-sm")}<span>${selBound ? "删框消卡" : "删除框"} (${escHtml(delKey)})</span></button>
         </div>
       </div>
       <div id="selRecogPreview"></div>
-      <div style="margin-top:8px;font-size:11.5px;color:var(--muted);line-height:1.65;">
-        • <b>左键长按拖动</b>：任意位置（含蓝色大框内）直接画新框；<b>左键单击</b>：选中框后可拖边/角缩放、拖框内移动（<b>Esc</b> 取消选中）<br>
-        • <b>删框即消卡</b>：<b>右键单击框</b>或按 Delete 删框，切回看答案卡片立即消失（<b>Ctrl+Z</b> 连原答案无损恢复）<br>
-        • <b>新框直调 API</b>：画完「大题-框 (6)」或「姓名学号 (1)」后按 <b>${recogKey}</b> 直接调用大模型识别<br>
-        • <b>平移画布</b>：中键/右键拖动 或 空格+左键拖动
+      <div class="edit-tip-wrap">
+        <div class="edit-tip-head"><span>操作说明</span><span>悬停查看详情</span></div>
+        <div class="edit-tip-grid" id="editTipGrid"></div>
       </div>
     `;
+    const tipDefs = [
+      {
+        label: "拖画新框",
+        icon: "crop",
+        title: "左键长按拖动 · 画新框",
+        badge: "含大框内",
+        color: "#2563eb",
+        body: `在任意位置（含蓝色非选答题区内部）按住左键拖动即可画出当前类别新框；画完「单题框」或「姓名学号」按 ${recogKey} 可直调 AI 识别。`,
+      },
+      {
+        label: "单击调框",
+        icon: "crosshair",
+        title: "左键单击 · 选中与微调",
+        badge: "Esc 取消",
+        color: "#7c3aed",
+        body: "单击任意框选中后，可拖四边/四角缩放或拖框内移动；多个框重叠时重复单击可循环切换。",
+      },
+      {
+        label: "右键删框",
+        icon: "trash",
+        title: "右键单击 · 删框并消卡",
+        badge: `或按 ${delKey}`,
+        color: "#dc2626",
+        body: "短按右键点击框（或选中后按 Delete）直接删框，切回看答案对应卡片同步消失；按 Ctrl+Z 可连同原答案无损恢复。",
+      },
+      {
+        label: "平移缩放",
+        icon: "search",
+        title: "平移与缩放画布",
+        badge: `${fitKey} 复位`,
+        color: "#0891b2",
+        body: `中键拖动、右键拖动或按住空格+左键拖动平移画布；滚轮缩放，双击空白处或按 ${fitKey} 适配整页。`,
+      },
+    ];
+    const tipGrid = secAct.querySelector("#editTipGrid");
+    tipDefs.forEach(td => {
+      const pill = document.createElement("span");
+      pill.className = "edit-tip-pill";
+      pill.tabIndex = 0;
+      pill.innerHTML = `${uiIcon(td.icon, "ui-ico-xs")}<span>${escHtml(td.label)}</span>`;
+      bindRevHoverTip(pill, {
+        title: td.title,
+        badge: td.badge,
+        color: td.color,
+        dot: true,
+        body: td.body,
+      });
+      tipGrid.appendChild(pill);
+    });
     body.appendChild(secAct);
+    if (!body._tipScrollBound) {
+      body._tipScrollBound = true;
+      body.addEventListener("scroll", hideRevHoverTip, { passive: true });
+    }
     secAct.querySelector("#btnUndoBox").onclick = undoBoxEdit;
     secAct.querySelector("#btnDelBox").onclick = () => deleteBoxAt(state.selectedBoxIdx);
     const recSelBtn = secAct.querySelector("#btnRecogSel");

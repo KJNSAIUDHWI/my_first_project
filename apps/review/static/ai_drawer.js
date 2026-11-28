@@ -61,13 +61,22 @@ async function applyReviewMirrorStateIfNeeded() {
     const qPage = REV_URL_PARAMS.get("page") || "";
     const qWorkMode = REV_URL_PARAMS.get("work_mode") || "";
     const qOverview = REV_URL_PARAMS.get("overview") || "";
+    const qReviewMode = REV_URL_PARAMS.get("review_mode") || "";
+    const qLayers = REV_URL_PARAMS.get("layers") || "";
+    const qTipCls = REV_URL_PARAMS.get("tip_cls") || "";
     const qItem = REV_URL_PARAMS.get("item") || "";
-    if (qWorkMode && typeof applyWorkModeUI === "function") applyWorkModeUI(qWorkMode, false);
+    if (qWorkMode) {
+      state.workMode = qWorkMode === "iteration" ? "iteration" : "grading";
+      state.showUnmatchedFills = state.workMode === "iteration";
+    }
     if (qOverview === "1" || qOverview === "0") {
-      state.fillDisplayMode = qOverview === "1" ? "sidebar" : "margin";
-      if (typeof syncRightSidebarVisibility === "function") syncRightSidebarVisibility(true);
+      state.fillDisplayMode = qOverview === "1" ? "margin" : "hover";
     } else if (st.fill_display_mode) {
       state.fillDisplayMode = st.fill_display_mode;
+    }
+    if (qLayers) {
+      const setL = new Set(qLayers.toLowerCase().split(",").map(s => s.trim()).filter(Boolean));
+      state.showLayers = { m1: setL.has("m1"), m2: setL.has("m2"), m3: setL.has("m3") };
     }
     if (typeof st.show_overlay === "boolean") state.showOverlay = st.show_overlay;
     if (typeof st.show_conf === "boolean") state.showConf = st.show_conf;
@@ -76,10 +85,33 @@ async function applyReviewMirrorStateIfNeeded() {
       const idx = state.pages.findIndex(p => p.id === targetPid);
       if (idx >= 0 && idx !== state.pageIdx) await _origOpenPage(idx, true, true);
     }
-    if (st.mode && st.mode !== state.mode) _origSetMode(st.mode);
+    const targetMode = (qReviewMode === "edit" || qReviewMode === "view") ? qReviewMode : (st.mode || "");
+    if (targetMode && targetMode !== state.mode) {
+      _origSetMode(targetMode);
+      await new Promise(r => setTimeout(r, 240));
+    } else if (qOverview === "1" || qOverview === "0" || qLayers || qWorkMode) {
+      updateTopbar();
+      renderRightPanel();
+      if (typeof syncRightSidebarVisibility === "function") syncRightSidebarVisibility(true);
+    }
     const targetItem = qItem || st.selected_item_id || "";
     if (targetItem) state.selectedItemId = targetItem;
     draw();
+    if (qTipCls && state.mode === "edit" && typeof showRevHoverTip === "function") {
+      const cid = Number(qTipCls);
+      const btn = document.querySelector(`.cls-btn[data-cls-id="${cid}"]`);
+      const m = BOX_META[cid];
+      if (btn && m) {
+        const lm = LAYER_META[m.stage] || { label: "" };
+        showRevHoverTip(btn, {
+          title: m.name,
+          badge: m.aiCapable ? `${lm.label} · 按 ${primaryKeyLabel("recognizeBox")} 识别` : lm.label,
+          color: m.color,
+          dot: true,
+          body: m.desc,
+        });
+      }
+    }
   } catch {}
   window.__MIRROR_APPLIED__ = true;
 }

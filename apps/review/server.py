@@ -1074,7 +1074,7 @@ class ReviewStore:
                 continue
             kind = VLM_RECOG_CLS.get(cls)
             if not kind:
-                skipped_reasons.append('仅大题-框 (M3) 与姓名学号 (M1) 支持直接调用大模型 API 识别')
+                skipped_reasons.append('仅「单题框」与「姓名学号」支持直接调用大模型 API 识别')
                 continue
             coords = raw.get('box')
             if not isinstance(coords, list) or len(coords) != 4:

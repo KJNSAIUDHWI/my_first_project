@@ -304,11 +304,28 @@ function renderFxCanvasNow() {
   fxCtx.translate(state.tx, state.ty);
   fxCtx.scale(state.scale, state.scale);
 
-  // 1) 绘制常规题框（看答案模式下：填空/姓名框与选择题统一清晰翠绿/科技蓝；当前焦点框在此跳过，交由单框形变层绘制，彻底杜绝套双框！）
-  visibleBoxIndices().forEach(idx => {
+  // 1) 绘制常规题框（看答案模式下统一主色；调框模式下按 版面总区 -> 选择细框 -> 非选单题 -> 悬停/选中 层次叠画，小框缩放下隐藏冗余文字标、悬停/选中即时浮现）
+  const stageRank = { m1: 0, m2: 1, m3: 2 };
+  const drawOrder = visibleBoxIndices();
+  if (state.mode === "edit") {
+    drawOrder.sort((ia, ib) => {
+      const pa = ia === state.selectedBoxIdx ? 3 : (ia === state.hoverBoxIdx ? 2 : 0);
+      const pb = ib === state.selectedBoxIdx ? 3 : (ib === state.hoverBoxIdx ? 2 : 0);
+      if (pa !== pb) return pa - pb;
+      const ma = BOX_META[state.workingBoxes[ia].cls] || {};
+      const mb = BOX_META[state.workingBoxes[ib].cls] || {};
+      const za = ma.isZone ? 0 : 1;
+      const zb = mb.isZone ? 0 : 1;
+      if (za !== zb) return za - zb;
+      return (stageRank[ma.stage] ?? 1) - (stageRank[mb.stage] ?? 1);
+    });
+  }
+  drawOrder.forEach(idx => {
     const b = state.workingBoxes[idx];
     const meta = BOX_META[b.cls] || { color: viewBaseColor, name: String(b.cls) };
     const [x1, y1, x2, y2] = b.box;
+    const bw = x2 - x1;
+    const bh = y2 - y1;
 
     if (state.mode === "view") {
       if (skipFocusId && (b.item_id === skipFocusId || (skipTargetBox && boxIoU(b.box, skipTargetBox) > 0.88))) {
@@ -316,54 +333,79 @@ function renderFxCanvasNow() {
       }
       fxCtx.lineWidth = 1.55 * inv;
       fxCtx.strokeStyle = viewBaseColor;
-      fxCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      fxCtx.strokeRect(x1, y1, bw, bh);
       return;
     }
 
     const isSel = idx === state.selectedBoxIdx;
-    fxCtx.lineWidth = (isSel ? 2.6 : 1.5) * inv;
+    const isHov = idx === state.hoverBoxIdx && !isSel;
+    const isZone = Boolean(meta.isZone);
+    fxCtx.save();
+    fxCtx.fillStyle = meta.color + (isSel ? "20" : (isHov ? "18" : (isZone ? "07" : "0d")));
+    fxCtx.fillRect(x1, y1, bw, bh);
+    fxCtx.lineWidth = (isSel ? 2.6 : (isHov ? 2.2 : (isZone ? 1.75 : 1.55))) * inv;
     fxCtx.strokeStyle = meta.color;
-    fxCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    if (isZone && !isSel) {
+      fxCtx.setLineDash([8 * inv, 4 * inv]);
+    }
+    fxCtx.strokeRect(x1, y1, bw, bh);
+    fxCtx.restore();
     if (isSel) {
-      fxCtx.fillStyle = meta.color + "1c";
-      fxCtx.fillRect(x1, y1, x2 - x1, y2 - y1);
-      const hs = 5 * inv;
+      const hs = 4.8 * inv;
       const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
       const pts = [[x1,y1],[mx,y1],[x2,y1],[x2,my],[x2,y2],[mx,y2],[x1,y2],[x1,my]];
       fxCtx.fillStyle = "#fff";
       fxCtx.strokeStyle = meta.color;
-      fxCtx.lineWidth = 1.6 * inv;
+      fxCtx.lineWidth = 1.75 * inv;
       pts.forEach(([px, py]) => {
-        fxCtx.fillRect(px - hs, py - hs, hs * 2, hs * 2);
-        fxCtx.strokeRect(px - hs, py - hs, hs * 2, hs * 2);
+        fxCtx.beginPath();
+        traceRoundedRect(fxCtx, px - hs, py - hs, hs * 2, hs * 2, 2.2 * inv);
+        fxCtx.fill();
+        fxCtx.stroke();
       });
     }
     const isRecogBusy = Boolean(b._uid && state.recognizingUids[b._uid]);
     if (isRecogBusy) {
       fxCtx.save();
       fxCtx.fillStyle = "rgba(37, 99, 235, 0.14)";
-      fxCtx.fillRect(x1, y1, x2 - x1, y2 - y1);
+      fxCtx.fillRect(x1, y1, bw, bh);
       fxCtx.strokeStyle = "#2563eb";
       fxCtx.lineWidth = 2.6 * inv;
       fxCtx.setLineDash([7 * inv, 4 * inv]);
-      fxCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      fxCtx.strokeRect(x1, y1, bw, bh);
       fxCtx.restore();
     }
-    fxCtx.font = `600 ${Math.max(10, 11.5 * inv)}px sans-serif`;
     const confVal = typeof b.confidence === "number" ? b.confidence : (typeof b.conf === "number" ? b.conf : null);
+    const hasSpecialTag = isSel || isHov || isRecogBusy
+      || Boolean(isVlmRecogCls(b.cls) && b._needsRecog)
+      || Boolean(state.showConf && !b.trusted && confVal !== null && confVal < 0.7);
+    // 平时仅给版面总区(M1)与悬停/选中/待识别/置信度模式画文字标签，避免密排单题与选择题被重复标签遮挡手写
+    const showTag = hasSpecialTag || isZone || b.cls === 0 || state.showConf;
+    if (!showTag) return;
+
+    const fontPx = Math.max(9.5, (isSel || isHov ? 11.2 : 10.4) * inv);
+    fxCtx.font = `600 ${fontPx}px sans-serif`;
     const confSuffix = state.showConf ? (confVal !== null ? ` ${Math.round(confVal * 100)}%` : " 人工") : "";
     const recogSuffix = isRecogBusy ? " · 识别中" : (isVlmRecogCls(b.cls) && b._needsRecog ? " · 待识别" : "");
     const tag = meta.name + confSuffix + recogSuffix;
-    const tw = fxCtx.measureText(tag).width + 8 * inv;
-    const th = 16 * inv;
+    const tw = fxCtx.measureText(tag).width + 9 * inv;
+    const th = (isSel || isHov ? 16.5 : 15) * inv;
+    // 大区容器标签靠右上角放，与左侧单题框/题号彻底错开零重叠
+    const tx = isZone ? Math.max(0, x2 - tw) : x1;
+    const ty = Math.max(0, y1 - th - (isZone ? 1 * inv : 0));
+    fxCtx.save();
+    fxCtx.globalAlpha = (isSel || isHov || isRecogBusy) ? 1.0 : 0.90;
     fxCtx.fillStyle = isRecogBusy
       ? "#2563eb"
       : ((isVlmRecogCls(b.cls) && b._needsRecog)
           ? "#d97706"
           : ((state.showConf && !b.trusted && confVal !== null && confVal < 0.7) ? "#d97706" : meta.color));
-    fxCtx.fillRect(x1, Math.max(0, y1 - th), tw, th);
+    fxCtx.beginPath();
+    traceRoundedRect(fxCtx, tx, ty, tw, th, 3.2 * inv);
+    fxCtx.fill();
     fxCtx.fillStyle = "#fff";
-    fxCtx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
+    fxCtx.fillText(tag, tx + 4.5 * inv, ty + (isSel || isHov ? 12.2 : 11.1) * inv);
+    fxCtx.restore();
   });
 
   // 2) 看答案模式：绘制选择题大区边界与各选择题框（当前焦点选择题同样跳过原直角框，由单框形变层接管）
@@ -725,7 +767,7 @@ async function recognizeBoxIndices(indices) {
   if (!p) return;
   const uniqueIdx = [...new Set((indices || []).filter(i => i >= 0 && i < state.workingBoxes.length))];
   if (!uniqueIdx.length) {
-    toast("请先选中一个大题-框 (M3) 或姓名学号框 (M1)", 2200);
+    toast("请先选中一个「单题框」或「姓名学号」框", 2200);
     return;
   }
   const targets = [];
@@ -743,7 +785,7 @@ async function recognizeBoxIndices(indices) {
     uidList.push(b._uid);
   });
   if (!targets.length) {
-    toast("仅「大题-框 (M3)」与「姓名学号 (M1)」支持直接调用视觉大模型 API 识别", 2600);
+    toast("仅「单题框」与「姓名学号」支持直接调用视觉大模型 API 识别", 2600);
     return;
   }
 

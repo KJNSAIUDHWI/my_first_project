@@ -17,6 +17,7 @@ host.addEventListener("wheel", (ev) => {
 }, { passive: false });
 
 host.addEventListener("mousedown", (ev) => {
+  if (typeof hideRevHoverTip === "function") hideRevHoverTip();
   if (!state.img) return;
   const rect = syncHostMetrics();
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
@@ -158,7 +159,17 @@ function processHoverMove(ev) {
     if (selHit && selHit.kind === "resize") host.style.cursor = edgeToCursor(selHit.dir);
     else if (selHit && selHit.kind === "move") host.style.cursor = "move";
     else host.style.cursor = "crosshair";
+    const hovHit = hitTestAnyBox(ix, iy);
+    const nextHov = hovHit ? hovHit.idx : -1;
+    if (nextHov !== state.hoverBoxIdx) {
+      state.hoverBoxIdx = nextHov;
+      scheduleFxOnly();
+    }
     return;
+  }
+  if (state.hoverBoxIdx !== -1) {
+    state.hoverBoxIdx = -1;
+    scheduleFxOnly();
   }
   if (state.mode !== "view") return;
 
@@ -395,6 +406,10 @@ window.addEventListener("mouseup", () => {
 });
 
 host.addEventListener("mouseleave", (ev) => {
+  if (state.hoverBoxIdx !== -1) {
+    state.hoverBoxIdx = -1;
+    scheduleFxOnly();
+  }
   const rel = ev && ev.relatedTarget;
   if (rel && rel.closest && rel.closest(".fill-hover-pop")) return;
   if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
@@ -488,7 +503,9 @@ async function submitCurrentPage(goNext = true) {
 }
 
 function setMode(m) {
+  if (typeof hideRevHoverTip === "function") hideRevHoverTip();
   state.mode = m;
+  state.hoverBoxIdx = -1;
   state.editingPopItemId = null;
   if (m === "edit") {
     state.pinnedItemId = null;
