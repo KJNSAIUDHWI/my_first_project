@@ -6,33 +6,21 @@ let LAST_PREFLIGHT_BATCH = '';
 let CURRENT_SCHEMA_OBJ = null;
 
 function playModeWave(mode, originPt) {
-  const wave = $('modeWaveOverlay');
-  if (!wave) return;
   const pill = $('workModePill');
-  let wx = window.innerWidth * 0.5, wy = 36;
-  if (originPt && Number.isFinite(originPt.x) && Number.isFinite(originPt.y)) {
-    wx = originPt.x; wy = originPt.y;
-  } else if (pill) {
-    const r = pill.getBoundingClientRect();
-    wx = r.left + r.width / 2;
-    wy = r.top + r.height / 2;
-  }
-  wave.style.setProperty('--wx', Math.round(wx) + 'px');
-  wave.style.setProperty('--wy', Math.round(wy) + 'px');
-  wave.className = 'mode-wave ' + (mode === 'iteration' ? 'cool' : 'warm');
-  void wave.offsetWidth;
-  wave.classList.add('play');
-  clearTimeout(wave._wt);
-  wave._wt = setTimeout(() => wave.classList.remove('play'), 620);
+  const pt = (originPt && Number.isFinite(originPt.x) && Number.isFinite(originPt.y))
+    ? originPt
+    : clickOriginFromEvent(null, pill);
+  playFallbackWave(mode === 'iteration' ? 'cool' : 'warm', pt);
 }
 
 function applyWorkModeDOM(m, animateStepper = false) {
   const isGrading = m === 'grading';
+  const modeChanged = document.body.dataset.workMode !== m;
   WORK_MODE = m;
   document.body.dataset.workMode = m;
   const pill = $('workModePill');
   if (pill) {
-    pill.dataset.mode = m;
+    if (pill.dataset.mode !== m) pill.dataset.mode = m;
     pill.querySelectorAll('.mode-cap-btn').forEach(btn => {
       const on = btn.dataset.workMode === m;
       btn.classList.toggle('active', on);
@@ -40,7 +28,7 @@ function applyWorkModeDOM(m, animateStepper = false) {
     });
   }
   const stepper = $('hostStepper');
-  if (stepper) {
+  if (stepper && stepper.classList.contains('mode-grading') !== isGrading) {
     stepper.classList.toggle('no-anim', !animateStepper);
     if (!animateStepper) void stepper.offsetWidth;
     stepper.classList.toggle('mode-grading', isGrading);
@@ -63,9 +51,13 @@ function applyWorkModeDOM(m, animateStepper = false) {
   if ($('iterIngestMeta')) $('iterIngestMeta').classList.toggle('hidden', isGrading);
   if ($('btnDoIngest')) $('btnDoIngest').classList.toggle('hidden', isGrading);
   if ($('btnIngestAndRun')) {
-    $('btnIngestAndRun').innerHTML = isGrading
+    const wantHtml = isGrading
       ? `${uiIcon('play', 'ui-ico')}<span>开始改试卷</span>`
       : `${uiIcon('play', 'ui-ico')}<span>导入并开始识别</span>`;
+    if ($('btnIngestAndRun').dataset.mode !== m) {
+      $('btnIngestAndRun').dataset.mode = m;
+      $('btnIngestAndRun').innerHTML = wantHtml;
+    }
   }
   if ($('btnEnvPill')) $('btnEnvPill').classList.toggle('hidden', !OVERVIEW?.is_host || !isGrading);
 
@@ -75,7 +67,7 @@ function applyWorkModeDOM(m, animateStepper = false) {
     secWrap.classList.toggle('hidden', !OVERVIEW.is_host || isGrading || !hasSec);
   }
   if (isGrading && (CURRENT_VIEW === 'train' || CURRENT_VIEW === 'check')) {
-    setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+    applyViewDOM(OVERVIEW?.active_batch ? 'overview' : 'ingest');
   }
   if ($('btnBackFromCheck')) {
     $('btnBackFromCheck').classList.toggle('hidden', !(CURRENT_VIEW === 'check' && isGrading));
@@ -83,8 +75,9 @@ function applyWorkModeDOM(m, animateStepper = false) {
   if ($('topSub') && OVERVIEW?.is_host) {
     $('topSub').textContent = isGrading ? '改试卷模式 · 暖色轻量批改' : '模型迭代模式 · 冷色训练调优';
   }
-  if (CURRENT_VIEW === 'check' && typeof drawEnvArchConnectors === 'function') {
-    requestAnimationFrame(drawEnvArchConnectors);
+  if (modeChanged) {
+    if (CURRENT_VIEW === 'check' && typeof drawEnvArchConnectors === 'function') drawEnvArchConnectors();
+    if (CURRENT_VIEW === 'overview' && typeof PipeFlow !== 'undefined') PipeFlow.relayout(true);
   }
 }
 
@@ -99,57 +92,17 @@ function applyWorkModeUI(mode, animate = false, originPt = null) {
     applyWorkModeDOM(m, false);
     return;
   }
+  const pt = (originPt && Number.isFinite(originPt.x) && Number.isFinite(originPt.y))
+    ? originPt
+    : clickOriginFromEvent(null, $('workModePill'));
 
-  const pill = $('workModePill');
-  let wx = window.innerWidth * 0.5, wy = 36;
-  if (originPt && Number.isFinite(originPt.x) && Number.isFinite(originPt.y)) {
-    wx = originPt.x; wy = originPt.y;
-  } else if (pill) {
-    const r = pill.getBoundingClientRect();
-    wx = r.left + r.width / 2;
-    wy = r.top + r.height / 2;
-  }
-
-  // 现代浏览器使用 View Transitions API：从模式胶囊圆心平滑扩散圆形主题水波，同时双翼步骤条自然展开/收拢
-  if (typeof document.startViewTransition === 'function' && !IS_MIRROR_MODE) {
-    const stepper = $('hostStepper');
-    const prevGrading = stepper ? stepper.classList.contains('mode-grading') : !isGrading;
-    const maxR = Math.hypot(Math.max(wx, window.innerWidth - wx), Math.max(wy, window.innerHeight - wy));
-    const vt = document.startViewTransition(() => {
-      applyWorkModeDOM(m, false);
-      // 保持旧步骤翼状态进入新帧，待水波启动瞬间再触发 Flex 双翼平滑滑展/收拢
-      if (stepper && prevGrading !== isGrading) {
-        stepper.classList.add('no-anim');
-        stepper.classList.toggle('mode-grading', prevGrading);
-      }
-    });
-    vt.ready.then(() => {
-      document.documentElement.animate(
-        { clipPath: [`circle(0px at ${wx}px ${wy}px)`, `circle(${maxR.toFixed(0)}px at ${wx}px ${wy}px)`] },
-        { duration: 540, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' }
-      );
-      if (stepper && prevGrading !== isGrading) {
-        requestAnimationFrame(() => {
-          stepper.classList.remove('no-anim');
-          void stepper.offsetWidth;
-          stepper.classList.toggle('mode-grading', isGrading);
-        });
-      }
-    }).catch(() => {
-      if (stepper) {
-        stepper.classList.remove('no-anim');
-        stepper.classList.toggle('mode-grading', isGrading);
-      }
-    });
-    return;
-  }
-
-  applyWorkModeDOM(m, true);
-  playModeWave(m, { x: wx, y: wy });
-  document.body.classList.remove('mode-switching');
-  void document.body.offsetWidth;
-  document.body.classList.add('mode-switching');
-  setTimeout(() => document.body.classList.remove('mode-switching'), 340);
+  // View Transitions 下一次性在快照内更新主题与步骤条（0 次逐帧重排），水波从胶囊圆心向双翼平滑展开
+  runCircularTransition({
+    originPt: pt,
+    durationMs: 500,
+    waveTone: m === 'iteration' ? 'cool' : 'warm',
+    mutateDOM: () => applyWorkModeDOM(m, typeof document.startViewTransition !== 'function'),
+  });
 }
 
 document.querySelectorAll('#workModePill .mode-cap-btn').forEach(btn => {
@@ -179,14 +132,17 @@ function renderSchemaStrip(data) {
   const badge = $('schemaBadge');
   const meta = $('schemaMetaText');
   const csvBtn = $('btnExportGradesCsv');
+  const uploadBtn = $('btnUploadAnswerPdf');
   if (s.configured) {
     badge.className = 'badge ok';
     badge.textContent = `已配答案 · 满分 ${s.total_possible_score || 0}`;
     meta.textContent = `选择 ${s.choice_count || 0} 题 · 填空 ${s.fill_blank_count || 0} 空（多选漏选 ${Math.round((s.multi_choice_partial_ratio ?? 0.5) * 100)}%）`;
+    if (uploadBtn) uploadBtn.className = 'btn xs';
   } else {
     badge.className = 'badge warn';
     badge.textContent = '未配答案';
     meta.textContent = '仍可直接识别；把答案 PDF / 图片拖到这里即可自动判分';
+    if (uploadBtn) uploadBtn.className = 'btn soft xs';
   }
   if (csvBtn) csvBtn.classList.toggle('hidden', !ab.has_recognition);
   const ratio = Number(s.multi_choice_partial_ratio ?? 0.5);

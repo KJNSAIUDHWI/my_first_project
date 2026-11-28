@@ -6,7 +6,7 @@
 <title>自动改卷工作台</title>
 <link rel="stylesheet" href="/static/workbench.css">
 </head>
-<body data-work-mode="grading">
+<body data-work-mode="grading" data-view="overview">
 <div id="modeWaveOverlay" class="mode-wave" aria-hidden="true"></div>
 <div class="wrap">
   <header class="topbar">
@@ -409,7 +409,7 @@
         </div>
         <div class="row" style="gap:6px">
           <input id="answerPdfInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.json" class="hidden">
-          <button class="btn primary xs" id="btnUploadAnswerPdf" type="button" title="选择或拖拽答案 PDF/图片，默认直接唤醒 AI 帮手整理"><i data-ico="upload" class="ui-ico-xs"></i><span>贴入答案</span></button>
+          <button class="btn soft xs" id="btnUploadAnswerPdf" type="button" title="选择或拖拽答案 PDF/图片，默认直接唤醒 AI 帮手整理"><i data-ico="upload" class="ui-ico-xs"></i><span>贴入答案</span></button>
           <button class="btn xs" id="btnToggleSchemaAdv" type="button"><i data-ico="sliders" class="ui-ico-xs"></i><span>判分规则</span></button>
           <button class="btn xs hidden" id="btnExportGradesCsv" type="button" title="导出带总分与逐题得分的 Excel 成绩单 CSV"><i data-ico="barChart" class="ui-ico-xs"></i><span>导出成绩 CSV</span></button>
         </div>

@@ -88,11 +88,21 @@ const PipeFlow = (() => {
     { id: 'out_review', from: 'nodeOut',    fromSide: 'bottom', fromRatio: 0.5,  to: 'nodeReview', toSide: 'top',   toRatio: 0.5,  color: 'green',  vertical: true },
   ];
 
-  const PALETTE = {
-    green:  { fill: '#10b981', glow: 'rgba(16,185,129,0.34)', textBg: '#ecfdf5', textBorder: '#34d399', textColor: '#065f46', pulseCls: 'recv-pulse' },
-    blue:   { fill: '#2563eb', glow: 'rgba(37,99,235,0.32)',  textBg: '#eff6ff', textBorder: '#60a5fa', textColor: '#1e40af', pulseCls: 'recv-pulse-blue' },
-    violet: { fill: '#7c3aed', glow: 'rgba(124,58,237,0.32)', textBg: '#f5f3ff', textBorder: '#a78bfa', textColor: '#5b21b6', pulseCls: 'recv-pulse' },
-  };
+  function getFlowPalette() {
+    const cs = getComputedStyle(document.body);
+    const primary = (cs.getPropertyValue('--primary') || '#b8531b').trim();
+    const primarySoft = (cs.getPropertyValue('--primary-soft') || '#fdf1e6').trim();
+    const primaryBorder = (cs.getPropertyValue('--primary-border') || '#ecc8a6').trim();
+    const primaryRing = (cs.getPropertyValue('--primary-ring') || 'rgba(184,83,27,0.28)').trim();
+    const okEdge = (cs.getPropertyValue('--ok-edge') || '#7fa585').trim();
+    const isIter = document.body.dataset.workMode === 'iteration';
+    return {
+      arrMain: isIter ? primary : okEdge,
+      green:  { fill: primary, glow: primaryRing, textBg: primarySoft, textBorder: primaryBorder, textColor: primary, pulseCls: 'recv-pulse' },
+      blue:   { fill: '#2563eb', glow: 'rgba(37,99,235,0.32)',  textBg: '#eff6ff', textBorder: '#60a5fa', textColor: '#1e40af', pulseCls: 'recv-pulse-blue' },
+      violet: { fill: '#7c3aed', glow: 'rgba(124,58,237,0.32)', textBg: '#f5f3ff', textBorder: '#a78bfa', textColor: '#5b21b6', pulseCls: 'recv-pulse' },
+    };
+  }
 
   let edgeEls = {};
   let edgeMeta = {};
@@ -103,10 +113,11 @@ const PipeFlow = (() => {
   let lastLayoutKey = '';
 
   function ensureDefs(svg) {
+    const pal = getFlowPalette();
     const defs = svgEl('defs');
     [
       ['arrIdle', '#cbd5e1'],
-      ['arrGreen', '#16a34a'],
+      ['arrGreen', pal.arrMain],
       ['arrBlue', '#2563eb'],
       ['arrViolet', '#7c3aed'],
       ['arrWarn', '#d97706'],
@@ -200,8 +211,9 @@ const PipeFlow = (() => {
   function emitPacket(edgeId, deltaLabel = '', count = 1) {
     const ref = edgeEls[edgeId];
     const pSvg = $('pipeParticleSvg');
-    if (!ref || !pSvg || ARCH_COLLAPSED) return;
-    const pal = PALETTE[ref.cfg.color] || PALETTE.green;
+    if (!ref || !pSvg || ARCH_COLLAPSED || document.hidden) return;
+    const palMap = getFlowPalette();
+    const pal = palMap[ref.cfg.color] || palMap.green;
 
     // 管道瞬时高亮
     ref.burst.classList.add('flash');

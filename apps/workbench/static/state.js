@@ -44,9 +44,89 @@ function highlightElement(id, durationMs = 2600) {
   el._st = setTimeout(() => el.classList.remove('spotlight'), durationMs);
 }
 
-function setView(view) {
-  if (!OVERVIEW?.is_host && view !== 'overview') view = 'overview';
+let ACTIVE_VT = null;
+
+function clickOriginFromEvent(ev, fallbackEl = null) {
+  if (ev && Number.isFinite(ev.clientX) && Number.isFinite(ev.clientY) && (ev.clientX !== 0 || ev.clientY !== 0)) {
+    return { x: ev.clientX, y: ev.clientY };
+  }
+  const el = fallbackEl || ev?.currentTarget || null;
+  if (el && typeof el.getBoundingClientRect === 'function') {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 || r.height > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  return { x: window.innerWidth * 0.5, y: 56 };
+}
+
+function playFallbackWave(tone, originPt) {
+  const wave = $('modeWaveOverlay');
+  if (!wave) return;
+  const wx = Number.isFinite(originPt?.x) ? originPt.x : window.innerWidth * 0.5;
+  const wy = Number.isFinite(originPt?.y) ? originPt.y : 56;
+  wave.style.setProperty('--wx', Math.round(wx) + 'px');
+  wave.style.setProperty('--wy', Math.round(wy) + 'px');
+  wave.className = 'mode-wave ' + (tone === 'cool' ? 'cool' : 'warm');
+  void wave.offsetWidth;
+  wave.classList.add('play');
+  clearTimeout(wave._wt);
+  wave._wt = setTimeout(() => wave.classList.remove('play'), 540);
+}
+
+/**
+ * 高帧率零重排圆形水波揭屏引擎（供模式切换与步骤切换共用）：
+ * - 切换瞬间锁定 CSS 过渡（html.vt-active），确保新快照仅光栅化 1 次、全程 GPU 合成层动画
+ * - 连续快速点击自动安全中断上一次动画（skipTransition），杜绝排队掉帧
+ * - 降级路径使用纯 transform:scale + opacity 合成层波纹
+ */
+function runCircularTransition({ originPt = null, durationMs = 380, waveTone = 'warm', mutateDOM, fallbackAfter = null }) {
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion || IS_MIRROR_MODE || typeof mutateDOM !== 'function') {
+    if (typeof mutateDOM === 'function') mutateDOM();
+    return;
+  }
+  const wx = Number.isFinite(originPt?.x) ? originPt.x : window.innerWidth * 0.5;
+  const wy = Number.isFinite(originPt?.y) ? originPt.y : 56;
+
+  if (typeof document.startViewTransition === 'function') {
+    if (ACTIVE_VT) {
+      try { ACTIVE_VT.skipTransition(); } catch (_) {}
+      ACTIVE_VT = null;
+    }
+    const maxR = Math.hypot(Math.max(wx, window.innerWidth - wx), Math.max(wy, window.innerHeight - wy));
+    document.documentElement.classList.add('vt-active');
+    let vt;
+    try {
+      vt = document.startViewTransition(() => {
+        mutateDOM();
+      });
+    } catch (_) {
+      document.documentElement.classList.remove('vt-active');
+      mutateDOM();
+      return;
+    }
+    ACTIVE_VT = vt;
+    vt.ready.then(() => {
+      if (ACTIVE_VT !== vt) return;
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${wx.toFixed(0)}px ${wy.toFixed(0)}px)`, `circle(${maxR.toFixed(0)}px at ${wx.toFixed(0)}px ${wy.toFixed(0)}px)`] },
+        { duration: durationMs, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' }
+      );
+    }).catch(() => {});
+    vt.finished.finally(() => {
+      if (ACTIVE_VT === vt) ACTIVE_VT = null;
+      document.documentElement.classList.remove('vt-active');
+    });
+    return;
+  }
+
+  mutateDOM();
+  if (typeof fallbackAfter === 'function') fallbackAfter();
+  playFallbackWave(waveTone, { x: wx, y: wy });
+}
+
+function applyViewDOM(view) {
   CURRENT_VIEW = view;
+  document.body.dataset.view = view;
   $('viewCheck').classList.toggle('hidden', view !== 'check');
   $('viewIngest').classList.toggle('hidden', view !== 'ingest');
   $('viewOverview').classList.toggle('hidden', view !== 'overview');
@@ -57,10 +137,29 @@ function setView(view) {
   document.querySelectorAll('.step-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.view === view);
   });
-  requestAnimationFrame(() => {
-    if (view === 'check') drawEnvArchConnectors();
-    if (view === 'overview') PipeFlow.relayout();
-  });
+  // 同步预排 SVG 连线，确保进入新快照前箭头已完全就位，水波展开期间零重排零闪现
+  if (view === 'check' && typeof drawEnvArchConnectors === 'function') drawEnvArchConnectors();
+  if (view === 'overview' && typeof PipeFlow !== 'undefined') PipeFlow.relayout();
+}
+
+function setView(view, opts = null) {
+  if (!OVERVIEW?.is_host && view !== 'overview') view = 'overview';
+  const animate = Boolean(opts && opts.animate && view !== CURRENT_VIEW);
+  if (animate) {
+    const tone = (typeof WORK_MODE === 'string' && WORK_MODE === 'iteration') ? 'cool' : 'warm';
+    runCircularTransition({
+      originPt: opts.originPt || null,
+      durationMs: opts.durationMs || 380,
+      waveTone: tone,
+      mutateDOM: () => applyViewDOM(view),
+    });
+  } else {
+    applyViewDOM(view);
+    requestAnimationFrame(() => {
+      if (view === 'check' && typeof drawEnvArchConnectors === 'function') drawEnvArchConnectors();
+      if (view === 'overview' && typeof PipeFlow !== 'undefined') PipeFlow.relayout();
+    });
+  }
   scheduleReportUiState();
 }
 

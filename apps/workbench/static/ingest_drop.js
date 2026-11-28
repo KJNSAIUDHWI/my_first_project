@@ -22,13 +22,18 @@ function readFileAsDataUrl(file) {
 function spawnCelebrateBurst(hostEl) {
   if (!hostEl) return;
   hostEl.innerHTML = '';
+  const isIter = typeof WORK_MODE === 'string' && WORK_MODE === 'iteration';
+  const c1 = isIter ? '#2563eb' : '#b8531b';
+  const c2 = isIter ? '#0284c7' : '#d97706';
+  const c3 = isIter ? '#0e7490' : '#4a7852';
+  const c4 = isIter ? '#4f46e5' : '#e07a24';
   const pieces = [
-    { ico: 'sparkles', x1: -10, y1: -16, x2: -44, y2: -54, r1: '-18deg', r2: '-42deg', color: '#16a34a' },
-    { ico: 'sparkles', x1: 8,   y1: -20, x2: 26,  y2: -58, r1: '15deg',  r2: '45deg',  color: '#d97706' },
-    { ico: 'check',    x1: -24, y1: -8,  x2: -74, y2: -34, r1: '-25deg', r2: '-60deg', color: '#15803d' },
-    { ico: 'check',    x1: -2,  y1: -24, x2: -8,  y2: -64, r1: '0deg',   r2: '12deg',  color: '#16a34a' },
-    { ico: 'sparkles', x1: 14,  y1: -8,  x2: 42,  y2: -28, r1: '20deg',  r2: '55deg',  color: '#2563eb' },
-    { ico: 'zap',      x1: -18, y1: 6,   x2: -58, y2: 14,  r1: '-10deg', r2: '-35deg', color: '#f59e0b' },
+    { ico: 'sparkles', x1: -10, y1: -16, x2: -44, y2: -54, r1: '-18deg', r2: '-42deg', color: c1 },
+    { ico: 'sparkles', x1: 8,   y1: -20, x2: 26,  y2: -58, r1: '15deg',  r2: '45deg',  color: c2 },
+    { ico: 'check',    x1: -24, y1: -8,  x2: -74, y2: -34, r1: '-25deg', r2: '-60deg', color: c3 },
+    { ico: 'check',    x1: -2,  y1: -24, x2: -8,  y2: -64, r1: '0deg',   r2: '12deg',  color: c3 },
+    { ico: 'sparkles', x1: 14,  y1: -8,  x2: 42,  y2: -28, r1: '20deg',  r2: '55deg',  color: c4 },
+    { ico: 'zap',      x1: -18, y1: 6,   x2: -58, y2: 14,  r1: '-10deg', r2: '-35deg', color: c2 },
   ];
   pieces.forEach((p, idx) => {
     const sp = document.createElement('span');
@@ -459,7 +464,7 @@ async function doIngest(autoStart = false) {
     if (autoStart) {
       await triggerRecognize();
     } else {
-      setView('overview');
+      setView('overview', { animate: true, originPt: clickOriginFromEvent(null, $('btnDoIngest')) });
     }
   } catch (err) {
     $('ingestMsg').textContent = '失败：' + err.message;

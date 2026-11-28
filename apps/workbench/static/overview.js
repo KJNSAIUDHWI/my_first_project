@@ -424,7 +424,7 @@ function renderPipelineDashboard(data) {
     const rBtn = $('btnDiagRetryNow');
     if (rBtn) rBtn.onclick = () => $('btnRetryFailed').click();
     const gBtn = $('btnDiagGoCheck');
-    if (gBtn) gBtn.onclick = () => { setView('check'); $('btnRecheck').click(); };
+    if (gBtn) gBtn.onclick = e => { setView('check', { animate: true, originPt: clickOriginFromEvent(e, gBtn) }); $('btnRecheck').click(); };
     const vBtn = $('btnDiagOpenVlm');
     if (vBtn) vBtn.onclick = () => openVlmDialog();
     const lBtn = $('btnDiagViewLog');
@@ -536,8 +536,11 @@ function renderOverview(data) {
   ).join('') || '<option value="">暂无批次</option>';
 
   const job = data.pipeline_job || {};
-  $('btnStartRecognize').disabled = !!job.running || !ab;
-  $('btnStartRecognize').textContent = job.running ? '识别中...' : (ab?.has_recognition ? '重新识别' : '开始识别');
+  const recBtn = $('btnStartRecognize');
+  recBtn.disabled = !!job.running || !ab;
+  recBtn.textContent = job.running ? '识别中...' : (ab?.has_recognition ? '重新识别' : '开始识别');
+  // 已有识别结果时将「重新识别」降为次级按钮，把视觉主 CTA 焦点留给下方「进去审 →」
+  recBtn.className = (!ab?.has_recognition && !job.running) ? 'btn primary sm' : 'btn sm';
 
   renderPipelineDashboard(data);
   if (data.agents) syncAgentsUI(data.agents, data.config);
@@ -737,15 +740,15 @@ $('btnSaveName').onclick = () => { const v = $('nameInput').value.trim(); if (!v
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnSaveName').click(); });
 
 if ($('btnEnvPill')) {
-  $('btnEnvPill').onclick = async () => {
-    setView('check');
+  $('btnEnvPill').onclick = async e => {
+    setView('check', { animate: true, originPt: clickOriginFromEvent(e, $('btnEnvPill')) });
     if (!CHECK) {
-      try { renderCheck(await api('/api/check')); } catch (e) { alert(e.message); }
+      try { renderCheck(await api('/api/check')); } catch (err) { alert(err.message); }
     }
   };
 }
 if ($('btnBackFromCheck')) {
-  $('btnBackFromCheck').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+  $('btnBackFromCheck').onclick = e => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest', { animate: true, originPt: clickOriginFromEvent(e, $('btnBackFromCheck')) });
 }
 if ($('btnLanShare')) $('btnLanShare').onclick = () => $('lanDialog')?.showModal();
 if ($('btnCloseLanDlg')) $('btnCloseLanDlg').onclick = () => $('lanDialog')?.close();
@@ -759,11 +762,12 @@ if ($('btnCloseMemDlg')) $('btnCloseMemDlg').onclick = () => $('memPreflightDial
 if ($('btnCloseSchemaRuleDlg')) $('btnCloseSchemaRuleDlg').onclick = () => $('schemaRuleDialog')?.close();
 
 document.querySelectorAll('.step-tab').forEach(btn => {
-  btn.onclick = async () => {
-    setView(btn.dataset.view);
-    if (btn.dataset.view === 'check' && !CHECK) {
-      try { renderCheck(await api('/api/check')); } catch (e) { alert(e.message); }
-    } else if (btn.dataset.view === 'train') {
+  btn.onclick = async e => {
+    const targetView = btn.dataset.view;
+    setView(targetView, { animate: true, originPt: clickOriginFromEvent(e, btn) });
+    if (targetView === 'check' && !CHECK) {
+      try { renderCheck(await api('/api/check')); } catch (err) { alert(err.message); }
+    } else if (targetView === 'train') {
       await refreshTrainOverview();
     }
   };
@@ -784,7 +788,7 @@ const _openWeightOrDetails = () => {
   if (el) el.onclick = _openWeightOrDetails;
 });
 $('envNodeVlm').onclick = () => openVlmDialog();
-$('envNodeReview').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+$('envNodeReview').onclick = e => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest', { animate: true, originPt: clickOriginFromEvent(e, $('envNodeReview')) });
 
 // Step 3 架构图「⑦ 人工复审」节点点击直达 8904 + 真实数据脉冲
 $('nodeReview').onclick = () => {
@@ -872,9 +876,9 @@ $('btnApplyBench').onclick = async () => {
   } catch (err) { alert('应用失败：' + err.message); }
 };
 
-$('btnToIngest').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
-$('btnSkipIngest').onclick = () => setView('overview');
-$('btnGoIngestNew').onclick = () => setView('ingest');
+$('btnToIngest').onclick = e => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest', { animate: true, originPt: clickOriginFromEvent(e, $('btnToIngest')) });
+$('btnSkipIngest').onclick = e => setView('overview', { animate: true, originPt: clickOriginFromEvent(e, $('btnSkipIngest')) });
+$('btnGoIngestNew').onclick = e => setView('ingest', { animate: true, originPt: clickOriginFromEvent(e, $('btnGoIngestNew')) });
 $('btnRefreshOverview').onclick = refreshOverview;
 
 $('btnRepairPip').onclick = async () => {
