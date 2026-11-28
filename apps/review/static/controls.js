@@ -223,6 +223,9 @@ $("btnFillDisplayMode").onclick = () => {
   renderRightPanel();
   syncRightSidebarVisibility(true);
   draw();
+  if (state.fillDisplayMode === "margin" && state.selectedItemId && typeof centerOverviewCard === "function") {
+    setTimeout(() => centerOverviewCard(state.selectedItemId, 0), 60);
+  }
   toast(state.fillDisplayMode === "margin"
     ? "已展开右侧答案总览栏（卷面悬停与点框固定同样可用）"
     : "已收起右侧答案总览栏", 2000);

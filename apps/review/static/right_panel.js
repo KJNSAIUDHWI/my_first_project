@@ -20,7 +20,8 @@ function refreshOverviewPanel() {
 }
 
 function syncOverviewHighlightOnly(scrollToSelected = false) {
-  drawCanvasOnly();
+  if (typeof drawFxCanvas === "function") drawFxCanvas();
+  else drawCanvasOnly();
   if (typeof syncFocusHighlightClasses === "function") {
     syncFocusHighlightClasses(scrollToSelected);
   }

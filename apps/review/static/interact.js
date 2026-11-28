@@ -4,7 +4,7 @@ let spaceDown = false;
 host.addEventListener("wheel", (ev) => {
   ev.preventDefault();
   if (!state.img) return;
-  const rect = host.getBoundingClientRect();
+  const rect = getHostMetrics();
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
   const factor = ev.deltaY < 0 ? 1.14 : 1 / 1.14;
   const nextScale = Math.max(0.08, Math.min(8, state.scale * factor));
@@ -13,12 +13,12 @@ host.addEventListener("wheel", (ev) => {
   state.tx = sx - ix * state.scale;
   state.ty = sy - iy * state.scale;
   $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
-  draw();
+  scheduleDraw();
 }, { passive: false });
 
 host.addEventListener("mousedown", (ev) => {
   if (!state.img) return;
-  const rect = host.getBoundingClientRect();
+  const rect = syncHostMetrics();
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
   const [ix, iy] = screenToImg(sx, sy);
 
@@ -139,73 +139,90 @@ host.addEventListener("mousedown", (ev) => {
   };
 });
 
-window.addEventListener("mousemove", (ev) => {
-  if (!state.img) return;
-  const rect = host.getBoundingClientRect();
+let _hoverMoveRaf = 0;
+let _lastMoveEv = null;
+function processHoverMove(ev) {
+  if (!state.img || state.drag) return;
+  const rect = getHostMetrics();
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
   const [ix, iy] = screenToImg(sx, sy);
 
-  // 未拖拽时更新光标：局部真子集框选模式显示十字准星
-  if (!state.drag) {
-    if (state.subboxTarget) {
-      host.style.cursor = spaceDown ? "grab" : "crosshair";
-      return;
-    }
-    if (state.mode === "edit" && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
-      if (spaceDown) { host.style.cursor = "grab"; return; }
-      const selHit = hitTestSelectedBox(ix, iy);
-      if (selHit && selHit.kind === "resize") host.style.cursor = edgeToCursor(selHit.dir);
-      else if (selHit && selHit.kind === "move") host.style.cursor = "move";
-      else host.style.cursor = "crosshair";
-    } else if (state.mode === "view") {
-      // 关键修复：鼠标位于悬停/固定气泡（或其透明桥接区）内时直接忽略底层画布命中，绝不穿透切题！
-      const overPop = ev.target && ev.target.closest && ev.target.closest(".fill-hover-pop");
-      if (overPop) {
-        clearTimeout(hoverHideTimer);
-        state.hoverInPopover = true;
-        return;
-      }
-      const overRightDock = ev.target && ev.target.closest && ev.target.closest("#sidebarRight");
-      if (overRightDock) {
-        if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-          scheduleHoverClear();
-        }
-        return;
-      }
+  if (state.subboxTarget) {
+    host.style.cursor = spaceDown ? "grab" : "crosshair";
+    return;
+  }
+  if (state.mode === "edit" && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+    if (spaceDown) { host.style.cursor = "grab"; return; }
+    const selHit = hitTestSelectedBox(ix, iy);
+    if (selHit && selHit.kind === "resize") host.style.cursor = edgeToCursor(selHit.dir);
+    else if (selHit && selHit.kind === "move") host.style.cursor = "move";
+    else host.style.cursor = "crosshair";
+    return;
+  }
+  if (state.mode !== "view") return;
 
-      if (state.showOverlay && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
-        const p = currentPage();
-        const hitCandidates = getPageItems(p)
-          .filter(it => {
-            if (it.kind === "fill" && !shouldShowFillInView(it)) return false;
-            if (!it.box || it.box.length !== 4) return false;
-            const [x1, y1, x2, y2] = it.box;
-            return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
-          })
-          .sort((a, b) => {
-            const areaA = Math.max(0, (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]));
-            const areaB = Math.max(0, (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]));
-            return areaA - areaB;
-          });
-        const hitItem = hitCandidates[0] || null;
-        host.style.cursor = hitItem ? "pointer" : "grab";
-        // 无论右侧总览栏是否开启，鼠标滑过任意题框均触发聚光压暗 + 半透明高亮蒙版 + 填空气泡预览
-        if (!getLockedFillItemId()) {
-          if (hitItem) {
-            setHoverCanvasItem(hitItem.id);
-          } else if (state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-            scheduleHoverClear();
-          }
-        }
-      } else {
-        host.style.cursor = "grab";
-        if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-          scheduleHoverClear();
-        }
-      }
+  // 鼠标位于悬停/固定气泡（或其透明桥接区）内时直接忽略底层画布命中，绝不穿透切题！
+  const overPop = ev.target && ev.target.closest && ev.target.closest(".fill-hover-pop");
+  if (overPop) {
+    clearTimeout(hoverHideTimer);
+    state.hoverInPopover = true;
+    return;
+  }
+  const overRightDock = ev.target && ev.target.closest && ev.target.closest("#sidebarRight");
+  if (overRightDock) {
+    if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+      scheduleHoverClear();
     }
     return;
   }
+
+  if (state.showOverlay && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+    const p = currentPage();
+    let hitItem = null;
+    let bestArea = Infinity;
+    const items = getPageItems(p);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "fill" && !shouldShowFillInView(it)) continue;
+      const b = it.box;
+      if (!b || b.length !== 4) continue;
+      if (ix >= b[0] && ix <= b[2] && iy >= b[1] && iy <= b[3]) {
+        const area = Math.max(0, (b[2] - b[0]) * (b[3] - b[1]));
+        if (area < bestArea) { bestArea = area; hitItem = it; }
+      }
+    }
+    host.style.cursor = hitItem ? "pointer" : "grab";
+    if (!getLockedFillItemId()) {
+      if (hitItem) {
+        setHoverCanvasItem(hitItem.id);
+      } else if (state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+        scheduleHoverClear();
+      }
+    }
+  } else {
+    host.style.cursor = "grab";
+    if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+      scheduleHoverClear();
+    }
+  }
+}
+
+window.addEventListener("mousemove", (ev) => {
+  if (!state.img) return;
+  if (!state.drag) {
+    _lastMoveEv = ev;
+    if (!_hoverMoveRaf) {
+      _hoverMoveRaf = requestAnimationFrame(() => {
+        _hoverMoveRaf = 0;
+        if (_lastMoveEv) processHoverMove(_lastMoveEv);
+      });
+    }
+    return;
+  }
+
+  const rect = getHostMetrics();
+  const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+  const [ix, iy] = screenToImg(sx, sy);
 
   const d = state.drag;
   if (d.type === "right_pending" || d.type === "view_pending") {
@@ -214,7 +231,7 @@ window.addEventListener("mousemove", (ev) => {
       host.classList.add("panning");
       state.tx = d.tx0 + (sx - d.sx);
       state.ty = d.ty0 + (sy - d.sy);
-      draw();
+      schedulePanFrame();
     }
   } else if (d.type === "draw_pending") {
     if (Math.hypot(sx - d.sx, sy - d.sy) >= 5) {
@@ -229,15 +246,15 @@ window.addEventListener("mousemove", (ev) => {
     const [px1, py1, px2, py2] = state.subboxTarget.parentBox;
     d.ix1 = Math.max(px1, Math.min(px2, ix));
     d.iy1 = Math.max(py1, Math.min(py2, iy));
-    draw();
+    scheduleFxOnly();
   } else if (d.type === "pan") {
     state.tx = d.tx0 + (sx - d.sx);
     state.ty = d.ty0 + (sy - d.sy);
-    draw();
+    schedulePanFrame();
   } else if (d.type === "draw") {
     d.ix1 = Math.max(0, Math.min(state.img.width, ix));
     d.iy1 = Math.max(0, Math.min(state.img.height, iy));
-    draw();
+    scheduleFxOnly();
   } else if (d.type === "move") {
     if (!d.moved && Math.hypot(sx - d.sx, sy - d.sy) < 4) return;
     d.moved = true;
@@ -254,7 +271,7 @@ window.addEventListener("mousemove", (ev) => {
     }
     state.boxesModified = true;
     updateDirtyBadge();
-    draw();
+    scheduleDraw();
   } else if (d.type === "resize") {
     if (!d.moved && Math.hypot(sx - d.sx, sy - d.sy) < 3) return;
     let [x1, y1, x2, y2] = d.orig;
@@ -274,7 +291,7 @@ window.addEventListener("mousemove", (ev) => {
     }
     state.boxesModified = true;
     updateDirtyBadge();
-    draw();
+    scheduleDraw();
   }
 });
 
@@ -283,6 +300,10 @@ window.addEventListener("mouseup", () => {
   const d = state.drag;
   state.drag = null;
   host.classList.remove("panning");
+  if (d.type === "pan") {
+    draw();
+    return;
+  }
   if (d.type === "subbox_draw" && state.subboxTarget) {
     const x1 = Math.min(d.ix0, d.ix1), y1 = Math.min(d.iy0, d.iy1);
     const x2 = Math.max(d.ix0, d.ix1), y2 = Math.max(d.iy0, d.iy1);

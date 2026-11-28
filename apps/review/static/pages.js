@@ -338,6 +338,9 @@ function focusTargetAt(targets, cursorIdx) {
   focusBoxOnCanvas(t.box);
   updateLowConfButton();
   draw();
+  if (t.kind === "item" && t.item && typeof centerOverviewCard === "function") {
+    centerOverviewCard(t.item.id, 0);
+  }
   toast(`已定位低置信度框 ${cursorIdx + 1}/${targets.length}：${t.label}`, 2400);
 }
 

@@ -17,13 +17,25 @@ function fmtBlankIdx(k) {
   return `[${k}]`;
 }
 
+const _katexHtmlCache = new Map();
 function appendLatexText(parent, text) {
   const parts = String(text || "").split(/(\$[^$]+\$)/g);
   for (const part of parts) {
     if (part.startsWith("$") && part.endsWith("$") && part.length > 2 && window.katex) {
       const kspan = document.createElement("span");
-      try { window.katex.render(part.slice(1, -1), kspan, { throwOnError: false }); }
-      catch { kspan.textContent = part; }
+      const tex = part.slice(1, -1);
+      let cached = _katexHtmlCache.get(tex);
+      if (cached === undefined) {
+        try {
+          cached = window.katex.renderToString(tex, { throwOnError: false });
+          if (_katexHtmlCache.size > 400) _katexHtmlCache.clear();
+          _katexHtmlCache.set(tex, cached);
+        } catch {
+          cached = null;
+        }
+      }
+      if (cached) kspan.innerHTML = cached;
+      else kspan.textContent = part;
       parent.appendChild(kspan);
     } else {
       parent.appendChild(document.createTextNode(part));
@@ -383,6 +395,27 @@ function getFloatingPopoverItemId() {
   if (state.hoverItemId && state.hoverSource !== "overview") return state.hoverItemId;
   return null;
 }
+let _ovCenterTimer = null;
+function centerOverviewCard(itemId, delayMs = 0) {
+  clearTimeout(_ovCenterTimer);
+  if (state.mode !== "view" || state.fillDisplayMode !== "margin" || !itemId) return;
+  const run = () => {
+    const body = $("rightBody");
+    if (!body) return;
+    let targetCard = null;
+    const cards = body.querySelectorAll(".ov-card");
+    for (let i = 0; i < cards.length; i++) {
+      if (cards[i].dataset.itemId === itemId) { targetCard = cards[i]; break; }
+    }
+    if (!targetCard) return;
+    const targetTop = Math.max(0, targetCard.offsetTop - Math.round((body.clientHeight - targetCard.offsetHeight) / 2));
+    if (Math.abs(body.scrollTop - targetTop) < 6) return;
+    body.scrollTo({ top: targetTop, behavior: "smooth" });
+  };
+  if (delayMs > 0) _ovCenterTimer = setTimeout(run, delayMs);
+  else run();
+}
+
 function syncFocusHighlightClasses(scrollOverview = false) {
   const lockedId = getLockedFillItemId() || "";
   const focusId = getActiveFocusItemId() || "";
@@ -404,7 +437,6 @@ function syncFocusHighlightClasses(scrollOverview = false) {
   if (!body) return;
   const ovList = body.querySelector(".ov-list");
   let matchedCard = false;
-  let targetCard = null;
   body.querySelectorAll(".ov-card").forEach(card => {
     const id = card.dataset.itemId || "";
     const isHov = Boolean(hoverId && id === hoverId);
@@ -412,11 +444,10 @@ function syncFocusHighlightClasses(scrollOverview = false) {
     card.classList.toggle("hovered", isHov);
     card.classList.toggle("active", isAct);
     if (isHov || isAct) matchedCard = true;
-    if (scrollOverview && selId && id === selId) targetCard = card;
   });
   if (ovList) ovList.classList.toggle("has-focus", matchedCard);
-  if (targetCard) {
-    try { targetCard.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch {}
+  if (scrollOverview && selId) {
+    centerOverviewCard(selId, 0);
   }
 }
 function pinFillItem(itemId) {
@@ -425,21 +456,21 @@ function pinFillItem(itemId) {
   state.selectedItemId = itemId;
   state.hoverItemId = itemId;
   state.hoverSource = "canvas";
-  draw();
+  syncHoverPopoverOnly();
   if (state.fillDisplayMode === "margin") {
-    syncFocusHighlightClasses(true);
+    centerOverviewCard(itemId, 0);
   }
 }
 function unpinFillItem() {
   clearTimeout(hoverHideTimer);
+  clearTimeout(_ovCenterTimer);
   state.pinnedItemId = null;
   state.selectedItemId = null;
   state.hoverItemId = null;
   state.hoverSource = null;
   state.hoverInPopover = false;
   state.inlineBlankEdit = null;
-  draw();
-  syncFocusHighlightClasses(false);
+  syncHoverPopoverOnly();
 }
 function scheduleHoverClear() {
   if (getLockedFillItemId()) return;
@@ -460,13 +491,19 @@ function setHoverCanvasItem(itemId) {
     state.hoverItemId = itemId;
     state.hoverSource = "canvas";
     syncHoverPopoverOnly();
+    // 开启右侧总览栏时，自动将当前卷面聚焦题平滑居中到右侧列表视野中央
+    if (state.fillDisplayMode === "margin") {
+      centerOverviewCard(itemId, 80);
+    }
   }
 }
 function setHoverFillItem(itemId) {
   setHoverCanvasItem(itemId);
 }
 function syncHoverPopoverOnly() {
-  drawCanvasOnly();
+  // 仅重绘顶层轻量特效画布（0ms 底图重绘）
+  if (typeof drawFxCanvas === "function") drawFxCanvas();
+  else drawCanvasOnly();
   overlayLayer.querySelectorAll(".fill-hover-pop").forEach(el => el.remove());
   syncFocusHighlightClasses(false);
   const p = currentPage();
@@ -475,7 +512,7 @@ function syncHoverPopoverOnly() {
   const it = getPageItems(p).find(x => x.id === popId && x.kind === "fill");
   if (!it || !it.box || it.box.length !== 4) return;
   const [x1, y1, x2, y2] = it.box;
-  const rect = host.getBoundingClientRect();
+  const rect = getHostMetrics();
   renderFillHoverPopover({
     it,
     sx1: x1 * state.scale + state.tx,
@@ -647,7 +684,18 @@ function renderEditBoxActionBar() {
   bar.style.top = Math.max(8, top) + "px";
 }
 
+let _overlayAnchorTx = 0;
+let _overlayAnchorTy = 0;
+function syncOverlayPanTransform() {
+  const dx = state.tx - _overlayAnchorTx;
+  const dy = state.ty - _overlayAnchorTy;
+  overlayLayer.style.transform = (dx === 0 && dy === 0) ? "" : `translate3d(${dx}px, ${dy}px, 0)`;
+}
+
 function renderOverlays() {
+  _overlayAnchorTx = state.tx;
+  _overlayAnchorTy = state.ty;
+  overlayLayer.style.transform = "";
   overlayLayer.innerHTML = "";
   const p = currentPage();
   if (!p || !state.img) return;
@@ -661,11 +709,13 @@ function renderOverlays() {
     return;
   }
 
-  const rect = host.getBoundingClientRect();
+  const rect = getHostMetrics();
   const fillRows = [];
   const pgGrade = getPageGrading(p);
   const focusId = getActiveFocusItemId();
   overlayLayer.classList.toggle("has-focus", Boolean(focusId));
+  const frag = document.createDocumentFragment();
+  const cullPad = 480;
 
   // 阅卷模式下，在每个 M1 选择题大框外沿渲染汇总统计标签（单选对错/多选对漏错/区得分）
   if (pgGrade && pgGrade.has_schema && Array.isArray(pgGrade.choice_zones)) {
@@ -675,13 +725,13 @@ function renderOverlays() {
       const zy1 = cz.box[1] * state.scale + state.ty;
       const zx2 = cz.box[2] * state.scale + state.tx;
       const zy2 = cz.box[3] * state.scale + state.ty;
-      if (zx2 < -20 || zx1 > rect.width + 20 || zy2 < 20 || zy1 > rect.height + 20) return;
+      if (zx2 < -cullPad || zx1 > rect.width + cullPad || zy2 < -cullPad || zy1 > rect.height + cullPad) return;
       const zb = document.createElement("div");
       zb.className = "choice-zone-badge";
       zb.innerHTML = `<span>${escHtml(cz.label || "")}</span><span class="cz-score">${escHtml(cz.total_label || "")}</span>`;
       zb.style.left = Math.max(8, Math.round(zx1)) + "px";
       zb.style.top = Math.max(8, Math.round(zy1 - 26)) + "px";
-      overlayLayer.appendChild(zb);
+      frag.appendChild(zb);
     });
   }
 
@@ -692,7 +742,7 @@ function renderOverlays() {
     const sy1 = y1 * state.scale + state.ty;
     const sx2 = x2 * state.scale + state.tx;
     const sy2 = y2 * state.scale + state.ty;
-    if (sx2 < -40 || sy2 < -40 || sx1 > rect.width + 40 || sy1 > rect.height + 40) return;
+    if (sx2 < -cullPad || sy2 < -cullPad || sx1 > rect.width + cullPad || sy1 > rect.height + cullPad) return;
 
     const bw = sx2 - sx1;
     const bh = sy2 - sy1;
@@ -779,7 +829,7 @@ function renderOverlays() {
         state.inlineChipEdit = { itemId: it.id, kind: "choice" };
         draw();
       };
-      overlayLayer.appendChild(chip);
+      frag.appendChild(chip);
     } else if (it.kind === "identity" || (it.kind === "fill" && bh > bw * 1.4 && bw < 95)) {
       const isEditingChip = Boolean(state.inlineChipEdit && state.inlineChipEdit.itemId === it.id);
       if (isEditingChip) {
@@ -835,18 +885,19 @@ function renderOverlays() {
         state.inlineChipEdit = { itemId: it.id, kind: "identity" };
         draw();
       };
-      overlayLayer.appendChild(chip);
+      frag.appendChild(chip);
     } else if (it.kind === "fill") {
-      if (sy2 < 4 || sy1 > rect.height - 4) return;
       fillRows.push({ it, sx1, sy1, sx2, sy2, midY: (sy1 + sy2) / 2 });
     }
   });
 
   if (fillRows.length) {
     // 无论右侧总览栏是否开启，卷面右上角题号徽章均支持悬停弹出气泡 + 点击固定编辑
+    // 两阶段批量布局（先全部挂载、再一次性测宽高、再一次性写位置），彻底杜绝 N 次强制同步回流
     const lockedId = getLockedFillItemId();
     const popId = getFloatingPopoverItemId();
     let popRow = null;
+    const tagEntries = [];
     fillRows.forEach(row => {
       const { it } = row;
       const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
@@ -876,27 +927,34 @@ function renderOverlays() {
         dot.title = "含学生未作答空位";
         tag.appendChild(dot);
       }
-      tag.style.left = "0px";
-      tag.style.top = "-9999px";
       tag.title = `第 ${qno} 题（悬停预览，点击固定改字）`;
       tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       tag.onmouseenter = () => setHoverCanvasItem(it.id);
       tag.onmouseleave = () => scheduleHoverClear();
       tag.onclick = (e) => { e.stopPropagation(); pinFillItem(it.id); };
-      overlayLayer.appendChild(tag);
-      // 嵌在题框右上角内侧（紧贴框内右边缘，彻底避免压到上一题答案或遮挡左侧手写开头）
-      const tw = tag.offsetWidth || 28;
-      const th = tag.offsetHeight || 18;
+      frag.appendChild(tag);
+      tagEntries.push({ tag, row });
+    });
+
+    overlayLayer.appendChild(frag);
+    // 一次性读取全部标签尺寸（仅 1 次 layout）
+    const dims = tagEntries.map(e => [e.tag.offsetWidth || 28, e.tag.offsetHeight || 18]);
+    // 一次性写入全部位置
+    for (let i = 0; i < tagEntries.length; i++) {
+      const { tag, row } = tagEntries[i];
+      const [tw, th] = dims[i];
       const insideLeft = Math.max(Math.round(row.sx1 + 2), Math.round(row.sx2 - tw - 3));
       const insideTop = (row.sy2 - row.sy1 >= th + 4)
         ? Math.round(row.sy1 + 2)
         : Math.round(row.sy1 + (row.sy2 - row.sy1 - th) / 2);
-      tag.style.left = Math.max(4, Math.min(rect.width - tw - 4, insideLeft)) + "px";
-      tag.style.top = Math.max(4, insideTop) + "px";
-    });
+      tag.style.left = insideLeft + "px";
+      tag.style.top = insideTop + "px";
+    }
     if (popRow) {
       renderFillHoverPopover(popRow, rect);
     }
+  } else {
+    overlayLayer.appendChild(frag);
   }
 
   // 仅保留原地胶囊直改，不再弹出蠢蠢的大文本框
@@ -920,6 +978,7 @@ function openInlineEditor(it) {
       state.inlineBlankEdit = { itemId: it.id, sub: slots[0].sub, blank: slots[0].blank, source: "pop" };
     }
     refreshOverviewPanel();
+    centerOverviewCard(it.id, 0);
   }
   draw();
 }

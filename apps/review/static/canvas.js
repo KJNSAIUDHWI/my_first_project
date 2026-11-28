@@ -1,13 +1,30 @@
-function resizeCanvas() {
-  const rect = host.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(rect.width * dpr));
-  const h = Math.max(1, Math.round(rect.height * dpr));
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+let _hostMetrics = { left: 0, top: 0, width: 0, height: 0 };
+function syncHostMetrics() {
+  const r = host.getBoundingClientRect();
+  _hostMetrics = { left: r.left, top: r.top, width: r.width, height: r.height };
+  return _hostMetrics;
+}
+function getHostMetrics() {
+  if (_hostMetrics.width <= 0 || _hostMetrics.height <= 0) return syncHostMetrics();
+  return _hostMetrics;
+}
+
+function ensureCanvasBuffer(c, context, wCss, hCss, dpr) {
+  if (!c || !context) return;
+  const needW = Math.max(1, Math.round(wCss * dpr));
+  const needH = Math.max(1, Math.round(hCss * dpr));
+  if (c.width !== needW || c.height !== needH) {
+    c.width = needW;
+    c.height = needH;
   }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function resizeCanvas() {
+  const rect = syncHostMetrics();
+  const dpr = window.devicePixelRatio || 1;
+  ensureCanvasBuffer(canvas, ctx, rect.width, rect.height, dpr);
+  ensureCanvasBuffer(fxCanvas, fxCtx, rect.width, rect.height, dpr);
   draw();
 }
 
@@ -15,7 +32,7 @@ function resizeCanvas() {
 if (typeof ResizeObserver !== "undefined") {
   let _lastHostW = 0, _lastHostH = 0;
   const _canvasHostRo = new ResizeObserver(() => {
-    const r = host.getBoundingClientRect();
+    const r = syncHostMetrics();
     const rw = Math.round(r.width), rh = Math.round(r.height);
     if (rw <= 0 || rh <= 0) return;
     if (rw !== _lastHostW || rh !== _lastHostH) {
@@ -29,7 +46,7 @@ if (typeof ResizeObserver !== "undefined") {
 
 function fitCanvas() {
   if (!state.img) return;
-  const rect = host.getBoundingClientRect();
+  const rect = syncHostMetrics();
   const pad = 16;
   const availW = Math.max(220, rect.width - pad * 2);
   const availH = Math.max(180, rect.height - pad * 2);
@@ -128,16 +145,11 @@ function hitTestAnyBox(ix, iy) {
   return null;
 }
 
-function drawCanvasOnly() {
-  const rect = host.getBoundingClientRect();
+/* 底层静态画布：绘制原卷图片 + 题框边界（仅在翻页/缩放/平移/改框时重绘，悬停切题零重绘！） */
+function drawBaseCanvas() {
+  const rect = getHostMetrics();
   const dpr = window.devicePixelRatio || 1;
-  const needW = Math.max(1, Math.round(rect.width * dpr));
-  const needH = Math.max(1, Math.round(rect.height * dpr));
-  if (canvas.width !== needW || canvas.height !== needH) {
-    canvas.width = needW;
-    canvas.height = needH;
-  }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ensureCanvasBuffer(canvas, ctx, rect.width, rect.height, dpr);
   ctx.clearRect(0, 0, rect.width, rect.height);
   if (!state.img) return;
 
@@ -149,20 +161,7 @@ function drawCanvasOnly() {
   const p = currentPage();
   const inv = 1 / Math.max(0.15, state.scale);
   const pgGrade = (state.mode === "view" && p) ? getPageGrading(p) : null;
-  const lockedId = (state.mode === "view") ? getLockedFillItemId() : null;
-  const focusId = (state.mode === "view" && !state.subboxTarget)
-    ? (lockedId || state.hoverItemId || state.selectedItemId)
-    : null;
-  const focusItem = (focusId && p)
-    ? getPageItems(p).find(it =>
-        it.id === focusId
-        && (it.kind !== "fill" || shouldShowFillInView(it))
-        && it.box && it.box.length === 4
-      ) || null
-    : null;
 
-  ctx.save();
-  if (focusItem) ctx.globalAlpha = 0.32;
   visibleBoxIndices().forEach(idx => {
     const b = state.workingBoxes[idx];
     const meta = BOX_META[b.cls] || { color: "#2563eb", name: String(b.cls) };
@@ -214,13 +213,10 @@ function drawCanvasOnly() {
       ctx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
     }
   });
-  ctx.restore();
 
   if (state.mode === "view" && p) {
-    // 阅卷模式下绘制选择题大框（M1 cls=1）淡绿边界
     if (pgGrade && pgGrade.has_schema && Array.isArray(pgGrade.choice_zones)) {
       ctx.save();
-      if (focusItem) ctx.globalAlpha = 0.34;
       pgGrade.choice_zones.forEach(cz => {
         if (!cz.box || cz.box.length !== 4) return;
         const [zx1, zy1, zx2, zy2] = cz.box;
@@ -231,109 +227,131 @@ function drawCanvasOnly() {
       });
       ctx.restore();
     }
-    // 非焦点项（聚光时整体降亮，避免喧宾夺主）
-    ctx.save();
-    if (focusItem) ctx.globalAlpha = 0.34;
     getPageItems(p).forEach(it => {
-      if (it.kind === "fill" && !shouldShowFillInView(it)) return;
-      if (focusItem && it.id === focusItem.id) return;
-      const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
-      if (it.kind === "choice") {
-        const cg = pgGrade && pgGrade.items ? pgGrade.items[it.id] : null;
-        const low = isLowConfChoice(it);
-        ctx.lineWidth = (cg ? 2.0 : 1.4) * inv;
-        if (cg && cg.status === "correct") {
-          ctx.fillStyle = "rgba(22, 163, 74, 0.12)";
-          ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-          ctx.strokeStyle = "#16a34a";
-        } else if (cg && cg.status === "partial") {
-          ctx.fillStyle = "rgba(234, 88, 12, 0.14)";
-          ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-          ctx.strokeStyle = "#ea580c";
-        } else if (cg && cg.status === "wrong") {
-          ctx.fillStyle = "rgba(220, 38, 38, 0.14)";
-          ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-          ctx.strokeStyle = "#dc2626";
-        } else {
-          ctx.strokeStyle = low ? "#d97706" : "#15803d";
-        }
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      if (it.kind !== "choice" || !it.box || it.box.length !== 4) return;
+      const [x1, y1, x2, y2] = it.box;
+      const cg = pgGrade && pgGrade.items ? pgGrade.items[it.id] : null;
+      const low = isLowConfChoice(it);
+      ctx.lineWidth = (cg ? 2.0 : 1.4) * inv;
+      if (cg && cg.status === "correct") {
+        ctx.fillStyle = "rgba(22, 163, 74, 0.12)";
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.strokeStyle = "#16a34a";
+      } else if (cg && cg.status === "partial") {
+        ctx.fillStyle = "rgba(234, 88, 12, 0.14)";
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.strokeStyle = "#ea580c";
+      } else if (cg && cg.status === "wrong") {
+        ctx.fillStyle = "rgba(220, 38, 38, 0.14)";
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+        ctx.strokeStyle = "#dc2626";
+      } else {
+        ctx.strokeStyle = low ? "#d97706" : "#15803d";
       }
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
     });
-    ctx.restore();
+  }
+  ctx.restore();
+}
 
-    // 悬停/固定聚光效果：压暗卷面其余区域亮度 + 为当前选中框叠加清晰半透明蒙版与亮边
+/* 顶层轻量特效画布：仅绘悬停聚光压暗 + 半透明蒙版 + 拖拽框（零 shadowBlur、零底图重绘，<0.2ms） */
+function drawFxCanvas() {
+  if (!fxCanvas || !fxCtx) return;
+  const rect = getHostMetrics();
+  const dpr = window.devicePixelRatio || 1;
+  ensureCanvasBuffer(fxCanvas, fxCtx, rect.width, rect.height, dpr);
+  fxCtx.clearRect(0, 0, rect.width, rect.height);
+  if (!state.img) return;
+
+  const p = currentPage();
+  const inv = 1 / Math.max(0.15, state.scale);
+
+  fxCtx.save();
+  fxCtx.translate(state.tx, state.ty);
+  fxCtx.scale(state.scale, state.scale);
+
+  if (state.mode === "view" && p && !state.subboxTarget) {
+    const lockedId = getLockedFillItemId();
+    const focusId = lockedId || state.hoverItemId || state.selectedItemId;
+    const focusItem = focusId
+      ? getPageItems(p).find(it =>
+          it.id === focusId
+          && (it.kind !== "fill" || shouldShowFillInView(it))
+          && it.box && it.box.length === 4
+        ) || null
+      : null;
+
     if (focusItem) {
       const [fx1, fy1, fx2, fy2] = focusItem.box;
-      ctx.save();
-      ctx.fillStyle = "rgba(15, 23, 42, 0.22)";
-      ctx.beginPath();
-      ctx.rect(0, 0, state.img.width, state.img.height);
-      ctx.rect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-      ctx.fill("evenodd");
-      ctx.restore();
+      // 压暗卷面其余区域（连同下方未选中框线一并柔和降亮）
+      fxCtx.fillStyle = "rgba(15, 23, 42, 0.24)";
+      fxCtx.beginPath();
+      fxCtx.rect(0, 0, state.img.width, state.img.height);
+      fxCtx.rect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+      fxCtx.fill("evenodd");
 
+      const pgGrade = getPageGrading(p);
       const isPinned = focusItem.id === lockedId;
       const isEdited = Boolean(state.itemEdits[focusItem.id] || ((state.feedback.items || {})[focusItem.id] || {}).correction);
-      let fillTint = isPinned ? "rgba(37, 99, 235, 0.19)" : "rgba(37, 99, 235, 0.14)";
+      let fillTint = isPinned ? "rgba(37, 99, 235, 0.20)" : "rgba(37, 99, 235, 0.14)";
       let strokeClr = isPinned ? "#1d4ed8" : "#2563eb";
-      let glowClr = "rgba(37, 99, 235, 0.38)";
+      let haloClr = "rgba(37, 99, 235, 0.24)";
       if (focusItem.kind === "choice") {
         const cg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
         if (cg && cg.status === "correct") {
-          fillTint = "rgba(22, 163, 74, 0.22)"; strokeClr = "#16a34a"; glowClr = "rgba(22, 163, 74, 0.38)";
+          fillTint = "rgba(22, 163, 74, 0.22)"; strokeClr = "#16a34a"; haloClr = "rgba(22, 163, 74, 0.24)";
         } else if (cg && cg.status === "partial") {
-          fillTint = "rgba(234, 88, 12, 0.22)"; strokeClr = "#ea580c"; glowClr = "rgba(234, 88, 12, 0.38)";
+          fillTint = "rgba(234, 88, 12, 0.22)"; strokeClr = "#ea580c"; haloClr = "rgba(234, 88, 12, 0.24)";
         } else if (cg && cg.status === "wrong") {
-          fillTint = "rgba(220, 38, 38, 0.22)"; strokeClr = "#dc2626"; glowClr = "rgba(220, 38, 38, 0.38)";
+          fillTint = "rgba(220, 38, 38, 0.22)"; strokeClr = "#dc2626"; haloClr = "rgba(220, 38, 38, 0.24)";
         } else {
-          fillTint = "rgba(37, 99, 235, 0.18)"; strokeClr = "#2563eb"; glowClr = "rgba(37, 99, 235, 0.38)";
+          fillTint = "rgba(37, 99, 235, 0.18)"; strokeClr = "#2563eb"; haloClr = "rgba(37, 99, 235, 0.24)";
         }
       } else if (isEdited) {
         fillTint = isPinned ? "rgba(22, 163, 74, 0.18)" : "rgba(22, 163, 74, 0.14)";
         strokeClr = "#15803d";
-        glowClr = "rgba(22, 163, 74, 0.34)";
+        haloClr = "rgba(22, 163, 74, 0.24)";
       }
 
-      ctx.save();
-      ctx.fillStyle = fillTint;
-      ctx.fillRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-      ctx.shadowColor = glowClr;
-      ctx.shadowBlur = 12 * inv;
-      ctx.lineWidth = (isPinned ? 3.2 : 2.6) * inv;
-      ctx.strokeStyle = strokeClr;
-      ctx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-      ctx.restore();
+      // 选中框半透明蒙版 + 零开销双层矢量亮边（替代昂贵的 shadowBlur）
+      fxCtx.fillStyle = fillTint;
+      fxCtx.fillRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+      fxCtx.lineWidth = (isPinned ? 7.0 : 6.0) * inv;
+      fxCtx.strokeStyle = haloClr;
+      fxCtx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+      fxCtx.lineWidth = (isPinned ? 3.0 : 2.5) * inv;
+      fxCtx.strokeStyle = strokeClr;
+      fxCtx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
     }
   }
 
   // 局部真子集小框聚焦重识别：压暗父大框外区域 + 亮起父大框引导边 + 绘制真子集小框
   if (state.subboxTarget && state.subboxTarget.parentBox) {
     const [px1, py1, px2, py2] = state.subboxTarget.parentBox;
-    ctx.save();
-    ctx.fillStyle = "rgba(15, 23, 42, 0.42)";
-    ctx.beginPath();
-    ctx.rect(-5000, -5000, state.img.width + 10000, state.img.height + 10000);
-    ctx.rect(px1, py1, px2 - px1, py2 - py1);
-    ctx.fill("evenodd");
-    ctx.lineWidth = 3.0 * inv;
-    ctx.strokeStyle = "#38bdf8";
-    ctx.setLineDash([8 * inv, 5 * inv]);
-    ctx.strokeRect(px1, py1, px2 - px1, py2 - py1);
-    ctx.setLineDash([]);
-    ctx.restore();
+    fxCtx.save();
+    fxCtx.fillStyle = "rgba(15, 23, 42, 0.42)";
+    fxCtx.beginPath();
+    fxCtx.rect(-5000, -5000, state.img.width + 10000, state.img.height + 10000);
+    fxCtx.rect(px1, py1, px2 - px1, py2 - py1);
+    fxCtx.fill("evenodd");
+    fxCtx.lineWidth = 3.0 * inv;
+    fxCtx.strokeStyle = "#38bdf8";
+    fxCtx.setLineDash([8 * inv, 5 * inv]);
+    fxCtx.strokeRect(px1, py1, px2 - px1, py2 - py1);
+    fxCtx.setLineDash([]);
+    fxCtx.restore();
   }
   if (state.drag && state.drag.type === "subbox_draw") {
     const d = state.drag;
     const x1 = Math.min(d.ix0, d.ix1), y1 = Math.min(d.iy0, d.iy1);
     const rw = Math.abs(d.ix1 - d.ix0), rh = Math.abs(d.iy1 - d.iy0);
-    ctx.save();
-    ctx.fillStyle = "rgba(34, 197, 94, 0.18)";
-    ctx.fillRect(x1, y1, rw, rh);
-    ctx.strokeStyle = "#16a34a";
-    ctx.lineWidth = 2.6 * inv;
-    ctx.strokeRect(x1, y1, rw, rh);
-    ctx.restore();
+    fxCtx.save();
+    fxCtx.fillStyle = "rgba(34, 197, 94, 0.18)";
+    fxCtx.fillRect(x1, y1, rw, rh);
+    fxCtx.strokeStyle = "#16a34a";
+    fxCtx.lineWidth = 2.6 * inv;
+    fxCtx.strokeRect(x1, y1, rw, rh);
+    fxCtx.restore();
   }
 
   if (state.drag && state.drag.type === "draw") {
@@ -341,29 +359,62 @@ function drawCanvasOnly() {
     const meta = BOX_META[state.activeCls] || { color: "#2563eb", name: String(state.activeCls) };
     const x1 = Math.min(d.ix0, d.ix1), y1 = Math.min(d.iy0, d.iy1);
     const rw = Math.abs(d.ix1 - d.ix0), rh = Math.abs(d.iy1 - d.iy0);
-    ctx.fillStyle = meta.color + "18";
-    ctx.fillRect(x1, y1, rw, rh);
-    ctx.strokeStyle = meta.color;
-    ctx.lineWidth = 2.2 * inv;
-    ctx.setLineDash([6 * inv, 4 * inv]);
-    ctx.strokeRect(x1, y1, rw, rh);
-    ctx.setLineDash([]);
+    fxCtx.fillStyle = meta.color + "18";
+    fxCtx.fillRect(x1, y1, rw, rh);
+    fxCtx.strokeStyle = meta.color;
+    fxCtx.lineWidth = 2.2 * inv;
+    fxCtx.setLineDash([6 * inv, 4 * inv]);
+    fxCtx.strokeRect(x1, y1, rw, rh);
+    fxCtx.setLineDash([]);
     if (rw >= 6 * inv && rh >= 6 * inv) {
-      ctx.font = `600 ${Math.max(10, 11.5 * inv)}px sans-serif`;
+      fxCtx.font = `600 ${Math.max(10, 11.5 * inv)}px sans-serif`;
       const tag = `+ ${meta.name}`;
-      const tw = ctx.measureText(tag).width + 8 * inv;
+      const tw = fxCtx.measureText(tag).width + 8 * inv;
       const th = 16 * inv;
-      ctx.fillStyle = meta.color;
-      ctx.fillRect(x1, Math.max(0, y1 - th), tw, th);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
+      fxCtx.fillStyle = meta.color;
+      fxCtx.fillRect(x1, Math.max(0, y1 - th), tw, th);
+      fxCtx.fillStyle = "#fff";
+      fxCtx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
     }
   }
 
-  ctx.restore();
+  fxCtx.restore();
+}
+
+function drawCanvasOnly() {
+  drawBaseCanvas();
+  drawFxCanvas();
+}
+
+let _drawRaf = 0;
+let _panRaf = 0;
+let _fxRaf = 0;
+function scheduleDraw() {
+  if (_drawRaf) return;
+  _drawRaf = requestAnimationFrame(() => {
+    _drawRaf = 0;
+    draw();
+  });
+}
+function schedulePanFrame() {
+  if (_panRaf) return;
+  _panRaf = requestAnimationFrame(() => {
+    _panRaf = 0;
+    drawCanvasOnly();
+    if (typeof syncOverlayPanTransform === "function") syncOverlayPanTransform();
+  });
+}
+function scheduleFxOnly() {
+  if (_fxRaf) return;
+  _fxRaf = requestAnimationFrame(() => {
+    _fxRaf = 0;
+    drawFxCanvas();
+  });
 }
 
 function draw() {
+  if (_drawRaf) { cancelAnimationFrame(_drawRaf); _drawRaf = 0; }
+  if (_panRaf) { cancelAnimationFrame(_panRaf); _panRaf = 0; }
   drawCanvasOnly();
   renderOverlays();
 }

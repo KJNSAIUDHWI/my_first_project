@@ -159,6 +159,8 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const canvas = $("paperCanvas");
 const ctx = canvas.getContext("2d");
+const fxCanvas = $("fxCanvas");
+const fxCtx = fxCanvas ? fxCanvas.getContext("2d") : null;
 const host = $("canvasHost");
 const overlayLayer = $("overlayLayer");
 
