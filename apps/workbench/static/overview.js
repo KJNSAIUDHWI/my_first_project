@@ -769,13 +769,8 @@ document.querySelectorAll('.step-tab').forEach(btn => {
   };
 });
 
-// Step 1 架构图节点交互直达
-$('envNodeCompute').onclick = () => {
-  const d = $('drawerPerf');
-  d.open = !d.open;
-  if (d.open) d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-};
-$('envNodeModels').onclick = () => {
+// Step 1 同构体检 DAG 节点交互直达
+const _openWeightOrDetails = () => {
   if (CHECK && CHECK.missing_weights?.length && CHECK.has_encrypted_weights) {
     $('btnUnpackWeights').click();
   } else {
@@ -784,6 +779,10 @@ $('envNodeModels').onclick = () => {
     if (d.open) d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 };
+['envNodeOrient', 'envNodeM1', 'envNodeM2', 'envNodeM3'].forEach(id => {
+  const el = $(id);
+  if (el) el.onclick = _openWeightOrDetails;
+});
 $('envNodeVlm').onclick = () => openVlmDialog();
 $('envNodeReview').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
 

@@ -33,22 +33,30 @@
     </div>
   </header>
 
-  <nav id="hostStepper" class="stepper mode-grading hidden">
-    <button class="step-tab hidden" data-view="check" id="tabCheck" type="button">
-      <span class="step-num" id="stepNumCheck">1</span>
-      <div><div class="step-title">运行环境</div><div class="step-desc" id="tabCheckDesc">检查就绪状态</div></div>
+  <nav id="hostStepper" class="stepper mode-grading no-anim hidden">
+    <button class="step-tab step-wing wing-left" data-view="check" id="tabCheck" type="button" aria-hidden="true" tabindex="-1">
+      <div class="step-tab-inner">
+        <span class="step-num" id="stepNumCheck">1</span>
+        <div><div class="step-title">运行环境</div><div class="step-desc" id="tabCheckDesc">检查就绪状态</div></div>
+      </div>
     </button>
     <button class="step-tab" data-view="ingest" id="tabIngest" type="button">
-      <span class="step-num" id="stepNumIngest">1</span>
-      <div><div class="step-title" id="tabIngestTitle">贴入试卷与答案</div><div class="step-desc" id="tabIngestDesc">拖放 / 贴路径 / Ctrl+V</div></div>
+      <div class="step-tab-inner">
+        <span class="step-num" id="stepNumIngest">1</span>
+        <div><div class="step-title" id="tabIngestTitle">贴入试卷与答案</div><div class="step-desc" id="tabIngestDesc">拖放 / 贴路径 / Ctrl+V</div></div>
+      </div>
     </button>
     <button class="step-tab" data-view="overview" id="tabOverview" type="button">
-      <span class="step-num" id="stepNumOverview">2</span>
-      <div><div class="step-title" id="tabOverviewTitle">改卷与导分</div><div class="step-desc" id="tabOverviewDesc">进度 / 复审 / 成绩单</div></div>
+      <div class="step-tab-inner">
+        <span class="step-num" id="stepNumOverview">2</span>
+        <div><div class="step-title" id="tabOverviewTitle">改卷与导分</div><div class="step-desc" id="tabOverviewDesc">进度 / 复审 / 成绩单</div></div>
+      </div>
     </button>
-    <button class="step-tab hidden" data-view="train" id="tabTrain" type="button">
-      <span class="step-num" id="stepNumTrain">4</span>
-      <div><div class="step-title">模型训练</div><div class="step-desc" id="tabTrainDesc">微调与换权重</div></div>
+    <button class="step-tab step-wing wing-right" data-view="train" id="tabTrain" type="button" aria-hidden="true" tabindex="-1">
+      <div class="step-tab-inner">
+        <span class="step-num" id="stepNumTrain">4</span>
+        <div><div class="step-title">模型训练</div><div class="step-desc" id="tabTrainDesc">微调与换权重</div></div>
+      </div>
     </button>
   </nav>
 
@@ -75,51 +83,103 @@
       <button class="btn primary sm hidden" id="btnRepairPip" type="button">安装缺失依赖</button>
       <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">解压模型权重</button>
       <button class="btn sm hidden" id="btnSetVlmKey" type="button">配置大模型 API</button>
+      <button class="btn sm hidden" id="btnDismissWarns" type="button" title="不影响改卷的非阻塞提醒，忽略后不再弹出，可在下方完整明细中随时恢复"><i data-ico="eyeOff"></i><span>忽略此提醒</span></button>
       <button class="btn sm" id="btnAskAgent" type="button"><i data-ico="sparkles"></i><span>求助 AI</span></button>
     </div>
 
-    <!-- 4 段系统就绪架构图（点击任意节点直达对应配置） -->
-    <div class="env-arch-wrap flow-stage" id="envArchStage">
-      <svg class="flow-svg" id="envArchSvg"></svg>
-      <div class="env-arch-grid">
-        <div class="env-node is-ok" id="envNodeCompute" title="点击展开高级加速调参">
-          <div class="env-head">
-            <span class="env-title"><i class="arch-dot" id="envDotCompute"></i>① 算力底座</span>
-            <span class="badge ok" id="envBadgeCompute">检查中</span>
+    <!-- 与识别流水线同构的体检 DAG + 公共运行基座托盘（悬停任意节点或依赖双向高亮联动） -->
+    <div class="env-arch-wrap" id="envArchStage">
+      <div class="flow-stage" id="envDagStage">
+        <svg class="flow-svg" id="envArchSvg"></svg>
+        <div class="env-dag">
+          <!-- ① 原图纠偏 -->
+          <div class="env-node is-ok" id="envNodeOrient" data-env-node="orient" title="点击查看方向纠偏模型明细">
+            <div class="env-head">
+              <span class="env-title"><i class="arch-dot" id="envDotOrient"></i>① 原图纠偏</span>
+              <span class="badge ok" id="envBadgeOrient">检查中</span>
+            </div>
+            <div class="env-main" id="envOrientMain">方向分类模型</div>
+            <div class="env-sub" id="envOrientSub"></div>
+            <div class="env-foot"><span id="envOrientFoot">专属权重检查</span><span>→</span></div>
           </div>
-          <div class="env-main" id="envComputeMain">探测硬件中...</div>
-          <div class="env-sub" id="envComputeSub"></div>
-          <div class="env-foot"><span id="envComputeFoot">点击调参 / 测速</span><span>→</span></div>
-        </div>
 
-        <div class="env-node is-ok" id="envNodeModels" title="点击查看或解压本地检测模型">
-          <div class="env-head">
-            <span class="env-title"><i class="arch-dot" id="envDotModels"></i>② 本地检测链</span>
-            <span class="badge ok" id="envBadgeModels">检查中</span>
+          <!-- ② M1 版面分区 -->
+          <div class="env-node is-ok" id="envNodeM1" data-env-node="m1" title="点击查看 M1 版面分区模型明细">
+            <div class="env-head">
+              <span class="env-title"><i class="arch-dot" id="envDotM1"></i>② M1 版面</span>
+              <span class="badge ok" id="envBadgeM1">检查中</span>
+            </div>
+            <div class="env-main" id="envM1Main">版面分区模型</div>
+            <div class="env-sub" id="envM1Sub"></div>
+            <div class="env-foot"><span id="envM1Foot">选区 / 非选 / 姓名</span><span>→</span></div>
           </div>
-          <div class="env-main" id="envModelsMain">7 项模型权重</div>
-          <div class="env-pill-grid" id="envModelPills"></div>
-          <div class="env-foot"><span id="envModelsFoot">查看权重明细</span><span>→</span></div>
-        </div>
 
-        <div class="env-node is-ok" id="envNodeVlm" title="点击配置大模型视觉 API">
-          <div class="env-head">
-            <span class="env-title"><i class="arch-dot" id="envDotVlm"></i>③ 大模型转录</span>
-            <span class="badge ok" id="envBadgeVlm">检查中</span>
+          <!-- ③ M2 选择题本地快车道 -->
+          <div class="env-node is-ok" id="envNodeM2" data-env-node="m2" title="点击查看 M2 选择题与涂卡 CNN 模型明细">
+            <div class="env-head">
+              <span class="env-title"><i class="arch-dot" id="envDotM2"></i>③ M2 选择题</span>
+              <span class="badge ok" id="envBadgeM2">检查中</span>
+            </div>
+            <div class="env-main" id="envM2Main">本地直出 · 零 API 费</div>
+            <div class="env-sub" id="envM2Sub"></div>
+            <div class="env-foot"><span id="envM2Foot">YOLO + 涂卡 CNN</span><span>→</span></div>
           </div>
-          <div class="env-main" id="envVlmMain">视觉 API</div>
-          <div class="env-sub" id="envVlmSub"></div>
-          <div class="env-foot"><span id="envVlmFoot">点击配置 / 测连通</span><span>→</span></div>
-        </div>
 
-        <div class="env-node is-ok" id="envNodeReview" title="点击进入导入或审阅">
-          <div class="env-head">
-            <span class="env-title"><i class="arch-dot done" id="envDotReview"></i>④ 审阅协作</span>
-            <span class="badge ok" id="envBadgeReview">就绪</span>
+          <!-- ④ M3 大题定位 + ⑤ 大模型转录 API -->
+          <div class="env-lower-track">
+            <div class="env-node is-ok" id="envNodeM3" data-env-node="m3" title="点击查看 M3 大题定位模型明细">
+              <div class="env-head">
+                <span class="env-title"><i class="arch-dot" id="envDotM3"></i>④ M3 大题</span>
+                <span class="badge ok" id="envBadgeM3">检查中</span>
+              </div>
+              <div class="env-main" id="envM3Main">大题切块定位</div>
+              <div class="env-sub" id="envM3Sub"></div>
+              <div class="env-foot"><span id="envM3Foot">专属权重检查</span><span>→</span></div>
+            </div>
+
+            <div class="env-node is-ok" id="envNodeVlm" data-env-node="vlm" title="点击配置视觉大模型 API">
+              <div class="env-head">
+                <span class="env-title"><i class="arch-dot" id="envDotVlm"></i>⑤ 大模型 API</span>
+                <span class="badge ok" id="envBadgeVlm">检查中</span>
+              </div>
+              <div class="env-main" id="envVlmMain">视觉大模型</div>
+              <div class="env-sub" id="envVlmSub"></div>
+              <div class="env-foot"><span id="envVlmFoot">配置 / 测连通</span><span>→</span></div>
+            </div>
           </div>
-          <div class="env-main" id="envReviewMain">工作台 + 8904</div>
-          <div class="env-sub"><span class="an-chip choice">悬停看答案</span><span class="an-chip fill">局域网协同</span></div>
-          <div class="env-foot"><span id="envReviewFoot">前往审阅工作区</span><span>→</span></div>
+
+          <!-- ⑥ 审阅协作 -->
+          <div class="env-node is-ok" id="envNodeReview" data-env-node="review" title="点击前往识别与审阅工作区">
+            <div class="env-head">
+              <span class="env-title"><i class="arch-dot done" id="envDotReview"></i>⑥ 审阅协作</span>
+              <span class="badge ok" id="envBadgeReview">就绪</span>
+            </div>
+            <div class="env-main" id="envReviewMain">工作台 + 8904</div>
+            <div class="env-sub" id="envReviewSub"><span class="env-mini ok"><i></i>悬停看答案</span><span class="env-mini ok"><i></i>局域网协同</span></div>
+            <div class="env-foot"><span id="envReviewFoot">前往审阅工作区</span><span>→</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下方公共运行基座：所有多模块共享依赖只出现一次，悬停与上方 DAG 双向联动 -->
+      <div class="env-base-tray" id="envBaseTray">
+        <div class="env-base-head">
+          <span class="env-base-title"><i data-ico="layers" class="ui-ico-sm"></i><span>公共运行基座（共享依赖不重复堆叠）</span></span>
+          <span class="env-link-hint" id="envLinkHint">悬停上方模块或下方依赖，高亮查看调用关系</span>
+        </div>
+        <div class="env-base-groups">
+          <div class="env-base-group">
+            <div class="env-base-glabel"><span>算力与解释器</span><span id="envBasePerfTag">自动推荐</span></div>
+            <div class="env-dep-row" id="envBaseComputeRow"></div>
+          </div>
+          <div class="env-base-group">
+            <div class="env-base-glabel"><span>推理引擎与共用 OCR</span><span>M1 / M2 / M3 共用</span></div>
+            <div class="env-dep-row" id="envBaseEngineRow"></div>
+          </div>
+          <div class="env-base-group">
+            <div class="env-base-glabel"><span>图像与基础库</span><span>点击可看详情</span></div>
+            <div class="env-dep-row" id="envBaseLibRow"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -201,6 +261,10 @@
         <span class="muted" id="checkDetailTag">加载中...</span>
       </summary>
       <div class="drawer-body">
+        <div id="checkDismissBar" class="check-dismiss-bar hidden">
+          <span id="checkDismissText"></span>
+          <button class="btn xs" id="btnRestoreAllWarns" type="button">恢复全部提醒</button>
+        </div>
         <div id="checkGrid" class="check-grid"></div>
       </div>
     </details>
@@ -308,13 +372,15 @@
       </div>
     </div>
 
-    <div class="between" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
-      <div class="row" style="gap:10px">
-        <button class="btn primary" id="btnIngestAndRun" type="button" style="padding:10px 22px;font-size:14.5px"><i data-ico="play" class="ui-ico-xs"></i><span>开始改试卷</span></button>
-        <button class="btn" id="btnDoIngest" type="button">仅入库</button>
-        <span id="ingestMsg" class="muted"></span>
+    <div class="ingest-cta-bar">
+      <div class="ingest-cta-actions">
+        <button class="btn primary btn-cta-hero" id="btnIngestAndRun" type="button"><i data-ico="play" class="ui-ico"></i><span>开始改试卷</span></button>
+        <button class="btn sm ghost hidden" id="btnDoIngest" type="button" title="仅导入批次并建立目录，暂不跑识别（模型迭代标框用）">仅入库（用于标注）</button>
       </div>
-      <span class="muted" id="ingestReadyHint" style="font-size:12px">放入试卷后即可一键开改</span>
+      <div class="ingest-cta-meta">
+        <span id="ingestReadyHint">放入试卷后即可一键开改</span>
+        <span id="ingestMsg"></span>
+      </div>
     </div>
   </section>
 

@@ -116,6 +116,8 @@ async function applyMirrorUiStateIfNeeded() {
     const qView = URL_PARAMS.get('view') || '';
     const qDlg = URL_PARAMS.get('dialog') || '';
     const qExpandArch = URL_PARAMS.get('expand_arch') === '1';
+    const qHoverDep = URL_PARAMS.get('hover_dep') || '';
+    const qHoverNode = URL_PARAMS.get('hover_node') || '';
 
     const targetMode = (qMode === 'grading' || qMode === 'iteration')
       ? qMode
@@ -129,7 +131,11 @@ async function applyMirrorUiStateIfNeeded() {
       : (['check', 'ingest', 'overview', 'train'].includes(st.view) ? st.view : '');
     if (targetView) {
       setView(targetView);
-      if (targetView === 'check' && !CHECK) renderCheck(await api('/api/check'));
+      if (targetView === 'check') {
+        if (!CHECK) renderCheck(await api('/api/check'));
+        if (qHoverDep && typeof highlightEnvByDep === 'function') highlightEnvByDep(qHoverDep);
+        else if (qHoverNode && typeof highlightEnvByNode === 'function') highlightEnvByNode(qHoverNode);
+      }
       if (targetView === 'train') await refreshTrainOverview();
     }
 

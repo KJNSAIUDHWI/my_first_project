@@ -813,7 +813,7 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
             "pip": pkg["pip"],
         })
 
-    # 2b. 版本兼容性检查（numpy < 2.4 与双 OpenCV 冲突）
+    # 2b. 版本兼容性检查（numpy < 2.4 与双 OpenCV 冲突；非阻塞，允许用户按指纹忽略）
     np_ver = _pkg_version("numpy")
     if np_ver and _parse_ver_tuple(np_ver) >= (2, 4, 0):
         items.append({
@@ -823,6 +823,7 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
             "name": "依赖兼容：NumPy 版本检查",
             "ok": False,
             "severity": "warn",
+            "dismissible": True,
             "detail": f"当前 numpy=={np_ver}，PaddleOCR (paddlex) 要求 numpy<2.4，可能引发兼容性问题。",
             "fix": "建议运行：pip install \"numpy>=2.0.0,<2.4\"",
         })
@@ -836,6 +837,7 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
             "name": "依赖兼容：OpenCV 重复安装",
             "ok": False,
             "severity": "warn",
+            "dismissible": True,
             "detail": f"同时安装了 opencv-python ({cv_std}) 与 opencv-contrib-python ({cv_contrib})，两者同名 cv2 可能互相覆盖。",
             "fix": "建议运行：pip uninstall -y opencv-python opencv-contrib-python && pip install opencv-contrib-python==4.10.0.84",
         })
@@ -931,8 +933,21 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
     opencode_path = find_opencode(cfg)
     zcode_info = find_zcode(cfg)
 
+    # 按配置指纹过滤用户已明确忽略的非阻塞兼容提醒（若版本号/明细变更则自动重新提醒）
+    dismissed_map = cfg.get("dismissed_env_warnings") or {}
+    if not isinstance(dismissed_map, dict):
+        dismissed_map = {}
+    for it in items:
+        if it.get("severity") == "warn" and it.get("dismissible"):
+            fp = str(it.get("detail") or "")
+            is_dis = bool(fp and dismissed_map.get(it["id"]) == fp)
+            it["dismissed"] = is_dis
+        else:
+            it["dismissed"] = False
+
     errors = [x for x in items if x["severity"] == "error"]
-    warnings = [x for x in items if x["severity"] == "warn"]
+    warnings = [x for x in items if x["severity"] == "warn" and not x.get("dismissed")]
+    dismissed_warns = [x for x in items if x.get("dismissed")]
 
     return {
         "checked_at": now_str(),
@@ -941,6 +956,8 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
         "ok": len(errors) == 0,
         "error_count": len(errors),
         "warning_count": len(warnings),
+        "dismissed_warning_count": len(dismissed_warns),
+        "dismissed_warning_ids": [x["id"] for x in dismissed_warns],
         "has_valid_api_key": has_key,
         "placeholder_api_key": placeholder_key,
         "hardware": hw,

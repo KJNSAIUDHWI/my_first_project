@@ -63,10 +63,20 @@ function triggerDropConfirmFX(cardEl, celebrateEl, tagEl, tagText) {
 
 function updateIngestReadyHint() {
   const hint = $('ingestReadyHint');
-  if (!hint) return;
+  const cta = $('btnIngestAndRun');
   const pOk = Boolean(STAGED_PAPER || $('inputSourceDir').value.trim());
   const aOk = Boolean(STAGED_ANSWER);
-  if (pOk && aOk) hint.textContent = '试卷与答案都已就位，点左侧按钮即可一键开改';
+  if (cta) {
+    const wasReady = cta.dataset.ready === '1';
+    cta.dataset.ready = pOk ? '1' : '0';
+    if (pOk && !wasReady) {
+      cta.classList.remove('ready-pop');
+      void cta.offsetWidth;
+      cta.classList.add('ready-pop');
+    }
+  }
+  if (!hint) return;
+  if (pOk && aOk) hint.textContent = '试卷与答案都已就位，点击上方按钮即可一键开改';
   else if (pOk) hint.textContent = '试卷已就位（答案可留空，也可现在贴入）';
   else hint.textContent = '放入试卷后即可一键开改';
 }

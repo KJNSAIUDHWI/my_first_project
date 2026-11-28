@@ -27,46 +27,51 @@ function bezierPath(a, b, vertical = false) {
   return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} C ${(a.x + dx).toFixed(1)} ${a.y.toFixed(1)}, ${(b.x - dx).toFixed(1)} ${b.y.toFixed(1)}, ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 }
 
-/* Step 1：环境配置 4 节点架构连线 */
-let ENV_STATES = { compute: 'ok', models: 'ok', vlm: 'ok', review: 'ok' };
+/* Step 1：与识别流同构的 6 节点体检 DAG 连线（配色随当前冷暖模式自适应，拒绝突兀亮绿） */
+let ENV_STATES = { orient: 'ok', m1: 'ok', m2: 'ok', m3: 'ok', vlm: 'ok', review: 'ok' };
 function drawEnvArchConnectors() {
-  const stage = $('envArchStage');
+  const stage = $('envDagStage') || $('envArchStage');
   const svg = $('envArchSvg');
   if (!stage || !svg || stage.offsetWidth === 0) return;
   const sr = stage.getBoundingClientRect();
   svg.innerHTML = '';
+  const cs = getComputedStyle(document.body);
+  const okColor = (cs.getPropertyValue('--ok-edge') || '#60a5fa').trim();
   const defs = svgEl('defs');
   [
-    ['envArrOk', '#16a34a'],
+    ['envArrOk', okColor],
     ['envArrWarn', '#d97706'],
     ['envArrErr', '#dc2626'],
     ['envArrIdle', '#94a3b8'],
   ].forEach(([id, color]) => {
-    const m = svgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 6.5, markerHeight: 6.5, orient: 'auto' });
+    const m = svgEl('marker', { id, viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto' });
     m.appendChild(svgEl('path', { d: 'M 0 1 L 9 5 L 0 9 z', fill: color }));
     defs.appendChild(m);
   });
   svg.appendChild(defs);
 
-  const pairs = [
-    ['envNodeCompute', 'envNodeModels', ENV_STATES.compute, ENV_STATES.models],
-    ['envNodeModels', 'envNodeVlm', ENV_STATES.models, ENV_STATES.vlm],
-    ['envNodeVlm', 'envNodeReview', ENV_STATES.vlm, ENV_STATES.review],
+  const edges = [
+    { from: 'envNodeOrient', fr: 0.5,  to: 'envNodeM1',     tr: 0.5,  sA: ENV_STATES.orient, sB: ENV_STATES.m1 },
+    { from: 'envNodeM1',     fr: 0.34, to: 'envNodeM2',     tr: 0.5,  sA: ENV_STATES.m1,     sB: ENV_STATES.m2 },
+    { from: 'envNodeM1',     fr: 0.68, to: 'envNodeM3',     tr: 0.5,  sA: ENV_STATES.m1,     sB: ENV_STATES.m3 },
+    { from: 'envNodeM3',     fr: 0.5,  to: 'envNodeVlm',    tr: 0.5,  sA: ENV_STATES.m3,     sB: ENV_STATES.vlm },
+    { from: 'envNodeM2',     fr: 0.5,  to: 'envNodeReview', tr: 0.36, sA: ENV_STATES.m2,     sB: ENV_STATES.review },
+    { from: 'envNodeVlm',    fr: 0.5,  to: 'envNodeReview', tr: 0.66, sA: ENV_STATES.vlm,    sB: ENV_STATES.review },
   ];
-  pairs.forEach(([fromId, toId, sA, sB]) => {
-    const aEl = $(fromId), bEl = $(toId);
+  edges.forEach(e => {
+    const aEl = $(e.from), bEl = $(e.to);
     if (!aEl || !bEl) return;
-    const a = anchorPoint(sr, aEl, 'right', 0.5);
-    const b = anchorPoint(sr, bEl, 'left', 0.5);
-    if (b.x - a.x < 10) return;
+    const a = anchorPoint(sr, aEl, 'right', e.fr);
+    const b = anchorPoint(sr, bEl, 'left', e.tr);
+    if (b.x - a.x < 8) return;
     const d = bezierPath(a, { x: b.x - 4, y: b.y }, false);
-    const bad = sA === 'err' || sB === 'err';
-    const warn = !bad && (sA === 'warn' || sB === 'warn');
+    const bad = e.sA === 'err' || e.sB === 'err';
+    const warn = !bad && (e.sA === 'warn' || e.sB === 'warn');
     const cls = bad ? 'err' : (warn ? 'warn' : 'done');
     const arrId = bad ? 'envArrErr' : (warn ? 'envArrWarn' : 'envArrOk');
     svg.appendChild(svgEl('path', { d, class: `pipe-base ${cls}`, 'marker-end': `url(#${arrId})` }));
     if (!bad && !warn) {
-      svg.appendChild(svgEl('path', { d, class: 'pipe-stream flowing', style: 'opacity:.32' }));
+      svg.appendChild(svgEl('path', { d, class: 'pipe-stream flowing', style: 'opacity:.22' }));
     }
   });
 }

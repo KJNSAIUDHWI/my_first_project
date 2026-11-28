@@ -2237,6 +2237,24 @@ def make_handler(state: WorkbenchState):
                     patch["training_db_enabled"] = bool(body["training_db_enabled"])
                 if "last_benchmark" in body and isinstance(body["last_benchmark"], dict):
                     patch["last_benchmark"] = body["last_benchmark"]
+                if "dismiss_env_warnings" in body and isinstance(body["dismiss_env_warnings"], list):
+                    cur_dis = dict(core.load_config(state.batches_root).get("dismissed_env_warnings") or {})
+                    for entry in body["dismiss_env_warnings"]:
+                        if isinstance(entry, dict):
+                            wid = str(entry.get("id") or "").strip()
+                            det = str(entry.get("detail") or "").strip()
+                            if wid and det:
+                                cur_dis[wid] = det
+                    patch["dismissed_env_warnings"] = cur_dis
+                if "restore_env_warnings" in body:
+                    rv = body["restore_env_warnings"]
+                    if rv is True or rv == "all":
+                        patch["dismissed_env_warnings"] = {}
+                    elif isinstance(rv, list):
+                        cur_dis = dict(core.load_config(state.batches_root).get("dismissed_env_warnings") or {})
+                        for wid in rv:
+                            cur_dis.pop(str(wid), None)
+                        patch["dismissed_env_warnings"] = cur_dis
                 cfg = core.save_config(patch, state.batches_root)
                 # 若切换了工作模式且 8904 正在运行，顺手热同步给 8904
                 if "work_mode" in patch:
@@ -2265,6 +2283,7 @@ def make_handler(state: WorkbenchState):
                     "training_db": core.get_training_db_status(state.root, state.batches_root),
                     "agents": agent_providers.detect_all_agents(cfg, deep=False),
                     "infer_settings": core.get_infer_settings(state.batches_root),
+                    "check": state.last_check,
                 })
                 return
 

@@ -988,6 +988,75 @@ class WorkbenchTests(unittest.TestCase):
                 srv.shutdown()
                 srv.server_close()
 
+    def test_dismiss_and_restore_env_warnings(self):
+        """验证非阻塞环境兼容提醒支持按指纹持久化忽略、版本变更自动重新提醒、以及一键恢复。"""
+        from unittest.mock import patch
+
+        iso_batches = self.work / "iso_dismiss_batches"
+        iso_batches.mkdir(parents=True, exist_ok=True)
+
+        fake_vers = {"opencv-python": "4.11.0.86", "opencv-contrib-python": "4.10.0.84", "numpy": "2.2.0"}
+        real_pkg_ver = core._pkg_version
+
+        def mock_pkg_ver(name):
+            return fake_vers.get(name, real_pkg_ver(name))
+
+        with patch.object(core, "_pkg_version", side_effect=mock_pkg_ver):
+            rep1 = core.check_environment(ROOT, iso_batches, deep=False)
+            cv_item = next((x for x in rep1["items"] if x["id"] == "compat_opencv"), None)
+            self.assertIsNotNone(cv_item)
+            self.assertTrue(cv_item["dismissible"])
+            self.assertFalse(cv_item["dismissed"])
+            self.assertGreaterEqual(rep1["warning_count"], 1)
+
+            # 通过 /api/config 持久化忽略该条提醒
+            state = wb_serve.WorkbenchState(root=ROOT, batches_root=iso_batches, port=0)
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), wb_serve.make_handler(state))
+            port = srv.server_address[1]
+            state.port = port
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                base = f"http://127.0.0.1:{port}"
+                req = urllib.request.Request(
+                    f"{base}/api/config",
+                    data=json.dumps({
+                        "dismiss_env_warnings": [{"id": "compat_opencv", "detail": cv_item["detail"]}],
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    res = json.loads(r.read().decode("utf-8"))
+                self.assertTrue(res["ok"])
+                chk2 = res["check"]
+                cv2 = next(x for x in chk2["items"] if x["id"] == "compat_opencv")
+                self.assertTrue(cv2["dismissed"])
+                self.assertEqual(chk2["dismissed_warning_count"], 1)
+                self.assertEqual(chk2["warning_count"], rep1["warning_count"] - 1)
+
+                # 若包版本号变化（指纹改变），自动重新浮出提醒
+                fake_vers["opencv-python"] = "4.12.0.1"
+                rep_changed = core.check_environment(ROOT, iso_batches, deep=False)
+                cv_changed = next(x for x in rep_changed["items"] if x["id"] == "compat_opencv")
+                self.assertFalse(cv_changed["dismissed"])
+
+                # 恢复原版本并通过 restore_env_warnings 清除忽略记录
+                fake_vers["opencv-python"] = "4.11.0.86"
+                req2 = urllib.request.Request(
+                    f"{base}/api/config",
+                    data=json.dumps({"restore_env_warnings": ["compat_opencv"]}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req2, timeout=5) as r:
+                    res2 = json.loads(r.read().decode("utf-8"))
+                cv3 = next(x for x in res2["check"]["items"] if x["id"] == "compat_opencv")
+                self.assertFalse(cv3["dismissed"])
+                self.assertEqual(res2["check"]["dismissed_warning_count"], 0)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()
