@@ -56,7 +56,9 @@ from engine.diagnostics import (
     resolve_infer_device,
     diagnose_exception,
     append_error_log,
+    is_json_or_struct_error,
 )
+from engine.run_log import RunLogger, now_iso, collect_runtime_versions
 
 DEFAULT_SELECTION = ROOT / 'models/对比/m3/20261030_物理20页全链路框回归_1811/selection.json'
 SETTINGS = {
@@ -489,7 +491,10 @@ def apply_responses(pages, grids, responses, provider_label: str | None = None):
                 item['issues'].append(prefix + str(err_txt))
                 continue
             item['transcription'] = parsed
-            item['status'] = '已识别'
+            dup_warnings = (response.get('dup_warnings') or {}).get(item['id']) or []
+            item['status'] = '待复核' if dup_warnings else '已识别'
+            for dw in dup_warnings:
+                item['issues'].append(prefix + str(dw))
             if item['kind'] == 'identity':
                 if any(parsed[k] == '看不清' for k in ('name', 'sid')):
                     item['issues'].append(prefix + '身份有看不清字段')
@@ -640,13 +645,15 @@ def run(args):
                 append_error_log(out, diag['module'], diag['reason'], diag)
                 _emit_event({'event': 'error', 'diagnostic': diag})
                 raise SystemExit(EXIT_MANIFEST_CONFLICT)
-            # 同一批试卷下：若更换了模型权重或检测参数，清理旧 pages/ 缓存以使用新模型重新检测；
-            # 若仅代码小修（模型与参数未变），保留已有 pages/ 缓存直接断点续跑。
+            # 同一批试卷下：若更换了模型权重、检测参数或核心检测/配对代码，清理旧 pages/ 缓存以使新逻辑生效
             models_changed = (
                 old_manifest.get('models') != manifest.get('models')
                 or old_manifest.get('paddle') != manifest.get('paddle')
                 or old_manifest.get('settings') != manifest.get('settings')
                 or old_manifest.get('working_images') != manifest.get('working_images')
+                or old_manifest.get('detection_code_sha256') != manifest.get('detection_code_sha256')
+                or old_manifest.get('choice_matching_sha256') != manifest.get('choice_matching_sha256')
+                or old_manifest.get('grid_size') != manifest.get('grid_size')
             )
             if models_changed and (out / 'pages').is_dir():
                 for stale in (out / 'pages').glob('p*.json'):
@@ -658,6 +665,22 @@ def run(args):
     (out / 'prompt.txt').write_text(PROMPT, encoding='utf-8')
 
     client = VlmClient(out)
+    run_log = RunLogger(
+        out,
+        kind='recognize',
+        source='recognizer',
+        meta_extra={
+            'pages_total': len(sources),
+            'device': eff_device,
+            'yolo_batch': yolo_batch,
+            'workers': workers,
+            'concurrency': args.concurrency,
+            'model': client.model,
+            'provider': client.provider,
+            'detect_only': bool(args.detect_only),
+        },
+    )
+    run_log.emit('run.start', f'启动自动识别，共 {len(sources)} 页（设备 {eff_device}）')
     packers = {'fill': SquarePacker(out), 'identity': SquarePacker(out, prefix='i')}
     recognizer: Recognizer | None = None
 
@@ -808,9 +831,32 @@ def run(args):
                 rec = {'grid': gid, 'ok': False, 'error': diag['title'] + '：' + diag['reason'], 'items': {}, 'errors': {}}
             records[gid] = rec
             if not rec.get('ok'):
-                diag = diagnose_exception(str(rec.get('error') or '调用失败'), default_module=f'{client.provider_label} 视觉转录')
-                append_error_log(out, diag['module'], str(rec.get('error') or '调用失败'), diag, context={'grid': gid})
+                err_txt = str(rec.get('error') or '调用失败')
+                diag = diagnose_exception(err_txt, default_module=f'{client.provider_label} 视觉转录')
+                append_error_log(out, diag['module'], err_txt, diag, context={'grid': gid, 'run_id': run_log.run_id})
+                run_log.emit(
+                    'api.grid_fail',
+                    f'拼图 {gid} 失败：{err_txt[:160]}',
+                    level='ERROR',
+                    status='fail',
+                    grid_id=gid,
+                    duration_ms=round(float(rec.get('seconds') or 0) * 1000, 1),
+                    error_code=str(rec.get('error_code') or ''),
+                    detail={'error': err_txt[:240]},
+                )
                 recent_error = diag
+            else:
+                dup_w = rec.get('dup_warnings') or {}
+                tile_errs = rec.get('errors') or {}
+                run_log.emit(
+                    'api.grid_ok',
+                    f'拼图 {gid} 完成（{len(rec.get("items") or {})} 题）',
+                    level='WARN' if (dup_w or tile_errs) else 'INFO',
+                    status='ok',
+                    grid_id=gid,
+                    duration_ms=round(float(rec.get('seconds') or 0) * 1000, 1),
+                    detail={'reused': bool(rec.get('reused')), 'dup_warning_tiles': list(dup_w.keys()), 'tile_error_count': len(tile_errs)},
+                )
             if gid not in merged_grid_ids and gid in grid_by_id:
                 apply_responses(pages, [grid_by_id[gid]], [rec], provider_label=client.provider_label)
                 merged_grid_ids.add(gid)
@@ -909,10 +955,11 @@ def run(args):
     ):
         def submit_grid(grid):
             if grid:
+                grid['run_id'] = run_log.run_id
                 grids.append(grid)
                 grid_by_id[grid['id']] = grid
                 if not args.detect_only:
-                    futures[api_pool.submit(client.call, grid)] = grid['id']
+                    futures[api_pool.submit(client.call, grid, False, run_log.run_id)] = grid['id']
 
         def commit_finished_page(page: dict, tiles: list):
             pages.append(page)
@@ -1232,23 +1279,36 @@ def run(args):
             if unmerged:
                 apply_responses(pages, [x[0] for x in unmerged], [x[1] for x in unmerged], provider_label=client.provider_label)
 
-        # 结构异常单轮有界自动补修（绝不重跑已成功题块）
+        # 结构异常与 JSON 解析失败单轮有界单题自动补修（绝不重跑已成功题块或网络/鉴权失败）
         if not args.detect_only:
-            repair_packer = SquarePacker(out, prefix='r')
+            repair_packer = SquarePacker(out, prefix='r', max_items=1)
             repair_grids = []
+            repaired_tile_ids: set[str] = set()
             for page in pages:
                 for item in page['items']:
-                    if item['status'] == '结构异常' and item['kind'] in ('fill', 'identity'):
+                    if item['kind'] not in ('fill', 'identity'):
+                        continue
+                    is_struct = item['status'] == '结构异常'
+                    is_json_fail = (
+                        item['status'] == '调用失败'
+                        and is_json_or_struct_error(' '.join(str(x) for x in (item.get('issues') or [])))
+                    )
+                    if is_struct or is_json_fail:
+                        crop_p = out / item['crop']
+                        if not crop_p.is_file():
+                            continue
+                        repaired_tile_ids.add(str(item['id']))
                         tile = {k: item[k] for k in ('id', 'kind', 'page_id', 'number', 'crop')}
-                        finished = repair_packer.add(tile, Image.open(out / item['crop']).convert('RGB'))
+                        finished = repair_packer.add(tile, Image.open(crop_p).convert('RGB'))
                         if finished:
                             repair_grids.append(finished)
             finished = repair_packer.finish()
             if finished:
                 repair_grids.append(finished)
             if repair_grids:
-                emit_progress('结构异常自动补修', f'检测到少量结构异常题块，正在重排为 {len(repair_grids)} 个补修拼图...')
-                repair_jobs = {api_pool.submit(client.call, g): g['id'] for g in repair_grids}
+                emit_progress('结构异常自动补修', f'检测到 {len(repaired_tile_ids)} 个结构/解析异常题块，正在按单题模式自动补修（{len(repair_grids)} 图）...')
+                run_log.emit('repair.start', f'自动单题补修启动：{len(repaired_tile_ids)} 题 / {len(repair_grids)} 图')
+                repair_jobs = {api_pool.submit(client.call, g, True, run_log.run_id): g['id'] for g in repair_grids}
                 repair_responses = {}
                 for fut in as_completed(repair_jobs):
                     gid = repair_jobs[fut]
@@ -1256,30 +1316,59 @@ def run(args):
                         rec = fut.result()
                     except Exception as exc:
                         diag = diagnose_exception(exc, default_module=f'{client.provider_label} 补修转录')
-                        append_error_log(out, diag['module'], exc, diag, context={'grid': gid})
+                        append_error_log(out, diag['module'], exc, diag, context={'grid': gid, 'run_id': run_log.run_id})
                         recent_error = diag
                         rec = {'grid': gid, 'ok': False, 'error': diag['title'] + '：' + diag['reason'], 'items': {}, 'errors': {}}
+                    if not rec.get('ok'):
+                        err_txt = str(rec.get('error') or '补修调用失败')
+                        diag = diagnose_exception(err_txt, default_module=f'{client.provider_label} 补修转录')
+                        append_error_log(out, diag['module'], err_txt, diag, context={'grid': gid, 'run_id': run_log.run_id})
+                        run_log.emit('api.repair_fail', f'补修拼图 {gid} 失败：{err_txt[:160]}', level='ERROR', status='fail', grid_id=gid)
+                        recent_error = diag
+                    else:
+                        run_log.emit('api.repair_ok', f'补修拼图 {gid} 成功', grid_id=gid)
                     repair_responses[gid] = rec
                     records[gid] = rec
                 ordered = [repair_responses[g['id']] for g in repair_grids]
                 apply_responses(pages, repair_grids, ordered, provider_label=client.provider_label)
+                for g in grids:
+                    if g.get('superseded'):
+                        continue
+                    g_ids = {str(t.get('id') or '') for t in (g.get('items') or []) if t.get('id')}
+                    prev_ok = bool((records.get(g['id']) or {}).get('ok'))
+                    if g_ids and (g_ids.issubset(repaired_tile_ids) or (not prev_ok and bool(g_ids & repaired_tile_ids))):
+                        g['superseded'] = True
+                        g['superseded_by'] = run_log.run_id
+                for g in repair_grids:
+                    g['run_id'] = run_log.run_id
                 grids.extend(repair_grids)
                 responses.extend(ordered)
+                run_log.emit('repair.end', f'单题自动补修完成：成功 {sum(1 for r in ordered if r.get("ok"))}/{len(ordered)}')
 
     all_records = [json.loads(p.read_text(encoding='utf-8')) for p in (out / 'api').glob('*.json')] if (out / 'api').exists() else []
     returned_models = sorted({str(r.get('returned_model')) for r in all_records if r.get('returned_model')})
     page_failures = sum(bool(p.get('error')) for p in pages)
-    api_success = sum(bool(r.get('ok')) for r in responses)
-    api_failures = sum(not r.get('ok') for r in responses)
+    active_pairs = [(g, r) for g, r in zip(grids, responses) if not g.get('superseded')]
+    superseded_grids = len(grids) - len(active_pairs)
+    api_success = sum(bool(r.get('ok')) for _, r in active_pairs)
+    api_failures = sum(not r.get('ok') for _, r in active_pairs)
+    remaining_failed_items = sum(
+        1
+        for p in pages
+        for i in p['items']
+        if i.get('kind') in ('fill', 'identity') and i.get('status') in ('调用失败', '结构异常', '等待视觉转录', '等待豆包')
+    )
     stats = {
         'pages': len(pages),
         'pages_total': total_pages,
         'page_failures': page_failures,
-        'grids': len(grids),
+        'grids': len(active_pairs),
+        'grids_total_history': len(grids),
+        'superseded_grids': superseded_grids,
         'api_done': api_success + api_failures,
         'api_success': api_success,
         'api_failures': api_failures,
-        'reused': sum(bool(r.get('reused')) for r in responses),
+        'reused': sum(bool(r.get('reused')) for _, r in active_pairs),
         'prompt_tokens': sum(r.get('usage', {}).get('prompt_tokens', 0) for r in all_records),
         'completion_tokens': sum(r.get('usage', {}).get('completion_tokens', 0) for r in all_records),
         'cached_tokens': sum((r.get('usage', {}).get('prompt_tokens_details') or {}).get('cached_tokens', 0) for r in all_records),
@@ -1295,7 +1384,7 @@ def run(args):
         'yolo_batch': yolo_batch,
         'workers': workers,
         'human_accuracy': None,
-        'api_extra_ids': {g['id']: r['extra_ids'] for g, r in zip(grids, responses) if r.get('extra_ids')},
+        'api_extra_ids': {g['id']: r['extra_ids'] for g, r in active_pairs if r.get('extra_ids')},
         **counters,
     }
 
@@ -1305,12 +1394,17 @@ def run(args):
         final_status = '识别失败：全部页面本地检测失败'
     elif page_failures > 0:
         final_status = '部分页面本地失败，待补跑'
-    elif api_failures > 0:
+    elif api_failures > 0 or remaining_failed_items > 0:
         final_status = '有未完成调用，待补跑'
     else:
         final_status = '待人工验收'
 
+    finished_at = now_iso()
     result = {
+        'run_id': run_log.run_id,
+        'started_at': run_log.started_at,
+        'finished_at': finished_at,
+        'runtime': collect_runtime_versions(),
         'pages': pages,
         'grids': grids,
         'model': client.model,
@@ -1323,8 +1417,13 @@ def run(args):
         'note': '只识别，不评分。未标注的空白区域也可能有漏检，请结合整页原图核对。工作图保留原转正像素；正反面不归并。',
     }
     save_json(out / 'results.json', result)
+    run_log.finish(
+        'error' if all_pages_failed else ('warn' if (page_failures > 0 or api_failures > 0 or remaining_failed_items > 0) else 'ok'),
+        stats=stats,
+        message=f'状态：{final_status}',
+    )
     emit_progress('完成' if not all_pages_failed else '全部失败', f'状态：{final_status}')
-    _emit_event({'event': 'summary', 'status': final_status, 'stats': stats, 'recent_error': recent_error})
+    _emit_event({'event': 'summary', 'run_id': run_log.run_id, 'status': final_status, 'stats': stats, 'recent_error': recent_error})
 
     if all_pages_failed:
         exit_code = int((recent_error or {}).get('exit_code') or EXIT_ALL_PAGES_FAILED)

@@ -134,9 +134,9 @@ def load_vlm_config(root=None) -> dict:
     }
 
 
-# 32x32 纯白 PNG（兼容豆包/Qwen-VL 等要求 >=14px 或 >=28px 的视觉模型最小尺寸限制，且体积仅 ~100 字节）
+# 64x64 纯白 PNG（兼容豆包/Qwen-VL 等要求 >=14px 或 >=28px 的视觉模型最小尺寸限制，且体积仅 ~140 字节）
 _TINY_PNG_B64 = (
-    'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQEAAAQEMPTvfErw2wqsk9SnqWcCgUAgEAgEAoHgygLH8QM9BsqtpQAAAABJRU5ErkJggg=='
+    'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAATUlEQVR42u3PQQ0AAAgEILV/5zOFDzdoQCepz6aeExAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQELi3cqoDfaKuZM4AAAAASUVORK5CYII='
 )
 
 
@@ -213,6 +213,7 @@ def test_vlm_connection(
         return {
             'ok': True,
             'vision_verified': bool(check_vision),
+            'vision_input_accepted': bool(check_vision),
             'latency_ms': ms,
             'endpoint': endpoint,
             'requested_model': eff_model,
@@ -231,11 +232,12 @@ def test_vlm_connection(
         low_err = err_body.lower()
         if exc.code in (401, 403):
             hint = '（密钥无效、已过期或无权访问该模型）'
+        elif exc.code == 400 and check_vision and any(k in low_err for k in ('too small', 'dimensions', 'minimum allowed', 'image size')):
+            hint = '（测试图片尺寸过小，不符合服务商最小边要求，并非模型不支持看图）'
         elif (
             exc.code == 400
             and check_vision
             and any(k in low_err for k in ('image', 'vision', 'multimodal', 'image_url'))
-            and not any(k in low_err for k in ('dimension', 'too small', 'too large', 'size'))
         ):
             hint = '（该模型不支持图片输入！请更换支持视觉/看图的模型）'
         elif exc.code == 404:
@@ -261,9 +263,9 @@ PROMPT = r'''你是答题卡忠实转录工具，不解题、不纠错、不评�
 只返回一个合法JSON对象，结构为 {"图块ID":{"kind":"fill","question_number":"卷面大题号","answers":{"小题号":{"空序号":"最终手写答案"}}}}。姓名学号图块改为 {"kind":"identity","name":"姓名","sid":"学号"}。
 最高优先级的用户规则：只要某个填空/实验探究小题里出现任何图片、示意图、曲线图、坐标图或其他图形，整个小题一律舍弃，不读其中任何答案，即使它要求的是文字填空而不是作图。保留该小题号，固定输出 {"舍弃":"舍弃"}，这不是第1空，不表示空位数量。例如 {"2":{"舍弃":"舍弃"}}；同一道大题的其他无图小题继续按原规则识别。没有小题号的题出现图片，按"无小题号":{"舍弃":"舍弃"}输出。不要仅因为图片属于别的图块就舍弃本图块。不能遗漏被舍弃题目的题号，也不能把舍弃当作空白或看不清。
 填空图块按实际印刷的小题号定位；没有小题号用"无小题号"。每个小题内按上到下、左到右为空位编号，从"1"起；一条连续填空线只算一空。大题号看不清写"题号看不清"，小题号看不清写"小题号看不清"，不能顺序猜号。每个可见的空都保留，绝不能合并空、漏空或把后面的答案前移。实验探究的文字回答也逐空保留。
-先区分印刷题号/子题号与学生答案。印刷的(4)①、②表示第4小题的两个子题，answers键分别写"4.1"、"4.2"，各子题的空序号重新从"1"起；不要再嵌套一层小题号，不把①②当作答案，不把②的空白漏掉。层级格式示例：{"4.1":{"1":"某答案"},"4.2":{"1":""}}。没有印刷子题号时，不因同一小题有多空而人为创建子题；例如(1)的三个填空仍是"1":{"1":"...","2":"...","3":"..."}。
+先区分印刷题号/子题号与学生答案。印刷的(4)①、②表示第4小题的两个子题，answers键分别写"4.1"、"4.2"，各子题的空序号重新从"1"起；不要再嵌套一层小题号，不把①②当作答案，不把②的空白漏掉。层级格式示例：{"4.1":{"1":"某答案"},"4.2":{"1":""}}。没有印刷子题号时，不因同一小题有多空而人为创建子题；例如(1)的三个填空仍是"1":{"1":"...","2":"...","3":"..."}。同一图块内每个小题号在answers中只能出现一次，严格按卷面从上到下（1、2、3、4）顺序输出，严禁在开头提前预写"4"后再重复输出"4"；若(4)下已拆分为"4.1"、"4.2"，不得再输出"4"。
 手写文字按可见字形逐字辨认，结合该字的横竖、穿出位置、封口、连笔及上下文确定；特别区分甲/乙/丙、甲/平、左/右、受/重等相似字，不以题型常见答案替代原字。每空检查开头、末尾和紧贴填空线的笔画，避免漏字、把连笔拆成多字或把正常收笔误当删除线。学生写到哪里就转录到哪里：未写完整的短语不续写，明显错别字不改正；若关键字存在无法排除的多种读法，该空写"看不清"，不输出猜测拼接的词。输出前再逐空核对文字、数字和空位数量，所有例子仅说明格式与辨认原则，不是本图答案。
-逐空先检查划掉、覆盖、重写或插入，特别留意穿过文字、与笔画重叠的细横线、斜线、叉号和反复涂抹；不要把印刷填空线或正常字形笔画当作删除线。明确划掉/涂黑删除的内容不进入最终答案，不能因旧字仍可读就与新字拼接；例如“质量”被划掉、重写“位置”，只输出“位置”，不得输出“质量位置”。无法区分删除与有效笔迹，或最终答案认不清，直接写"看不清"，不能依据常识猜测。真正空白或明确仅删除未重写写空字符串。学生的错别字、错误数字、单位、正负号、公式忠实保留，不依据常识改正。印刷题干不作学生答案。
+逐空先检查划掉、覆盖、重写或插入，特别留意穿过文字、与笔画重叠的细横线、斜线、叉号和反复涂抹；不要把印刷填空线或正常字形笔画当作删除线。明确划掉/涂黑删除的内容不进入最终答案，不能因旧字仍可读就与新字拼接；例如“质量”被划掉、重写“位置”，只输出“位置”，不得输出“质量位置”。同一条连续填空横线上无论涂改多少次、左右并排写了被划掉的旧字与重写的新字，永远只对应这1个空，严禁把同一条横线上的涂改残字与新字拆分成两个空号。无法区分删除与有效笔迹，或最终答案认不清，直接写"看不清"，不能依据常识猜测。真正空白或明确仅删除未重写写空字符串。学生的错别字、错误数字、单位、正负号、公式忠实保留，不依据常识改正。印刷题干不作学生答案。
 公式必须用合法LaTeX转录，以单个美元符号包围，例如 $...$；文字与公式混合时只包围公式部分。先按原图辨认分子/分母、分数线范围、上下标归属、括号、根号范围、正负号、乘除号及等号两边，再转录；严格区分数字1、小写l、大写L以及数字0、字母O，不按物理公式补项、改写、化简或纠错。分子分母、上下标及根号内容均用花括号明确范围。分数写\frac{分子}{分母}，禁止漏掉反斜杠或把frac写成rac。关键符号无法辨认时该空写“看不清”，不要生成貌似合理的公式。
 JSON转义必须正确：公式里的每一个LaTeX反斜杠在原始JSON字符串中必须写成两个反斜杠；不得把\frac中的\f变成换页控制字符，也不得把\text中的\t、\begin中的\b等当作JSON控制转义。完整合法JSON示例：{"图块ID":{"kind":"fill","question_number":"22","answers":{"3":{"1":"$\\frac{F_{1}L_{1}}{F_{2}}=L_{2}$"}}}}。这只是格式示例，实际内容必须来自各自图块，不照抄示例。输出前检查JSON解码后的公式仍保留完整LaTeX命令，花括号和美元符号成对；只返回JSON，不输出检查过程。
 姓名、学号分别忠实读取，学号必须用字符串保留前导零；认不清写"看不清"，没写用空字符串。
@@ -305,6 +307,45 @@ def save_json(path, data, retries=100, delay=0.05):
     raise last_exc  # type: ignore[misc]
 
 
+def _strip_json_fences(text: str) -> str:
+    clean = text.strip()
+    if clean.startswith('```') and clean.endswith('```'):
+        clean = clean.split('\n', 1)[1].rsplit('```', 1)[0]
+    return clean
+
+
+def _merge_duplicate_values(existing, incoming, path_prefix: str, notes: list[str], own_notes: dict[int, list[str]] | None = None, refs: list | None = None):
+    """递归合并 JSON 同层重复键：dict 按键合并，值相同去重，值冲突保留后值并记录前值供复核。"""
+    if isinstance(existing, dict) and isinstance(incoming, dict):
+        merged = dict(existing)
+        if refs is not None:
+            refs.append(merged)
+        carried: list[str] = []
+        if own_notes is not None:
+            carried.extend(own_notes.pop(id(existing), []))
+            carried.extend(own_notes.pop(id(incoming), []))
+        before = len(notes)
+        for k, v in incoming.items():
+            sub_path = f'{path_prefix}.{k}' if path_prefix else str(k)
+            if k in merged:
+                merged[k] = _merge_duplicate_values(merged[k], v, sub_path, notes, own_notes=own_notes, refs=refs)
+            else:
+                merged[k] = v
+        if len(notes) == before:
+            notes.append(f'JSON重复键合并：{path_prefix}（已互补合并）')
+        if carried and own_notes is not None:
+            own_notes.setdefault(id(merged), []).extend(carried)
+        return merged
+    if existing == incoming:
+        notes.append(f'JSON重复键去重：{path_prefix}')
+        return incoming
+    prev_s = str(existing)
+    if len(prev_s) > 40:
+        prev_s = prev_s[:40] + '…'
+    notes.append(f'JSON重复键冲突：{path_prefix}（前值“{prev_s}”，已保留后值，请复核）')
+    return incoming
+
+
 def strict_json(text):
     def pairs(items):
         result = {}
@@ -313,11 +354,69 @@ def strict_json(text):
                 raise ValueError('JSON重复键：' + key)
             result[key] = value
         return result
-    clean = text.strip()
-    if clean.startswith('```') and clean.endswith('```'):
-        clean = clean.split('\n', 1)[1].rsplit('```', 1)[0]
+    clean = _strip_json_fences(text)
     return json.loads(clean, object_pairs_hook=pairs,
                       parse_constant=lambda x: (_ for _ in ()).throw(ValueError('非法数值：' + x)))
+
+
+def tolerant_json(text) -> tuple[object, dict[str, list[str]]]:
+    """容错解析模型输出的 JSON：同层重复键按键合并并按顶层图块 ID 精确归属审计警告，绝不静默丢弃。"""
+    own_notes: dict[int, list[str]] = {}
+    own_key_notes: dict[int, dict[str, list[str]]] = {}
+    refs: list = []
+
+    def pairs(items):
+        result = {}
+        local_notes: list[str] = []
+        key_notes: dict[str, list[str]] = {}
+        for key, value in items:
+            if key in result:
+                k_notes: list[str] = []
+                result[key] = _merge_duplicate_values(
+                    result[key], value, str(key), k_notes, own_notes=own_notes, refs=refs
+                )
+                local_notes.extend(k_notes)
+                key_notes.setdefault(key, []).extend(k_notes)
+            else:
+                result[key] = value
+        refs.append(result)
+        if local_notes:
+            own_notes[id(result)] = local_notes
+        if key_notes:
+            own_key_notes[id(result)] = key_notes
+        return result
+
+    clean = _strip_json_fences(text)
+    parsed = json.loads(
+        clean,
+        object_pairs_hook=pairs,
+        parse_constant=lambda x: (_ for _ in ()).throw(ValueError('非法数值：' + x)),
+    )
+
+    def _collect(obj, acc: list[str]) -> None:
+        if isinstance(obj, dict):
+            if id(obj) in own_notes:
+                acc.extend(own_notes[id(obj)])
+            for v in obj.values():
+                _collect(v, acc)
+        elif isinstance(obj, list):
+            for v in obj:
+                _collect(v, acc)
+
+    dup_by_tile: dict[str, list[str]] = {}
+    if isinstance(parsed, dict):
+        root_knotes = own_key_notes.get(id(parsed), {})
+        for tile_id, tile_val in parsed.items():
+            notes: list[str] = list(root_knotes.get(tile_id, []))
+            _collect(tile_val, notes)
+            if notes:
+                # 保持去重且按出现顺序
+                seen: list[str] = []
+                for n in notes:
+                    if n not in seen:
+                        seen.append(n)
+                dup_by_tile[str(tile_id)] = seen
+    return parsed, dup_by_tile
 
 
 def validate_item(item, kind):
@@ -344,7 +443,7 @@ def validate_item(item, kind):
         siblings = {}
         for key in blanks:
             if not re.fullmatch(r'[1-9]\d*(?:\.[1-9]\d*)*', key):
-                raise ValueError('空序号非法：' + sub)
+                raise ValueError(f'空序号非法：{key}（小题 {sub}）')
             prefix, _, number = key.rpartition('.')
             siblings.setdefault(prefix, set()).add(int(number or key))
             if any(other.startswith(key+'.') for other in blanks):
@@ -355,11 +454,12 @@ def validate_item(item, kind):
             raise ValueError('每空必须是字符串')
 
 
-def normalize_item(item):
-    """仅统一可逆的小题括号/全角；碰撞拒绝，不展平、不补位。"""
+def normalize_item(item, *, merge_duplicates: bool = False, dup_notes: list[str] | None = None):
+    """仅统一可逆的小题括号/全角；默认碰撞拒绝，启用 merge_duplicates 时按同层规则合并并留痕。"""
     if not isinstance(item, dict) or item.get('kind') != 'fill' or not isinstance(item.get('answers'), dict):
         return item
     normalized = {}
+    notes = dup_notes if dup_notes is not None else []
     for raw, blanks in item['answers'].items():
         key = unicodedata.normalize('NFKC', raw).strip()
         match = re.fullmatch(r'\((\d+)\)', key)
@@ -368,8 +468,6 @@ def normalize_item(item):
         compound = re.fullmatch(r'\((\d+)\)\s*(\d+)', key)
         if compound:
             key = compound.group(1) + '.' + compound.group(2)
-        if key in normalized:
-            raise ValueError('小题号规范化后重复：' + key)
         # Preserve explicit nested paths. Never infer whether a repeated prefix is a subquestion or a blank.
         if isinstance(blanks, dict) and blanks != {'舍弃':'舍弃'}:
             flat = {}
@@ -382,25 +480,36 @@ def normalize_item(item):
                     else:
                         name = '.'.join(address)
                         if name in flat:
-                            raise ValueError('空位完整编号重复：' + name)
-                        flat[name] = value
+                            if not merge_duplicates:
+                                raise ValueError('空位完整编号重复：' + name)
+                            flat[name] = _merge_duplicate_values(flat[name], value, f'{key}.{name}', notes)
+                        else:
+                            flat[name] = value
             walk(blanks)
             blanks = flat
-        normalized[key] = blanks
+        if key in normalized:
+            if not merge_duplicates:
+                raise ValueError('小题号规范化后重复：' + key)
+            normalized[key] = _merge_duplicate_values(normalized[key], blanks, str(key), notes)
+        else:
+            normalized[key] = blanks
     return {**item, 'answers': normalized}
 
 
 def parse_record(record, grid):
-    parsed = strict_json(record['raw_text'])
+    parsed, dup_by_tile = tolerant_json(record['raw_text'])
     if not isinstance(parsed, dict):
         raise ValueError('顶层必须为图块对象')
     expected = {i['id']: i['kind'] for i in grid['items']}
-    record.update(items={}, errors={}, extra_ids=sorted(set(parsed)-set(expected)))
+    record.update(items={}, errors={}, dup_warnings={}, extra_ids=sorted(set(parsed)-set(expected)))
     for ident, kind in expected.items():
         try:
-            item = normalize_item(parsed.get(ident))
+            tile_dups = list(dup_by_tile.get(ident, []))
+            item = normalize_item(parsed.get(ident), merge_duplicates=True, dup_notes=tile_dups)
             validate_item(item, kind)
             record['items'][ident] = item
+            if tile_dups:
+                record['dup_warnings'][ident] = tile_dups
         except ValueError as exc:
             record['errors'][ident] = str(exc)
     return record
@@ -408,9 +517,10 @@ def parse_record(record, grid):
 
 class SquarePacker:
     """在线shelf排版：边检测边完成拼图；仅超大单块缩小，不为塞更多题缩字。"""
-    def __init__(self, out, size=1500, prefix='g'):
+    def __init__(self, out, size=1500, prefix='g', max_items: int | None = None):
         self.out, self.size = Path(out), size
         self.prefix = prefix
+        self.max_items = max(1, int(max_items)) if max_items is not None else None
         self.index = 0
         try:
             self.font = ImageFont.truetype('C:/Windows/Fonts/arial.ttf', 24)
@@ -430,6 +540,8 @@ class SquarePacker:
         resized = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS) if scale < 1 else image
         w, h = resized.size
         finished = None
+        if self.max_items is not None and len(self.items) >= self.max_items:
+            finished = self.finish()
         def slot():
             fits = [(fw*fh-w*(h+36), i) for i, (_, _, fw, fh) in enumerate(self.free) if fw >= w and fh >= h+36]
             return min(fits)[1] if fits else None
@@ -485,7 +597,8 @@ class VlmClient:
         self.serial = threading.Semaphore(1)
         self.throttled = threading.Event()
 
-    def call(self, grid, refresh=False):
+    def call(self, grid, refresh=False, run_id: str | None = None):
+        from engine.run_log import now_iso
         content = PROMPT + '\n本次图块清单（只标明来源，不含参考答案）：\n' + json.dumps(
             [{'id': i['id'], 'kind': i['kind']} for i in grid['items']], ensure_ascii=False)
         image_url_obj = {
@@ -509,7 +622,7 @@ class VlmClient:
         legacy_fingerprint = digest(json.dumps({'body': request, 'endpoint': self.endpoint}, sort_keys=True).encode())
         request['response_format'] = {'type': 'json_object'}
         request['messages'][0]['content'][0]['text'] += '''\n严格格式示例：{"p000_000":{"kind":"fill","question_number":"20","answers":{"1":{"1":"答案一","2":""},"2":{"1":"看不清"}}}}。
-小题键用数字字符串1、2，不加括号；若存在(1)下面的①②子层级，则分别用1.1、1.2，不得把子层级和普通空混合或输出重复键。每小题多个空统一放在同一个对象中，空序号1、2、3连续。不得新增无小题号来装本应属于某小题的后续空位。回答前检查所有大括号平衡、每块ID独立闭合，空字符串不是空对象。'''
+小题键用数字字符串1、2，不加括号；按1、2、3、4顺序输出且同一小题号只出现一次，禁止开头预写4再重复写4；若存在(1)下面的①②子层级，则分别用1.1、1.2，不得把子层级和普通空混合或再输出父键。同一条连续横线上无论涂改多少次永远只算1空，不得拆成多空。每小题多个空统一放在同一个对象中，空序号1、2、3连续。不得新增无小题号来装本应属于某小题的后续空位。回答前检查所有大括号平衡、每块ID独立闭合，空字符串不是空对象。'''
         fingerprint = digest(json.dumps({'body': request, 'endpoint': self.endpoint}, sort_keys=True).encode())
         path = self.out / 'api' / (grid['id'] + '_' + fingerprint[:16] + '.json')
         legacy_path = self.out / 'api' / (grid['id'] + '_' + legacy_fingerprint[:16] + '.json')
@@ -527,8 +640,9 @@ class VlmClient:
                     return {**cached, 'reused': True, 'compatible_legacy_cache': cached_path == legacy_path}
         record = {'grid': grid['id'], 'fingerprint': fingerprint, 'ok': False, 'model': self.model,
                   'provider': self.provider, 'endpoint': self.endpoint,
+                  'ts': now_iso(), 'run_id': run_id or '',
                   'detail': 'high', 'thinking': 'disabled' if self.is_doubao else 'default',
-                  'attempts': [], 'items': {}, 'errors': {},
+                  'attempts': [], 'items': {}, 'errors': {}, 'dup_warnings': {},
                   'image_sha256': grid['sha256']}
         start = time.monotonic()
         if not self.key and self.transport is None:

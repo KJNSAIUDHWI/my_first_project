@@ -151,6 +151,277 @@ def find_opencode(cfg: dict | None = None) -> str | None:
     return None
 
 
+def find_zcode(cfg: dict | None = None, *, probe_version: bool = False) -> dict:
+    """探测本机 ZCode CLI（支持桌面端 Electron node-bundle 与独立 CLI，支持配置覆盖）。"""
+    cfg = cfg or {}
+    custom_exe = str(cfg.get("zcode_exe") or "").strip()
+    custom_cli = str(cfg.get("zcode_cli") or "").strip()
+    result = {
+        "available": False,
+        "mode": "",
+        "exe": "",
+        "cli": "",
+        "version": "",
+    }
+
+    # 1. 配置显式覆盖
+    if custom_exe and custom_cli and Path(custom_exe).is_file() and Path(custom_cli).is_file():
+        result.update({"available": True, "mode": "electron_bundle", "exe": custom_exe, "cli": custom_cli})
+    elif custom_cli and Path(custom_cli).is_file() and custom_cli.lower().endswith((".exe", ".cmd", ".bat")):
+        result.update({"available": True, "mode": "cli", "exe": custom_cli, "cli": custom_cli})
+
+    # 2. 常见桌面端 Electron bundle 安装路径（ZCode.exe + resources/glm/zcode.cjs）
+    if not result["available"]:
+        local_app = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+        prog_files = [
+            Path(os.environ.get("ProgramFiles") or "C:/Program Files") / "ZCode",
+            Path(os.environ.get("ProgramFiles(x86)") or "C:/Program Files (x86)") / "ZCode",
+            local_app / "Programs" / "ZCode",
+            Path("C:/Program Files/ZCode"),
+        ]
+        for base in prog_files:
+            exe_p = base / "ZCode.exe"
+            cli_p = base / "resources" / "glm" / "zcode.cjs"
+            if exe_p.is_file() and cli_p.is_file():
+                result.update({"available": True, "mode": "electron_bundle", "exe": str(exe_p), "cli": str(cli_p)})
+                break
+
+    # 3. 独立 PATH 或 ~/.zcode/bin 包装脚本
+    if not result["available"]:
+        for name in ("zcode", "zcode.cmd", "zcode.exe"):
+            found = shutil.which(name)
+            if found:
+                result.update({"available": True, "mode": "cli", "exe": found, "cli": found})
+                break
+    if not result["available"]:
+        cand_cmd = Path.home() / ".zcode" / "bin" / "zcode.cmd"
+        if cand_cmd.is_file():
+            result.update({"available": True, "mode": "cli", "exe": str(cand_cmd), "cli": str(cand_cmd)})
+
+    if result["available"] and probe_version:
+        try:
+            cmd = [result["exe"], result["cli"], "--version"] if result["mode"] == "electron_bundle" else [result["exe"], "--version"]
+            env = dict(os.environ, ELECTRON_RUN_AS_NODE="1") if result["mode"] == "electron_bundle" else dict(os.environ)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, env=env)
+            if proc.returncode == 0:
+                lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+                if lines:
+                    result["version"] = lines[-1][:40]
+        except Exception:
+            pass
+    return result
+
+
+def build_zcode_command(
+    prompt: str,
+    root: Path = ROOT,
+    *,
+    mode: str = "plan",
+    session_id: str = "",
+    attach: list[str] | None = None,
+    cfg: dict | None = None,
+) -> dict:
+    """构造安全的 ZCode headless 调用契约（严禁默认 yolo，强制 --mode plan 或 guarded）。"""
+    safe_mode = mode if mode in ("plan", "guarded") else "plan"
+    zc = find_zcode(cfg)
+    if not zc.get("available"):
+        return {
+            "ok": False,
+            "provider": "clipboard",
+            "mode": safe_mode,
+            "error": "未检测到本机 ZCode CLI（可安装 ZCode 桌面端或在配置中指定 zcode_exe/zcode_cli）",
+            "zcode": zc,
+        }
+    cwd = str(Path(root).resolve())
+    if zc["mode"] == "electron_bundle":
+        cmd = [zc["exe"], zc["cli"]]
+        env_patch = {"ELECTRON_RUN_AS_NODE": "1"}
+    else:
+        cmd = [zc["exe"]]
+        env_patch = {}
+    cmd.extend([
+        "-p", prompt,
+        "--cwd", cwd,
+        "--json",
+        "--no-color",
+        "--locale", "zh-CN",
+        "--mode", safe_mode,
+    ])
+    if session_id:
+        cmd.extend(["--resume", str(session_id).strip()])
+    for ap in (attach or []):
+        p = Path(ap)
+        if p.is_file():
+            cmd.extend(["--attach", str(p.resolve())])
+    return {
+        "ok": True,
+        "provider": "zcode",
+        "mode": safe_mode,
+        "cwd": cwd,
+        "cmd": cmd,
+        "env_patch": env_patch,
+        "zcode": zc,
+    }
+
+
+def _pid_alive(pid: int) -> bool:
+    """检查本地进程 PID 是否仍存活（Windows/POSIX 兼容）。"""
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            h = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not h:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+                return bool(ok and code.value == STILL_ACTIVE)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            return True
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def read_pipeline_lease(batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict | None:
+    """读取当前任务租约文件，并自动标记是否过期/进程已退出。"""
+    lock_path = Path(batches_root) / ".pipeline.lock"
+    data = read_json(lock_path)
+    if not isinstance(data, dict):
+        return None
+    pid = int(data.get("pid") or 0)
+    ts = float(data.get("ts") or 0.0)
+    ttl = float(data.get("ttl_seconds") or 1800.0)
+    expired = (time.time() - ts) > ttl if ts > 0 else True
+    alive = _pid_alive(pid) if pid else False
+    data["stale"] = bool(expired or not alive)
+    return data
+
+
+def acquire_pipeline_lease(
+    kind: str,
+    batch_id: str = "",
+    *,
+    owner: str = "workbench",
+    batches_root: Path = DEFAULT_BATCHES_ROOT,
+    ttl_seconds: int = 1800,
+) -> dict:
+    """获取跨进程共享任务租约（防 GUI/CLI/AI 同时跑同一批次触发重复扣费与结果覆盖）。"""
+    batches_root = Path(batches_root)
+    batches_root.mkdir(parents=True, exist_ok=True)
+    lock_path = batches_root / ".pipeline.lock"
+    token = f"{os.getpid()}_{threading.get_ident()}_{int(time.time() * 1000)}"
+    payload = {
+        "token": token,
+        "pid": os.getpid(),
+        "owner": owner,
+        "kind": kind,
+        "batch_id": batch_id,
+        "acquired_at": now_str(),
+        "ts": time.time(),
+        "ttl_seconds": int(ttl_seconds),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    for _ in range(3):
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, raw)
+            finally:
+                os.close(fd)
+            return {"ok": True, "lease": payload}
+        except FileExistsError:
+            cur = read_pipeline_lease(batches_root)
+            if cur is None or cur.get("stale"):
+                try:
+                    lock_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
+            return {
+                "ok": False,
+                "error": f"已有任务运行中（{cur.get('owner')}/{cur.get('kind')}，批次 {cur.get('batch_id') or '-'}，PID {cur.get('pid')}），请等待完成后再试",
+                "lease": cur,
+            }
+        except OSError as exc:
+            return {"ok": False, "error": f"无法创建任务租约锁：{exc}"}
+    return {"ok": False, "error": "已有任务运行中，获取任务租约失败"}
+
+
+def release_pipeline_lease(token: str | None = None, batches_root: Path = DEFAULT_BATCHES_ROOT) -> bool:
+    """释放本进程持有的任务租约（若传入 token 则严格校验匹配后再删）。"""
+    lock_path = Path(batches_root) / ".pipeline.lock"
+    if not lock_path.is_file():
+        return True
+    cur = read_json(lock_path)
+    if token and isinstance(cur, dict) and cur.get("token") and cur.get("token") != token:
+        return False
+    try:
+        lock_path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def collect_machine_info(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_ROOT, *, probe_zcode_version: bool = False) -> dict:
+    """采集本机硬件/Python/依赖/ZCode/项目与服务信息（脱敏返回，供 AI 帮手与 doctor 读取）。"""
+    import platform
+    diag_mod = _load_diag_module(root)
+    hw = diag_mod.probe_compute_hardware()
+    cfg = load_config(batches_root)
+    zc = find_zcode(cfg, probe_version=probe_zcode_version)
+    vlm = get_vlm_settings(root)
+    active = get_active_batch(batches_root)
+    pkg_versions = {}
+    for p in REQUIRED_PACKAGES:
+        try:
+            pkg_versions[p["dist"]] = importlib.metadata.version(p["dist"])
+        except Exception:
+            pkg_versions[p["dist"]] = ""
+    return {
+        "host": socket.gethostname(),
+        "os": f"{platform.system()} {platform.release()} ({platform.version()})",
+        "arch": platform.machine(),
+        "python": {
+            "version": platform.python_version(),
+            "executable": sys.executable,
+        },
+        "hardware": hw,
+        "packages": pkg_versions,
+        "tools": {
+            "seven_zip": find_7z() or "",
+            "zcode": zc,
+            "opencode": find_opencode(cfg) or "",
+        },
+        "project_root": str(Path(root).resolve()),
+        "batches_root": str(Path(batches_root).resolve()),
+        "active_batch": {
+            "batch_id": active.get("batch_id"),
+            "subject": active.get("subject"),
+            "total_images": active.get("total_images"),
+            "recognize_dir": active.get("recognize_dir"),
+        } if active else None,
+        "vlm": {
+            "provider": vlm.get("provider"),
+            "provider_label": vlm.get("provider_label"),
+            "model": vlm.get("model"),
+            "has_key": vlm.get("has_key"),
+            "api_key_masked": vlm.get("api_key_masked"),
+        },
+        "ports": {"workbench": 8888, "review": 8904, "annotate": 8900, "choice": 8905, "monitor": 8901},
+    }
+
+
 def find_7z() -> str | None:
     found = shutil.which("7z") or shutil.which("7z.exe")
     if found:
@@ -486,10 +757,11 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
         "fix": api_fix,
     })
 
-    # 7. 加密权重包与 7z / opencode 探测（辅助信息）
+    # 7. 加密权重包与 7z / opencode / ZCode 探测（辅助信息）
     archive_001 = find_weight_archive(root)
     seven_zip = find_7z()
     opencode_path = find_opencode(cfg)
+    zcode_info = find_zcode(cfg)
 
     errors = [x for x in items if x["severity"] == "error"]
     warnings = [x for x in items if x["severity"] == "warn"]
@@ -513,6 +785,7 @@ def check_environment(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_RO
         "encrypted_archive": str(archive_001) if archive_001 else "",
         "seven_zip": seven_zip or "",
         "opencode_path": opencode_path or "",
+        "zcode": zcode_info,
         "items": items,
     }
 
@@ -668,7 +941,11 @@ def unpack_weights(password: str, root: Path = ROOT) -> dict:
 
 
 def build_agent_prompt(report: dict, root: Path = ROOT, extra_note: str = "") -> str:
-    """生成给本地 Agent (opencode 等) 的结构化诊断提示词。"""
+    """生成给本地 Agent (ZCode / opencode) 的结构化脱敏诊断提示词。"""
+    root_s = str(root)
+    if root_s not in sys.path:
+        sys.path.insert(0, root_s)
+    from engine.run_log import mask_secret
     problems = [x for x in report.get("items", []) if x.get("severity") != "ok"]
     lines = [
         "请帮我诊断并修复「自动改卷」项目的本地运行环境问题。",
@@ -685,17 +962,17 @@ def build_agent_prompt(report: dict, root: Path = ROOT, extra_note: str = "") ->
     else:
         for p in problems:
             tag = "错误" if p["severity"] == "error" else "提醒"
-            lines.append(f"- [{tag}] {p['name']}：{p['detail']}")
+            lines.append(f"- [{tag}] {p['name']}：{mask_secret(str(p['detail']))}")
     if extra_note.strip():
-        lines.extend(["", "### 用户补充说明", extra_note.strip()])
+        lines.extend(["", "### 用户补充说明", mask_secret(extra_note.strip())])
     lines.extend([
         "",
         "### 期望操作",
-        "1. 优先说明问题原因（用通俗中文），再给出或直接执行最小化修复命令。",
+        "1. 优先说明问题原因（用通俗中文），再给出最小化修复步骤（只读诊断模式不要直接修改无关文件）。",
         "2. 若需安装 Python 依赖，优先测试并使用国内镜像源（清华/阿里云）。",
-        "3. 修复完成后可运行 `python apps/workbench/cli.py check` 验证全部变绿。",
+        "3. 修复完成后可运行 `python -m apps.workbench check --json` 验证全部变绿。",
     ])
-    return "\n".join(lines)
+    return mask_secret("\n".join(lines))
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -1025,10 +1302,15 @@ def _count_recognition_progress(rec_dir: Path) -> tuple[dict, Counter]:
     fb_items = fb.get("items") or {}
 
     total_items = 0
+    unmatched_items = 0
     done_pages = 0
     for p in pages:
         p_items = p.get("items") or []
-        total_items += len(p_items)
+        for it in p_items:
+            if it.get("kind") == "unmatched":
+                unmatched_items += 1
+            else:
+                total_items += 1
         page_rec = fb_items.get(p["id"])
         if page_rec and page_rec.get("label"):
             done_pages += 1
@@ -1050,6 +1332,7 @@ def _count_recognition_progress(rec_dir: Path) -> tuple[dict, Counter]:
         "pages": total_pages,
         "done_pages": done_pages,
         "total_items": total_items,
+        "unmatched_items": unmatched_items,
     }, contributors
 
 
@@ -1189,7 +1472,10 @@ def collect_tasks_and_leaderboard(
             "done": rec_stat["done"],
             "remaining": rec_stat["remaining"],
             "unit": "页",
-            "extra": f"共 {rec_stat.get('total_items', 0)} 题" if rec_stat["available"] else "待完成识别",
+            "extra": (
+                f"共 {rec_stat.get('total_items', 0)} 题"
+                + (f"（另 {rec_stat.get('unmatched_items', 0)} 未配对框）" if rec_stat.get("unmatched_items") else "")
+            ) if rec_stat["available"] else "待完成识别",
             "running": bool(services.get("review", {}).get("running")),
         },
         {

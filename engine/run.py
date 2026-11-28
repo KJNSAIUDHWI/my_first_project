@@ -20,6 +20,7 @@ import cv2
 cv2.setNumThreads(0)
 from ultralytics import YOLO
 
+SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png")
 TO_TOOL = {0: 0, 1: 1, 2: 4}
 
 
@@ -46,7 +47,7 @@ def main():
     orient = YOLO(str(model_weight("orient")))
     m1 = YOLO(str(model_weight("m1")))
 
-    files = sorted(f for f in os.listdir(args.input) if f.lower().endswith(".jpg"))
+    files = sorted(f for f in os.listdir(args.input) if os.path.splitext(f)[1].lower() in SUPPORTED_IMAGE_EXTS)
     print("图片:", len(files))
     result = {}
     for i, f in enumerate(files):

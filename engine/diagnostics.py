@@ -11,10 +11,47 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
+import threading
+import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+_TZ_CN = timezone(timedelta(hours=8))
+_ERROR_LOG_LOCK = threading.RLock()
+
+_JSON_STRUCT_ERROR_HINTS = (
+    "json重复键",
+    "extra data",
+    "expecting",
+    "unterminated string",
+    "响应未完整结束",
+    "顶层必须为图块对象",
+    "图块类型或结构不符",
+    "没有逐空结构",
+    "小题号非法",
+    "小题缺空位",
+    "空序号非法",
+    "空位编号与子层级冲突",
+    "空序号不连续",
+    "小题号规范化后重复",
+    "空位完整编号重复",
+    "结构异常",
+    "缺图块输出",
+)
+
+
+def is_json_or_struct_error(text: str | None) -> bool:
+    """判断错误文本是否属于模型输出 JSON/结构类异常（适合单题降级重试，而非网络/鉴权故障）。"""
+    s = (text or "").strip()
+    if not s:
+        return False
+    low = s.lower()
+    if any(k in low for k in ("http 401", "http 403", "http 429", "http 5", "timeout", "urlopen", "connection", "余额", "费用限制", "setlimitexceeded", "insufficientbalance", "accountoverdue", "api key")):
+        return False
+    return any(k in low for k in _JSON_STRUCT_ERROR_HINTS)
 
 # ==================== 语义化退出码 ====================
 EXIT_OK = 0
@@ -378,12 +415,23 @@ def diagnose_exception(exc_or_text: BaseException | str, default_module: str = "
             "raw": raw[:320],
         }
 
+    # 8.5 视觉大模型 JSON 解析 / 重复键 / 结构异常（告别循环指引）
+    if is_json_or_struct_error(raw):
+        return {
+            "module": "视觉大模型输出解析",
+            "title": "大模型返回 JSON 结构异常或存在重复键",
+            "reason": f"模型在多题拼图输出中产生了重复小题号或结构异常（{msg[:200]}），并非 API 密钥或网络故障。",
+            "fix": "新版已支持同层重复键自动合并（冲突项标为待复核），且点击「补跑失败图块」会自动降级为单题模式重试，通常一轮即可清零。",
+            "exit_code": EXIT_GENERAL_ERROR,
+            "raw": raw[:320],
+        }
+
     # 默认兜底
     return {
         "module": default_module,
         "title": f"{default_module}出现异常" + (f"（{exc_type}）" if exc_type else ""),
         "reason": msg[:260] or "发生未明确分类的运行错误。",
-        "fix": "请查看 recognized/logs/errors.log 获取完整堆栈，或点击工作台「求助 AI」自动定位修复。",
+        "fix": "请检查具体原始报错信息，或点击工作台「求助 AI」结合最新运行日志定位修复。",
         "exit_code": EXIT_GENERAL_ERROR,
         "raw": raw[:320],
     }
@@ -395,30 +443,46 @@ def append_error_log(
     exc: BaseException | str,
     diag: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    retries: int = 20,
+    delay: float = 0.02,
 ) -> Path | None:
-    """将结构化中文诊断与完整 traceback 追加写入 <out_dir>/logs/errors.log。"""
-    try:
-        log_path = Path(out_dir) / "logs" / "errors.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        d = diag or diagnose_exception(exc, default_module=module)
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        tb = ""
-        if isinstance(exc, BaseException) and exc.__traceback__ is not None:
-            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-        lines = [
-            f"================ [{ts}] {d['module']} | {d['title']} ================",
-            f"原因：{d['reason']}",
-            f"建议修复：{d['fix']}",
-        ]
-        if context:
-            lines.append("上下文：" + json.dumps(context, ensure_ascii=False))
-        if d.get("raw"):
-            lines.append(f"原始信息：{d['raw']}")
-        if tb:
-            lines.append("完整堆栈：\n" + tb.rstrip())
-        lines.append("")
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-        return log_path
-    except OSError:
-        return None
+    """将结构化中文诊断与完整 traceback 线程安全追加写入 <out_dir>/logs/errors.log。"""
+    log_path = Path(out_dir) / "logs" / "errors.log"
+    d = diag or diagnose_exception(exc, default_module=module)
+    ts = datetime.now(_TZ_CN).isoformat(timespec="seconds")
+    tb = ""
+    if isinstance(exc, BaseException) and exc.__traceback__ is not None:
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    lines = [
+        f"================ [{ts}] {d['module']} | {d['title']} ================",
+        f"原因：{d['reason']}",
+        f"建议修复：{d['fix']}",
+    ]
+    if context:
+        lines.append("上下文：" + json.dumps(context, ensure_ascii=False))
+    if d.get("raw"):
+        lines.append(f"原始信息：{d['raw']}")
+    if tb:
+        lines.append("完整堆栈：\n" + tb.rstrip())
+    lines.append("")
+    payload = "\n".join(lines) + "\n"
+
+    last_exc: Exception | None = None
+    with _ERROR_LOG_LOCK:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as mk_exc:
+            print(f"[WARN] 创建错误日志目录失败 ({log_path.parent}): {mk_exc}", file=sys.stderr)
+            return None
+        for attempt in range(max(1, int(retries))):
+            try:
+                with log_path.open("a", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                return log_path
+            except OSError as io_exc:
+                last_exc = io_exc
+                if attempt + 1 < retries:
+                    time.sleep(delay)
+    print(f"[WARN] 写入 errors.log 失败 ({log_path}): {last_exc}", file=sys.stderr)
+    return None

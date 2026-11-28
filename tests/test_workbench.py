@@ -496,6 +496,106 @@ class WorkbenchTests(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_lease_zcode_contract_runs_api_and_cli_hub_sync(self):
+        import subprocess
+        from engine.run_log import RunLogger, mask_secret
+
+        # 1. 跨进程任务租约互斥与释放
+        l1 = core.acquire_pipeline_lease("recognize", "b1", owner="gui", batches_root=self.batches)
+        self.assertTrue(l1["ok"])
+        l2 = core.acquire_pipeline_lease("recognize", "b1", owner="cli", batches_root=self.batches)
+        self.assertFalse(l2["ok"])
+        self.assertIn("已有任务运行中", l2["error"])
+        self.assertTrue(core.release_pipeline_lease(l1["lease"]["token"], batches_root=self.batches))
+        l3 = core.acquire_pipeline_lease("retry", "b1", owner="cli", batches_root=self.batches)
+        self.assertTrue(l3["ok"])
+        core.release_pipeline_lease(l3["lease"]["token"], batches_root=self.batches)
+
+        # 2. ZCode 无头调用契约：强制禁止 yolo，自动降级 plan，且传递 ELECTRON_RUN_AS_NODE=1
+        fake_zc_dir = self.work / "ZCode"
+        (fake_zc_dir / "resources" / "glm").mkdir(parents=True)
+        fake_exe = fake_zc_dir / "ZCode.exe"
+        fake_cli = fake_zc_dir / "resources" / "glm" / "zcode.cjs"
+        fake_exe.write_bytes(b"MZ")
+        fake_cli.write_text("console.log('ok');", encoding="utf-8")
+        spec = core.build_zcode_command(
+            "诊断测试",
+            ROOT,
+            mode="yolo",
+            cfg={"zcode_exe": str(fake_exe), "zcode_cli": str(fake_cli)},
+        )
+        self.assertTrue(spec["ok"])
+        self.assertEqual(spec["mode"], "plan")
+        self.assertEqual(spec["env_patch"].get("ELECTRON_RUN_AS_NODE"), "1")
+        self.assertIn("--mode", spec["cmd"])
+        self.assertIn("plan", spec["cmd"])
+        self.assertNotIn("yolo", spec["cmd"])
+
+        # 3. 脱敏校验（使用合成占位字符串，不含任何真实密钥）
+        fake_key = "ark-" + "1234abcd" * 4 + "-test9"
+        masked_out = mask_secret(f"key={fake_key}")
+        self.assertNotIn("1234abcd1234abcd", masked_out)
+
+        # 4. RunLogger 写入 + Hub /api/machine, /api/runs, /api/logs, /api/check/sync + CLI --hub 后置
+        rec_dir = self.batches / "20261128_demo" / "recognized"
+        rl = RunLogger(rec_dir, kind="recognize", batch_id="20261128_demo")
+        rl.emit("api.grid_fail", "测试事件", level="ERROR", grid_id="g001", page_id="p001")
+        rl.finish("warn", stats={"pages": 1})
+
+        state = wb_serve.WorkbenchState(root=ROOT, batches_root=self.batches, port=0)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), wb_serve.make_handler(state))
+        port = srv.server_address[1]
+        state.port = port
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        try:
+            base = f"http://127.0.0.1:{port}"
+            with urllib.request.urlopen(f"{base}/api/machine", timeout=4) as r:
+                mach = json.loads(r.read().decode("utf-8"))
+            self.assertTrue(mach["ok"])
+            self.assertIn("python", mach)
+            self.assertIn("hardware", mach)
+
+            with urllib.request.urlopen(f"{base}/api/runs", timeout=4) as r:
+                runs_res = json.loads(r.read().decode("utf-8"))
+            self.assertTrue(runs_res["ok"])
+            self.assertTrue(any(x["run_id"] == rl.run_id for x in runs_res["runs"]))
+
+            with urllib.request.urlopen(f"{base}/api/logs?run_id={rl.run_id}&level=ERROR", timeout=4) as r:
+                logs_res = json.loads(r.read().decode("utf-8"))
+            self.assertEqual(logs_res["total"], 1)
+            self.assertEqual(logs_res["items"][0]["grid_id"], "g001")
+
+            # CLI --hub 后置到子命令之后 + status/capabilities/doctor/check 回写 Hub last_check
+            proc_st = subprocess.run(
+                [sys.executable, "-m", "apps.workbench", "status", "--hub", base, "--json"],
+                cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", timeout=15,
+            )
+            self.assertEqual(proc_st.returncode, 0, proc_st.stderr)
+            st_json = json.loads(proc_st.stdout)
+            self.assertTrue(st_json["ok"])
+            self.assertTrue(st_json["data"]["from_hub"])
+
+            proc_cap = subprocess.run(
+                [sys.executable, "-m", "apps.workbench", "capabilities", "--hub", base, "--json"],
+                cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", timeout=15,
+            )
+            self.assertEqual(proc_cap.returncode, 0, proc_cap.stderr)
+            cap_json = json.loads(proc_cap.stdout)
+            self.assertTrue(cap_json["ok"])
+            cmd_names = {c["name"] for c in cap_json["commands"]}
+            self.assertTrue({"run", "retry", "stop", "benchmark", "vlm-test", "doctor", "runs", "logs"}.issubset(cmd_names))
+
+            proc_chk = subprocess.run(
+                [sys.executable, "-m", "apps.workbench", "check", "--hub", base, "--json"],
+                cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", timeout=20,
+            )
+            self.assertIn(proc_chk.returncode, (0, 1))
+            self.assertIsNotNone(state.last_check)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

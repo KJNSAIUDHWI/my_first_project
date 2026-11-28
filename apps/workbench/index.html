@@ -410,7 +410,7 @@
       <button class="btn primary sm hidden" id="btnRepairPip" type="button">安装缺失依赖</button>
       <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">解压模型权重</button>
       <button class="btn sm hidden" id="btnSetVlmKey" type="button">配置大模型 API</button>
-      <button class="btn sm" id="btnAskAgent" type="button">求助 AI (opencode)</button>
+      <button class="btn sm" id="btnAskAgent" type="button">🤖 求助 AI</button>
     </div>
 
     <!-- 4 段系统就绪架构图（点击任意节点直达对应配置） -->
@@ -930,6 +930,31 @@
   <span id="liveText">就绪</span>
 </div>
 
+<!-- AI 助手诊断面板（支持 ZCode 无头流式输出与 opencode/剪贴板降级） -->
+<dialog id="aiHelperDialog" style="width:min(720px,94vw);border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:#fff;box-shadow:0 18px 48px rgba(15,23,42,.18)">
+  <div class="between" style="margin-bottom:8px">
+    <div class="row" style="gap:8px;align-items:center">
+      <h3 style="margin:0;font-size:16px">🤖 AI 助手诊断面板</h3>
+      <span class="badge" id="aiStatusBadge">就绪</span>
+    </div>
+    <button class="btn sm" id="btnCloseAiDlg" type="button">关闭</button>
+  </div>
+  <div class="muted" id="aiProviderHint" style="margin-bottom:10px;font-size:12.5px">自动探测本机 ZCode CLI（默认只读 plan 模式，绝不泄露 API Key 或学生姓名学号）。</div>
+  <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    <label style="font-size:12.5px;color:var(--muted)">权限模式：
+      <select id="aiModeSelect" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px">
+        <option value="plan" selected>只读诊断 (--mode plan · 推荐)</option>
+        <option value="guarded">受控修复 (--mode guarded)</option>
+      </select>
+    </label>
+    <input id="aiNoteInput" type="text" placeholder="补充想让 AI 排查的问题（可选，留空则结合环境自检与报错日志诊断）" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+    <button class="btn primary sm" id="btnStartAi" type="button">开始诊断</button>
+    <button class="btn sm hidden" id="btnStopAi" type="button" style="color:var(--err);border-color:#fecaca">停止</button>
+  </div>
+  <div id="aiMetaBar" class="muted" style="font-size:12px;margin-bottom:6px;display:flex;gap:14px;flex-wrap:wrap"></div>
+  <pre id="aiResponseBox" style="margin:0;padding:12px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;min-height:140px;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.6;font-family:ui-monospace,Consolas,monospace">点击「开始诊断」后，将在此实时显示 AI 回复或降级剪贴板结果。</pre>
+</dialog>
+
 <!-- 新手引导弹窗 -->
 <dialog id="guideDialog" class="guide-dlg">
   <div class="between" style="margin-bottom:6px">
@@ -1093,7 +1118,7 @@ function setUserName(name) {
 }
 
 function showBanner(source, text, durationMs = 4200) {
-  $('liveSource').textContent = source === 'cli' ? 'CLI 联动' : '实时';
+  $('liveSource').textContent = source === 'ai' ? 'AI 联动' : (source === 'cli' ? 'CLI 联动' : '实时');
   $('liveText').textContent = text;
   $('liveBanner').classList.add('show');
   clearTimeout(showBanner._t);
@@ -1790,13 +1815,19 @@ function renderPipelineDashboard(data) {
   const reviewedPages = Number(reviewTask.done || 0);
   const reviewTotal = Number(reviewTask.total || pagesDone || pagesTotal);
 
+  const detFrac = pagesTotal > 0 ? Math.min(1, pagesDone / pagesTotal) : 0;
+  const m1Frac = pagesTotal > 0 ? Math.min(1, m1Pages / pagesTotal) : 0;
+  const apiLocalFrac = gridsTotal > 0 ? Math.min(1, apiSuccess / gridsTotal) : (detFrac >= 1 ? 1 : 0);
+  const globalApiFrac = (running && job.kind === 'retry') ? apiLocalFrac : (detFrac * apiLocalFrac);
+
   let pct = 0;
   if (!running && !isErrState && !isWarnState && (job.status === 'done' || rs)) {
     pct = 100;
+  } else if (running && job.kind === 'retry') {
+    pct = Math.round(apiLocalFrac * 100);
+    if (pct < 4) pct = 4;
   } else {
-    const detFrac = Math.min(1, pagesDone / pagesTotal);
-    const apiFrac = gridsTotal > 0 ? Math.min(1, apiSuccess / gridsTotal) : (detFrac >= 1 ? 1 : 0);
-    pct = Math.round((detFrac * 0.60 + apiFrac * 0.40) * 100);
+    pct = Math.round((detFrac * 0.55 + globalApiFrac * 0.45) * 100);
     if (running && pct < 4) pct = 4;
   }
   $('pipeMainBar').style.width = pct + '%';
@@ -1907,53 +1938,64 @@ function renderPipelineDashboard(data) {
   $('anM1Fill').textContent = `填 ${m1Fill}`;
   $('anM1Id').textContent = `名 ${m1Identity}`;
 
-  // ③ M2 选择题
+  // ③ M2 选择题（全局进度锚定到 M1 已扫描页占比，避免前期局部飙高）
   const m2YoloPct = pctOf(m2ZonesYolo, Math.max(1, m1Choice));
   const m2DonePct = pctOf(m2ZonesDone, Math.max(1, m1Choice));
-  const m2State = running && m1Choice > 0 && m2ZonesDone < m1Choice ? 'active' : (m2ZonesDone > 0 || choiceItems > 0 ? 'done' : (m1Choice > 0 ? 'active' : 'idle'));
+  const m2Scale = (running && m1Pages < pagesTotal) ? m1Frac : 1;
+  const m2GlobalYoloPct = m1Choice > 0 ? Math.round(m2YoloPct * m2Scale) : 0;
+  const m2GlobalDonePct = m1Choice > 0 ? Math.round(m2DonePct * m2Scale) : 0;
+  const m2State = running && m1Choice > 0 && (m2ZonesDone < m1Choice || m1Pages < pagesTotal) ? 'active' : (m2ZonesDone > 0 || choiceItems > 0 ? 'done' : (m1Choice > 0 ? 'active' : 'idle'));
   setArchNodeState('nodeM2', 'dotM2', m2State);
   $('anM2InTag').textContent = `收 ${m1Choice} 区`;
   $('anM2YoloVal').textContent = `${m2ZonesYolo}/${m1Choice}`;
-  $('anM2YoloBar').style.width = (m1Choice > 0 ? m2YoloPct : 0) + '%';
+  $('anM2YoloBar').style.width = m2GlobalYoloPct + '%';
   $('anM2OcrVal').textContent = `${m2Ocr} 号`;
-  $('anM2OcrBar').style.width = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  $('anM2OcrBar').style.width = m2GlobalDonePct + '%';
   $('anM2CnnVal').textContent = `${choiceItems} 题`;
-  $('anM2CnnBar').style.width = (m1Choice > 0 ? m2DonePct : 0) + '%';
-  $('anM2Pct').textContent = (m1Choice > 0 ? m2DonePct : 0) + '%';
+  $('anM2CnnBar').style.width = m2GlobalDonePct + '%';
+  $('anM2Pct').textContent = m2GlobalDonePct + '%';
 
-  // ④ M3 大题定位
+  // ④ M3 大题定位（同样锚定全局占比）
   const m3YoloPct = pctOf(m3ZonesYolo, Math.max(1, m1Fill));
   const m3DonePct = pctOf(m3ZonesDone, Math.max(1, m1Fill));
   const m3OcrPct = fillItems > 0 ? pctOf(m3Ocr, fillItems) : m3DonePct;
-  const m3State = running && m1Fill > 0 && m3ZonesDone < m1Fill ? 'active' : (m3ZonesDone > 0 || fillItems > 0 ? 'done' : (m1Fill > 0 ? 'active' : 'idle'));
+  const m3Scale = (running && m1Pages < pagesTotal) ? m1Frac : 1;
+  const m3GlobalYoloPct = m1Fill > 0 ? Math.round(m3YoloPct * m3Scale) : 0;
+  const m3GlobalOcrPct = m1Fill > 0 ? Math.round(m3OcrPct * m3Scale) : 0;
+  const m3GlobalDonePct = m1Fill > 0 ? Math.round(m3DonePct * m3Scale) : 0;
+  const m3State = running && m1Fill > 0 && (m3ZonesDone < m1Fill || m1Pages < pagesTotal) ? 'active' : (m3ZonesDone > 0 || fillItems > 0 ? 'done' : (m1Fill > 0 ? 'active' : 'idle'));
   setArchNodeState('nodeM3', 'dotM3', m3State);
   $('anM3InTag').textContent = `收 ${m1Fill} 区`;
   $('anM3YoloVal').textContent = `${m3ZonesYolo}/${m1Fill} · ${fillItems}题`;
-  $('anM3YoloBar').style.width = (m1Fill > 0 ? m3YoloPct : 0) + '%';
+  $('anM3YoloBar').style.width = m3GlobalYoloPct + '%';
   $('anM3OcrVal').textContent = `${m3Ocr}/${fillItems}`;
-  $('anM3OcrBar').style.width = (m1Fill > 0 ? m3OcrPct : 0) + '%';
+  $('anM3OcrBar').style.width = m3GlobalOcrPct + '%';
   $('anM3Foot').textContent = `下游 ${tilesQueued} 块`;
-  $('anM3Pct').textContent = (m1Fill > 0 ? m3DonePct : 0) + '%';
+  $('anM3Pct').textContent = m3GlobalDonePct + '%';
 
-  // ⑤ 拼图 & 大模型 API
+  // ⑤ 拼图 & 大模型 API（流式跑批前期按已扫描页占比折算为全批进度）
   const apiPct = gridsTotal > 0 ? pctOf(apiSuccess, gridsTotal) : 0;
+  const apiGlobalPct = (running && job.kind !== 'retry' && pagesDone < pagesTotal)
+    ? Math.round(apiPct * detFrac)
+    : apiPct;
   const apiState = (isErrState || (!running && apiFail > 0 && apiSuccess === 0))
     ? 'err'
-    : (apiFail > 0 ? (running ? 'warn' : 'err') : (running && (apiInflight > 0 || gridsTotal > apiSuccess) ? 'active' : (apiSuccess > 0 ? 'done' : 'idle')));
+    : (apiFail > 0 ? (running ? 'warn' : 'err') : (running && (apiInflight > 0 || gridsTotal > apiSuccess || pagesDone < pagesTotal) ? 'active' : (apiSuccess > 0 ? 'done' : 'idle')));
   setArchNodeState('nodeApi', 'dotApi', apiState);
   $('stApiTag').textContent = running && apiInflight > 0 ? `${apiInflight} 并发中` : `${prog.concurrency || st.concurrency || 4} 并发`;
   $('anApiIn').textContent = `${tilesQueued}块→${gridsTotal}图`;
   $('anApiVal').textContent = `${apiSuccess}/${gridsTotal}` + (apiFail > 0 ? ` (错${apiFail})` : '');
   $('anApiVal').className = 'an-m-val' + (apiFail > 0 ? ' err' : (apiSuccess > 0 && apiSuccess >= gridsTotal ? ' ok' : ''));
-  $('anApiBar').style.width = apiPct + '%';
+  $('anApiBar').style.width = apiGlobalPct + '%';
   $('anApiBarWrap').className = 'an-bar' + (apiFail > 0 ? ' err' : '');
   const apiCostSuffix = (costInfo && costInfo.found && costInfo.total_tokens > 0) ? ` · ${costInfo.cost_display}` : '';
   $('anApiFoot').textContent = (apiInflight > 0 ? `在途 ${apiInflight} · 已转 ${transCnt}` : `已转 ${transCnt} 处`) + apiCostSuffix;
-  $('anApiPct').textContent = apiPct + '%';
+  $('anApiPct').textContent = apiGlobalPct + '%';
 
-  // ⑥ 实时落盘
+  // ⑥ 实时落盘（严格按全批总页数 × 已扫描页转录比例计算，绝不超过已落盘页占比）
   const transDenom = Math.max(transCnt, tilesQueued);
-  const outPct = transDenom > 0 ? pctOf(transCnt, transDenom) : pctOf(pagesDone, pagesTotal);
+  const transLocalFrac = transDenom > 0 ? Math.min(1, transCnt / transDenom) : 1;
+  const outPct = Math.round(detFrac * transLocalFrac * 100);
   const outState = isErrState ? 'err' : (isWarnState ? 'warn' : (running ? 'active' : (pagesDone > 0 ? 'done' : 'idle')));
   setArchNodeState('nodeOut', 'dotOut', outState);
   $('tagOutState').textContent = running ? '写入中' : (isErrState ? '失败' : (isWarnState ? '待补跑' : '已落盘'));
@@ -2305,6 +2347,8 @@ function connectSSE() {
       } else if (ev.step?.startsWith('service_')) {
         highlightElement('task_' + ev.step.replace('service_', ''));
         refreshOverview();
+      } else if (ev.step === 'ai' && ev.ai_snapshot) {
+        renderAiPanel(ev.ai_snapshot);
       } else if (ev.step === 'overview') {
         refreshOverview();
       }
@@ -2461,9 +2505,73 @@ $('btnConfirmPwd').onclick = async () => {
   } catch (err) { $('pwdErr').textContent = err.message; }
   finally { $('btnConfirmPwd').disabled = false; }
 };
-$('btnAskAgent').onclick = async () => {
-  try { const res = await api('/api/repair/agent', { method: 'POST', body: '{}' }); alert(res.message); }
-  catch (err) { alert(err.message); }
+function renderAiPanel(aiJob) {
+  if (!aiJob) return;
+  const running = Boolean(aiJob.running);
+  const st = aiJob.status || 'idle';
+  const badge = $('aiStatusBadge');
+  if (badge) {
+    badge.className = 'badge ' + (running ? 'ok' : (st === 'done' ? 'ok' : (st === 'error' ? 'err' : 'warn')));
+    badge.textContent = running ? '诊断中...' : (st === 'done' ? '已完成' : (st === 'error' ? '异常' : (st === 'stopped' ? '已停止' : '就绪')));
+  }
+  if ($('btnStartAi')) $('btnStartAi').disabled = running;
+  if ($('btnStopAi')) $('btnStopAi').classList.toggle('hidden', !running);
+  const meta = [];
+  if (aiJob.provider) meta.push(`引擎：${aiJob.provider}`);
+  if (aiJob.mode) meta.push(`模式：${aiJob.mode}`);
+  if (aiJob.session_id) meta.push(`会话：${aiJob.session_id.slice(0, 16)}`);
+  const u = aiJob.usage || {};
+  if (u.inputTokens || u.outputTokens) meta.push(`Token：输入 ${u.inputTokens || 0} / 输出 ${u.outputTokens || 0}`);
+  if ($('aiMetaBar')) $('aiMetaBar').textContent = meta.join('  ·  ');
+  if ($('aiResponseBox')) {
+    const txt = aiJob.response || (aiJob.logs || []).join('\n') || aiJob.error || '';
+    if (txt) $('aiResponseBox').textContent = txt;
+  }
+}
+
+function openAiHelperDialog() {
+  const zc = OVERVIEW?.zcode;
+  if ($('aiProviderHint')) {
+    $('aiProviderHint').textContent = zc?.available
+      ? `已检测到本机 ZCode CLI（${zc.cli}），默认使用安全只读 --mode plan 模式，严禁泄露 API Key 或学生信息。`
+      : '未检测到 ZCode CLI，点击「开始诊断」将自动尝试 opencode 或复制脱敏诊断提示词到剪贴板。';
+  }
+  if (OVERVIEW?.ai_job) renderAiPanel(OVERVIEW.ai_job);
+  $('aiHelperDialog').showModal();
+}
+
+$('btnAskAgent').onclick = () => openAiHelperDialog();
+$('btnCloseAiDlg').onclick = () => $('aiHelperDialog').close();
+$('btnStartAi').onclick = async () => {
+  $('btnStartAi').disabled = true;
+  try {
+    const res = await api('/api/ai/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode: $('aiModeSelect').value,
+        note: $('aiNoteInput').value.trim(),
+        session_id: OVERVIEW?.ai_job?.session_id || '',
+      }),
+    });
+    if (res.headless) {
+      showBanner('ai', res.message || 'ZCode AI 助手已启动', 4000);
+      const st = await api('/api/ai/status');
+      if (st.ai_job) renderAiPanel(st.ai_job);
+    } else {
+      if ($('aiResponseBox')) $('aiResponseBox').textContent = (res.message || '') + (res.prompt ? '\n\n--- 已复制提示词 ---\n' + res.prompt : '');
+      showBanner('ai', res.message || '已复制诊断提示词', 4500);
+    }
+  } catch (err) {
+    if ($('aiResponseBox')) $('aiResponseBox').textContent = '启动失败：' + err.message;
+  } finally {
+    $('btnStartAi').disabled = false;
+  }
+};
+$('btnStopAi').onclick = async () => {
+  try {
+    const res = await api('/api/ai/stop', { method: 'POST', body: '{}' });
+    showBanner('ai', res.message || '已停止 AI 助手');
+  } catch (err) { alert(err.message); }
 };
 $('btnSetVlmKey').onclick = () => openVlmDialog();
 $('btnSaveOpencode').onclick = async () => {
@@ -2477,9 +2585,16 @@ $('btnPickFolder').onclick = async () => {
   $('btnPickFolder').disabled = true;
   try {
     const res = await api('/api/pick-folder', { method: 'POST', body: '{}' });
-    if (res.path) $('inputSourceDir').value = res.path;
-  } catch (err) { alert(err.message); }
-  finally { $('btnPickFolder').disabled = false; }
+    if (res.path) {
+      $('inputSourceDir').value = res.path;
+    } else if (res.timeout || res.cancelled) {
+      showBanner('gui', res.message || '已取消选择文件夹，可直接粘贴路径', 4500);
+    }
+  } catch (err) {
+    showBanner('gui', '打开目录选择框失败，请直接粘贴文件夹路径（' + err.message + '）', 5000);
+  } finally {
+    $('btnPickFolder').disabled = false;
+  }
 };
 
 async function doIngest(autoStart = false) {

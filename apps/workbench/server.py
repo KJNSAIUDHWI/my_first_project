@@ -37,6 +37,14 @@ def _load_pricing_mod(root: Path = ROOT):
     return api_pricing
 
 
+def _load_run_log_mod(root: Path = ROOT):
+    root_s = str(root)
+    if root_s not in sys.path:
+        sys.path.insert(0, root_s)
+    from engine import run_log  # noqa: E402
+    return run_log
+
+
 class EventBus:
     """进程内 SSE 广播总线：CLI 或后台任务发事件，所有网页实时高亮。"""
 
@@ -84,8 +92,9 @@ class WorkbenchState:
     """管理子服务进程、后台流水线任务、在线人员与最近自检结果。"""
 
     def __init__(self, root: Path = ROOT, batches_root: Path = core.DEFAULT_BATCHES_ROOT, port: int = 8888):
-        self.root = root
-        self.batches_root = batches_root
+        self.root = Path(root).resolve()
+        self.batches_root = Path(batches_root).resolve()
+        self.batches_root.mkdir(parents=True, exist_ok=True)
         self.port = port
         self.bus = EventBus()
         self._lock = threading.RLock()
@@ -95,6 +104,7 @@ class WorkbenchState:
             "running": False,
             "kind": "recognize",
             "batch_id": "",
+            "source": "gui",
             "logs": [],
             "status": "idle",
             "returncode": None,
@@ -111,6 +121,19 @@ class WorkbenchState:
             "error": "",
         }
         self.repair_job: dict = {"running": False, "logs": [], "status": "idle", "result": None}
+        self.ai_job: dict = {
+            "running": False,
+            "provider": "",
+            "mode": "plan",
+            "status": "idle",
+            "session_id": "",
+            "response": "",
+            "usage": {},
+            "logs": [],
+            "error": "",
+            "started_at": "",
+            "finished_at": "",
+        }
         self.train_job: dict = {
             "running": False,
             "task": "",
@@ -123,7 +146,9 @@ class WorkbenchState:
             "returncode": None,
         }
         self._pipeline_proc: subprocess.Popen | None = None
+        self._pipeline_lease_token: str = ""
         self._train_proc: subprocess.Popen | None = None
+        self._ai_proc: subprocess.Popen | None = None
         self._stop_event = threading.Event()
         self.last_check: dict | None = None
         # 若本地尚无官方定价永久缓存，在后台静默抓取一次并永久保存（已有缓存时零网络开销）
@@ -197,6 +222,13 @@ class WorkbenchState:
             snap = dict(self.train_job)
             snap["logs"] = list(self.train_job.get("logs") or [])
             snap["metrics"] = dict(self.train_job.get("metrics") or {})
+        return snap
+
+    def ai_job_snapshot(self) -> dict:
+        with self._lock:
+            snap = dict(self.ai_job)
+            snap["logs"] = list(self.ai_job.get("logs") or [])
+            snap["usage"] = dict(self.ai_job.get("usage") or {})
         return snap
 
     def run_check(self, deep: bool = False) -> dict:
@@ -309,13 +341,24 @@ class WorkbenchState:
             log_dir = self.batches_root / "_logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             err_log_path = log_dir / f"service_{task_id}.log"
-            err_fh = err_log_path.open("w", encoding="utf-8", errors="replace")
+            # 追加落盘 + 超过 10 MB 简单轮转，绝不在重启时截断历史日志，且同时保留 stdout 与 stderr
             try:
+                if err_log_path.is_file() and err_log_path.stat().st_size > 10 * 1024 * 1024:
+                    rot = log_dir / f"service_{task_id}.log.1"
+                    if rot.exists():
+                        rot.unlink(missing_ok=True)
+                    err_log_path.replace(rot)
+            except OSError:
+                pass
+            err_fh = err_log_path.open("a", encoding="utf-8", errors="replace")
+            try:
+                err_fh.write(f"\n=== [{core.now_str()}] START {task_id} port={port} ===\n")
+                err_fh.flush()
                 proc = subprocess.Popen(
                     cmd,
                     cwd=str(self.root),
-                    stdout=subprocess.DEVNULL,
-                    stderr=err_fh,
+                    stdout=err_fh,
+                    stderr=subprocess.STDOUT,
                     env=self._utf8_env(),
                     creationflags=creation,
                 )
@@ -362,6 +405,12 @@ class WorkbenchState:
                 info["proc"].wait(timeout=3)
             except subprocess.TimeoutExpired:
                 info["proc"].kill()
+        if info and info.get("err_log"):
+            try:
+                with Path(info["err_log"]).open("a", encoding="utf-8", errors="replace") as fh:
+                    fh.write(f"=== [{core.now_str()}] STOP {task_id} ===\n")
+            except OSError:
+                pass
         self.bus.publish({"source": "gui", "step": f"service_{task_id}", "status": "stopped", "message": f"已停止 {task_id} 服务"})
         return {"ok": True, "task_id": task_id}
 
@@ -475,8 +524,9 @@ class WorkbenchState:
             "has_error_log": (rec_dir / "logs" / "errors.log").is_file(),
         }
 
-    def start_pipeline(self, batch_id: str | None = None) -> dict:
+    def start_pipeline(self, batch_id: str | None = None, source: str = "gui") -> dict:
         diag_mod = core._load_diag_module(self.root)
+        src = source if source in ("gui", "cli", "ai") else "gui"
         with self._lock:
             if self.pipeline_job["running"]:
                 return {"ok": False, "error": "已有自动识别任务正在运行，请等待完成"}
@@ -487,20 +537,38 @@ class WorkbenchState:
             active = core.set_active_batch(batch_id, self.batches_root) if batch_id else core.get_active_batch(self.batches_root)
             if not active:
                 return {"ok": False, "error": "请先导入一批试卷照片"}
+            lease_res = core.acquire_pipeline_lease(
+                "recognize",
+                active["batch_id"],
+                owner=f"hub:{src}",
+                batches_root=self.batches_root,
+            )
+            if not lease_res.get("ok"):
+                return {"ok": False, "error": lease_res.get("error") or "已有任务运行中"}
+            lease_token = str(lease_res["lease"]["token"])
+            self._pipeline_lease_token = lease_token
             # 原子占位，防止双击在 3 秒深度环境检查窗口内拉起双份识别进程
             self.pipeline_job.update({
                 "running": True,
                 "kind": "recognize",
                 "batch_id": active["batch_id"],
+                "source": src,
                 "status": "checking",
                 "error_report": None,
             })
+
+        def _abort_lease():
+            core.release_pipeline_lease(lease_token, self.batches_root)
+            with self._lock:
+                if self._pipeline_lease_token == lease_token:
+                    self._pipeline_lease_token = ""
 
         # 启动前强校验：依赖（含真实 import）、模型权重、有效 API Key
         try:
             rep = core.check_environment(self.root, self.batches_root, deep=True)
         except Exception as exc:
             diag = diag_mod.diagnose_exception(exc, default_module="启动前环境校验")
+            _abort_lease()
             with self._lock:
                 self.pipeline_job.update({"running": False, "status": "error", "error_report": diag})
             return {"ok": False, "error": diag["reason"], "diagnostic": diag}
@@ -517,6 +585,7 @@ class WorkbenchState:
                 "fix": err_fix,
                 "exit_code": diag_mod.EXIT_WEIGHTS_MISSING if (first_err or {}).get("category") == "weights" else diag_mod.EXIT_ENV_MISSING,
             }
+            _abort_lease()
             with self._lock:
                 self.pipeline_job.update({
                     "running": False,
@@ -544,6 +613,7 @@ class WorkbenchState:
                 "fix": "请点击右上角「⚙ 大模型 API」，选择服务商、填入真实密钥并点击「测试连通性」通过后再启动识别。",
                 "exit_code": diag_mod.EXIT_API_CONFIG_ERROR,
             }
+            _abort_lease()
             with self._lock:
                 self.pipeline_job.update({
                     "running": False,
@@ -773,7 +843,7 @@ class WorkbenchState:
                     if last_error_diag and not was_stopped:
                         self.pipeline_job["error_report"] = last_error_diag
                     self.pipeline_job["logs"].append(f"[结束] 退出码 {rc}（{exit_info['title']}）· {msg}")
-                self.bus.publish({"source": "gui", "step": "recognize", "status": final_status, "message": msg})
+                self.bus.publish({"source": src, "step": "recognize", "status": final_status, "message": msg})
             except Exception as exc:
                 diag = diag_mod.diagnose_exception(exc, default_module="工作台任务调度")
                 with self._lock:
@@ -784,10 +854,12 @@ class WorkbenchState:
                     self.pipeline_job["exit_info"] = diag_mod.describe_exit_code(diag.get("exit_code", 1))
                     self.pipeline_job["error_report"] = diag
                     self.pipeline_job["logs"].append(f"[异常·{diag['module']}] {diag['title']}：{diag['reason']}")
-                self.bus.publish({"source": "gui", "step": "recognize", "status": "error", "message": f"启动识别失败：{diag['title']}"})
+                self.bus.publish({"source": src, "step": "recognize", "status": "error", "message": f"启动识别失败：{diag['title']}"})
+            finally:
+                _abort_lease()
 
         threading.Thread(target=worker, daemon=True).start()
-        return {"ok": True, "batch_id": active["batch_id"]}
+        return {"ok": True, "batch_id": active["batch_id"], "source": src}
 
     def stop_pipeline(self) -> dict:
         """优雅中止正在运行的自动识别进程（保留已落盘进度，支持断点续跑）。"""
@@ -812,9 +884,10 @@ class WorkbenchState:
         self.bus.publish({"source": "gui", "step": "recognize", "status": "stopped", "message": "已停止自动识别（已处理进度已保存）"})
         return {"ok": True, "message": "已停止自动识别"}
 
-    def start_retry_failed(self, batch_id: str | None = None) -> dict:
-        """在后台仅补跑当前批次失败或结构异常的图块（不重复扣费）。"""
+    def start_retry_failed(self, batch_id: str | None = None, source: str = "gui") -> dict:
+        """在后台仅补跑当前批次失败或结构异常的图块（不重复扣费，JSON/结构异常自动降级单题重试）。"""
         diag_mod = core._load_diag_module(self.root)
+        src = source if source in ("gui", "cli", "ai") else "gui"
         with self._lock:
             if self.pipeline_job["running"]:
                 return {"ok": False, "error": "当前已有识别或补跑任务正在运行，请稍候"}
@@ -832,12 +905,23 @@ class WorkbenchState:
             page_fail_n = int((cur_summary.get("stats") or {}).get("page_failures") or 0)
             if page_fail_n > 0:
                 # 存在本地检测失败页：直接断点续跑流水线（跳过已成功缓存页与已转录题块，仅补跑失败页）
-                return self.start_pipeline(active["batch_id"])
+                return self.start_pipeline(active["batch_id"], source=src)
+            lease_res = core.acquire_pipeline_lease(
+                "retry",
+                active["batch_id"],
+                owner=f"hub:{src}",
+                batches_root=self.batches_root,
+            )
+            if not lease_res.get("ok"):
+                return {"ok": False, "error": lease_res.get("error") or "已有任务运行中"}
+            lease_token = str(lease_res["lease"]["token"])
+            self._pipeline_lease_token = lease_token
             infer_cfg = core.get_infer_settings(self.batches_root)
             self.pipeline_job.update({
                 "running": True,
                 "kind": "retry",
                 "batch_id": active["batch_id"],
+                "source": src,
                 "status": "running",
                 "returncode": None,
                 "exit_info": None,
@@ -847,7 +931,7 @@ class WorkbenchState:
 
         def worker():
             import importlib.util
-            self.bus.publish({"source": "gui", "step": "recognize", "status": "running", "message": "正在补跑失败图块（不重复扣费）..."})
+            self.bus.publish({"source": src, "step": "recognize", "status": "running", "message": "正在补跑失败图块（JSON/结构类自动单题重试，不重复扣费）..."})
             try:
                 spec = importlib.util.spec_from_file_location("_retry_failed", str(self.root / "scripts" / "retry_failed_tiles.py"))
                 mod = importlib.util.module_from_spec(spec)
@@ -858,9 +942,9 @@ class WorkbenchState:
                         self.pipeline_job["logs"].append(f"[补跑] {msg}")
                         if len(self.pipeline_job["logs"]) > 200:
                             self.pipeline_job["logs"] = self.pipeline_job["logs"][-200:]
-                    self.bus.publish({"source": "gui", "step": "recognize", "status": "running", "message": msg})
+                    self.bus.publish({"source": src, "step": "recognize", "status": "running", "message": msg})
 
-                res = mod.retry_failed_grids(rec_dir, concurrency=infer_cfg["api_concurrency"], progress_cb=cb)
+                res = mod.retry_failed_grids(rec_dir, concurrency=infer_cfg["api_concurrency"], progress_cb=cb, actor=src)
                 run_summary = self._read_run_stats(rec_dir)
                 ok = bool(res.get("ok"))
                 rem = int(res.get("remaining_failures") or 0)
@@ -873,7 +957,7 @@ class WorkbenchState:
                     if not ok:
                         self.pipeline_job["error_report"] = diag_mod.diagnose_exception(res.get("error") or "补跑失败", default_module="补跑失败图块")
                     self.pipeline_job["logs"].append(f"[补跑结束] {res.get('message') or res.get('error') or ''}")
-                self.bus.publish({"source": "gui", "step": "recognize", "status": "done" if ok else "error", "message": res.get("message") or res.get("error") or "补跑结束"})
+                self.bus.publish({"source": src, "step": "recognize", "status": "done" if ok else "error", "message": res.get("message") or res.get("error") or "补跑结束"})
             except Exception as exc:
                 diag = diag_mod.diagnose_exception(exc, default_module="补跑失败图块")
                 with self._lock:
@@ -882,10 +966,15 @@ class WorkbenchState:
                     self.pipeline_job["returncode"] = diag.get("exit_code", 1)
                     self.pipeline_job["exit_info"] = diag_mod.describe_exit_code(diag.get("exit_code", 1))
                     self.pipeline_job["error_report"] = diag
-                self.bus.publish({"source": "gui", "step": "recognize", "status": "error", "message": f"补跑失败：{diag['title']}"})
+                self.bus.publish({"source": src, "step": "recognize", "status": "error", "message": f"补跑失败：{diag['title']}"})
+            finally:
+                core.release_pipeline_lease(lease_token, self.batches_root)
+                with self._lock:
+                    if self._pipeline_lease_token == lease_token:
+                        self._pipeline_lease_token = ""
 
         threading.Thread(target=worker, daemon=True).start()
-        return {"ok": True, "batch_id": active["batch_id"]}
+        return {"ok": True, "batch_id": active["batch_id"], "source": src}
 
     def start_benchmark(self, samples: int = 4) -> dict:
         """启动本机 Batch/并发性能压测（零 API 费用，自动选出最优参数）。"""
@@ -1107,8 +1196,207 @@ class WorkbenchState:
         self.bus.publish({"source": "gui", "step": "train", "status": "stopped", "message": f"已停止训练任务：{run_name}"})
         return {"ok": True, "message": f"已停止训练：{run_name}"}
 
+    def start_ai_helper(self, payload: dict) -> dict:
+        """通过 ZCode headless（或降级 opencode/剪贴板）执行只读诊断或受控 AI 辅助。"""
+        rl = _load_run_log_mod(self.root)
+        cfg = core.load_config(self.batches_root)
+        pref = str(payload.get("provider") or cfg.get("ai_helper_provider") or "auto").strip().lower()
+        mode = str(payload.get("mode") or "plan").strip().lower()
+        if mode not in ("plan", "guarded"):
+            mode = "plan"
+        session_id = str(payload.get("session_id") or "").strip()
+        raw_prompt = str(payload.get("prompt") or "").strip()
+        note = str(payload.get("note") or "").strip()
+        if not raw_prompt:
+            rep = self.last_check or core.check_environment(self.root, self.batches_root)
+            raw_prompt = core.build_agent_prompt(rep, root=self.root, extra_note=note)
+        prompt = rl.mask_secret(raw_prompt)
+        attach = payload.get("attach") if isinstance(payload.get("attach"), list) else []
+
+        # 优先使用 ZCode（除非用户指定 opencode）
+        zc_spec = core.build_zcode_command(prompt, self.root, mode=mode, session_id=session_id, attach=attach, cfg=cfg) if pref != "opencode" else {"ok": False}
+        if not zc_spec.get("ok"):
+            fallback = core.launch_opencode(self.root, prompt, batches_root=self.batches_root)
+            rl.append_cli_log(
+                self.batches_root,
+                command="ai.fallback",
+                source="ai",
+                actor="gui",
+                ok=True,
+                message=fallback.get("message") or "",
+                detail={"provider": "opencode" if fallback.get("launched") else "clipboard"},
+            )
+            self.bus.publish({"source": "ai", "step": "agent", "status": "done", "message": fallback.get("message") or "诊断提示词已复制"})
+            return {**fallback, "provider": "opencode" if fallback.get("launched") else "clipboard", "headless": False}
+
+        with self._lock:
+            if self.ai_job.get("running"):
+                return {"ok": False, "error": "已有 AI 助手诊断任务正在运行，请等待完成或先点击停止"}
+            self.ai_job = {
+                "running": True,
+                "provider": "zcode",
+                "mode": mode,
+                "status": "running",
+                "session_id": session_id,
+                "response": "",
+                "usage": {},
+                "logs": [f"[{core.now_str()}] 启动 ZCode 无头助手（模式：{mode}，目录：{self.root}）..."],
+                "error": "",
+                "started_at": core.now_str(),
+                "finished_at": "",
+            }
+
+        def worker():
+            t0 = time.monotonic()
+            cmd = zc_spec["cmd"]
+            env = {**self._utf8_env(), **(zc_spec.get("env_patch") or {})}
+            creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            self.bus.publish({"source": "ai", "step": "ai", "status": "running", "message": f"ZCode AI 助手诊断中（模式：{mode}）..."})
+            out_lines: list[str] = []
+            last_json: dict | None = None
+            rc = -1
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=zc_spec["cwd"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    creationflags=creation,
+                )
+                with self._lock:
+                    self._ai_proc = proc
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    text = rl.mask_secret(line.rstrip())
+                    if not text:
+                        continue
+                    out_lines.append(text)
+                    parsed = None
+                    if text.startswith("{") and text.endswith("}"):
+                        try:
+                            parsed = json.loads(text)
+                        except ValueError:
+                            parsed = None
+                    with self._lock:
+                        if isinstance(parsed, dict):
+                            last_json = parsed
+                            if parsed.get("sessionId"):
+                                self.ai_job["session_id"] = str(parsed["sessionId"])
+                            if isinstance(parsed.get("usage"), dict):
+                                self.ai_job["usage"] = parsed["usage"]
+                            if isinstance(parsed.get("response"), str):
+                                self.ai_job["response"] = rl.mask_secret(parsed["response"])
+                            elif isinstance(parsed.get("delta"), str):
+                                self.ai_job["response"] += rl.mask_secret(parsed["delta"])
+                        self.ai_job["logs"].append(text[:300])
+                        if len(self.ai_job["logs"]) > 200:
+                            self.ai_job["logs"] = self.ai_job["logs"][-200:]
+                    self.bus.publish({
+                        "source": "ai",
+                        "step": "ai",
+                        "status": "running",
+                        "message": "ZCode AI 助手输出更新",
+                        "ai_snapshot": self.ai_job_snapshot(),
+                    })
+                rc = proc.wait()
+                # 若整个输出是多行 JSON，尝试整体解析
+                if last_json is None and out_lines:
+                    joined = "\n".join(out_lines).strip()
+                    if joined.startswith("{") and joined.endswith("}"):
+                        try:
+                            obj = json.loads(joined)
+                            if isinstance(obj, dict):
+                                last_json = obj
+                        except ValueError:
+                            pass
+                with self._lock:
+                    was_stopped = self.ai_job.get("status") == "stopped"
+                    self._ai_proc = None
+                    if isinstance(last_json, dict):
+                        if last_json.get("sessionId"):
+                            self.ai_job["session_id"] = str(last_json["sessionId"])
+                        if isinstance(last_json.get("usage"), dict):
+                            self.ai_job["usage"] = last_json["usage"]
+                        if isinstance(last_json.get("response"), str):
+                            self.ai_job["response"] = rl.mask_secret(last_json["response"])
+                    if not self.ai_job["response"] and out_lines:
+                        self.ai_job["response"] = "\n".join(out_lines[-30:])
+                    self.ai_job["running"] = False
+                    self.ai_job["finished_at"] = core.now_str()
+                    if was_stopped:
+                        self.ai_job["status"] = "stopped"
+                    elif rc == 0:
+                        self.ai_job["status"] = "done"
+                    else:
+                        self.ai_job["status"] = "error"
+                        self.ai_job["error"] = f"ZCode 退出码 {rc}"
+                final_snap = self.ai_job_snapshot()
+                dur_ms = round((time.monotonic() - t0) * 1000, 1)
+                rl.append_cli_log(
+                    self.batches_root,
+                    command="ai.zcode",
+                    argv=[cmd[0], cmd[1] if len(cmd) > 1 else "", "--mode", mode],
+                    source="ai",
+                    actor="zcode",
+                    exit_code=rc,
+                    duration_ms=dur_ms,
+                    ok=(rc == 0),
+                    session_id=final_snap.get("session_id") or "",
+                    message=f"ZCode ({mode}) 完成" if rc == 0 else f"ZCode 失败 (rc={rc})",
+                    detail={"usage": final_snap.get("usage") or {}},
+                )
+                self.bus.publish({
+                    "source": "ai",
+                    "step": "ai",
+                    "status": final_snap["status"],
+                    "message": "ZCode AI 诊断完成" if rc == 0 else f"ZCode AI 助手结束（状态：{final_snap['status']}）",
+                    "ai_snapshot": final_snap,
+                })
+            except Exception as exc:
+                err_s = rl.mask_secret(str(exc))
+                with self._lock:
+                    self._ai_proc = None
+                    self.ai_job["running"] = False
+                    self.ai_job["status"] = "error"
+                    self.ai_job["error"] = err_s
+                    self.ai_job["finished_at"] = core.now_str()
+                self.bus.publish({"source": "ai", "step": "ai", "status": "error", "message": f"ZCode 启动失败：{err_s}"})
+
+        threading.Thread(target=worker, daemon=True, name="zcode-ai").start()
+        return {"ok": True, "provider": "zcode", "mode": mode, "headless": True, "message": f"已启动 ZCode AI 助手（{mode} 模式）"}
+
+    def stop_ai_helper(self) -> dict:
+        with self._lock:
+            proc = self._ai_proc
+            if not self.ai_job.get("running"):
+                return {"ok": True, "message": "当前没有运行中的 AI 助手任务"}
+            self.ai_job["status"] = "stopped"
+        if proc and proc.poll() is None:
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=5)
+                else:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self.bus.publish({"source": "ai", "step": "ai", "status": "stopped", "message": "已停止 AI 助手任务"})
+        return {"ok": True, "message": "已停止 AI 助手任务"}
+
     def shutdown_all(self) -> None:
         self._stop_event.set()
+        if self.ai_job.get("running"):
+            try:
+                self.stop_ai_helper()
+            except Exception:
+                pass
         if self.pipeline_job.get("running"):
             try:
                 self.stop_pipeline()
@@ -1128,27 +1416,47 @@ class WorkbenchState:
                 pass
 
 
-def pick_windows_folder() -> str:
-    """弹出 Windows 原生文件夹选择对话框（不依赖 tkinter）。"""
+def pick_windows_folder(initial_dir: Path | str | None = None, timeout_seconds: int = 120) -> dict:
+    """弹出 Windows 原生文件夹选择对话框（默认定位到当前项目路径、强制置顶、优雅处理超时取消）。"""
     if os.name != "nt":
-        return ""
+        return {"ok": True, "path": "", "cancelled": True, "message": "当前非 Windows 系统，请手动粘贴文件夹路径"}
+    init_p = Path(initial_dir).resolve() if initial_dir else ROOT
+    if not init_p.is_dir():
+        init_p = ROOT
     ps = (
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
-        "$f.Description = '请选择存放新试卷照片的文件夹'; "
-        "$f.ShowNewFolderButton = $false; "
-        "$top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; "
-        "if ($f.ShowDialog($top) -eq 'OK') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output $f.SelectedPath }"
+        "$f.Description = '请选择存放新试卷照片的文件夹（默认从当前项目目录展开）'; "
+        "$f.ShowNewFolderButton = $true; "
+        "if ($env:AGY_PICK_INIT_DIR -and (Test-Path -LiteralPath $env:AGY_PICK_INIT_DIR)) { $f.SelectedPath = $env:AGY_PICK_INIT_DIR }; "
+        "$top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; $top.StartPosition = 'Manual'; $top.Location = New-Object System.Drawing.Point(-2000, -2000); $top.ShowInTaskbar = $false; "
+        "$top.Show(); $top.Activate(); "
+        "$res = $f.ShowDialog($top); $top.Dispose(); "
+        "if ($res -eq 'OK') { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output $f.SelectedPath }"
     )
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-STA", "-Command", ps],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-    )
-    return (proc.stdout or "").strip()
+    env = dict(os.environ, AGY_PICK_INIT_DIR=str(init_p))
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-STA", "-Command", ps],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(10, int(timeout_seconds)),
+            env=env,
+        )
+        chosen = (proc.stdout or "").strip()
+        return {"ok": True, "path": chosen, "cancelled": not bool(chosen)}
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": True,
+            "path": "",
+            "cancelled": True,
+            "timeout": True,
+            "message": "文件夹选择弹窗超过 120 秒未操作已自动关闭；您可以重新点击选择，或直接粘贴文件夹路径。",
+        }
+    except Exception as exc:
+        return {"ok": False, "path": "", "error": f"打开系统文件夹弹窗失败：{exc}"}
 
 
 def make_handler(state: WorkbenchState):
@@ -1260,6 +1568,66 @@ def make_handler(state: WorkbenchState):
                 self._send_json(200, {"ok": True, "benchmark_job": state.benchmark_job_snapshot()})
                 return
 
+            if path == "/api/ai/status":
+                if not self._require_host():
+                    return
+                self._send_json(200, {"ok": True, "ai_job": state.ai_job_snapshot(), "zcode": core.find_zcode(core.load_config(state.batches_root))})
+                return
+
+            if path == "/api/machine":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                probe_v = qs.get("probe_version", ["0"])[0] in ("1", "true", "yes")
+                info = core.collect_machine_info(state.root, state.batches_root, probe_zcode_version=probe_v)
+                info["services"] = state.service_snapshot()
+                info["pipeline_lease"] = core.read_pipeline_lease(state.batches_root)
+                self._send_json(200, {"ok": True, **info})
+                return
+
+            if path == "/api/runs":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                bid = str(qs.get("batch_id", [""])[0] or "").strip() or None
+                lim = int(qs.get("limit", ["50"])[0] or 50)
+                rl = _load_run_log_mod(state.root)
+                runs = rl.list_runs(state.batches_root, batch_id=bid, limit=lim)
+                self._send_json(200, {"ok": True, "runs": runs, "count": len(runs)})
+                return
+
+            if path.startswith("/api/runs/"):
+                if not self._require_host():
+                    return
+                rid = urllib.parse.unquote(path[len("/api/runs/"):]).strip("/")
+                rl = _load_run_log_mod(state.root)
+                det = rl.get_run_detail(state.batches_root, rid)
+                if not det:
+                    self._send_json(404, {"ok": False, "error": f"未找到运行记录：{rid}"})
+                    return
+                self._send_json(200, {"ok": True, **det})
+                return
+
+            if path == "/api/logs":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                rl = _load_run_log_mod(state.root)
+                res = rl.query_events(
+                    state.batches_root,
+                    run_id=str(qs.get("run_id", [""])[0] or ""),
+                    batch_id=str(qs.get("batch_id", [""])[0] or ""),
+                    level=str(qs.get("level", [""])[0] or ""),
+                    event=str(qs.get("event", [""])[0] or ""),
+                    page_id=str(qs.get("page_id", [""])[0] or ""),
+                    grid_id=str(qs.get("grid_id", [""])[0] or ""),
+                    q=str(qs.get("q", [""])[0] or ""),
+                    limit=int(qs.get("limit", ["200"])[0] or 200),
+                    offset=int(qs.get("offset", ["0"])[0] or 0),
+                )
+                self._send_json(200, {"ok": True, **res})
+                return
+
             if path == "/api/pipeline/errors":
                 if not self._require_host():
                     return
@@ -1309,6 +1677,9 @@ def make_handler(state: WorkbenchState):
                     "pipeline_job": state.pipeline_job_snapshot(),
                     "recognition_summary": rec_summary,
                     "benchmark_job": state.benchmark_job_snapshot() if self._is_host() else None,
+                    "ai_job": state.ai_job_snapshot() if self._is_host() else None,
+                    "zcode": core.find_zcode(core.load_config(state.batches_root)) if self._is_host() else None,
+                    "pipeline_lease": core.read_pipeline_lease(state.batches_root) if self._is_host() else None,
                     "infer_settings": core.get_infer_settings(state.batches_root) if self._is_host() else {},
                     "hardware": diag_mod.probe_compute_hardware() if self._is_host() else {},
                     "last_check": state.last_check if self._is_host() else None,
@@ -1418,6 +1789,13 @@ def make_handler(state: WorkbenchState):
                 patch = {}
                 if "opencode_path" in body:
                     patch["opencode_path"] = str(body["opencode_path"] or "").strip()
+                if "zcode_exe" in body:
+                    patch["zcode_exe"] = str(body["zcode_exe"] or "").strip()
+                if "zcode_cli" in body:
+                    patch["zcode_cli"] = str(body["zcode_cli"] or "").strip()
+                if "ai_helper_provider" in body:
+                    prov = str(body["ai_helper_provider"] or "auto").strip().lower()
+                    patch["ai_helper_provider"] = prov if prov in ("auto", "zcode", "opencode") else "auto"
                 if "infer_device" in body:
                     dev = str(body["infer_device"] or "auto").strip()
                     patch["infer_device"] = dev if dev in ("auto", "cpu", "cuda:0", "cuda") else "auto"
@@ -1436,6 +1814,25 @@ def make_handler(state: WorkbenchState):
                     "config": cfg,
                     "infer_settings": core.get_infer_settings(state.batches_root),
                 })
+                return
+
+            if path == "/api/check/sync":
+                rep = body.get("report")
+                if isinstance(rep, dict) and "items" in rep:
+                    state.last_check = rep
+                else:
+                    deep = bool(body.get("deep"))
+                    state.last_check = core.check_environment(state.root, state.batches_root, deep=deep)
+                src = str(body.get("source") or "cli")
+                ok_c = bool((state.last_check or {}).get("ok"))
+                err_n = int((state.last_check or {}).get("error_count") or 0)
+                state.bus.publish({
+                    "source": src,
+                    "step": "check",
+                    "status": "done" if ok_c else "error",
+                    "message": "环境自检全部通过（已同步）" if ok_c else f"环境自检发现 {err_n} 项异常（已同步）",
+                })
+                self._send_json(200, {"ok": True, "last_check": state.last_check})
                 return
 
             if path == "/api/repair/pip":
@@ -1529,20 +1926,24 @@ def make_handler(state: WorkbenchState):
                 return
 
             if path == "/api/repair/agent":
-                rep = state.last_check or core.check_environment(state.root, state.batches_root)
-                note = str(body.get("note") or "")
-                prompt = core.build_agent_prompt(rep, root=state.root, extra_note=note)
-                res = core.launch_opencode(state.root, prompt, batches_root=state.batches_root)
-                state.bus.publish({"source": "gui", "step": "agent", "status": "done", "message": res["message"]})
+                res = state.start_ai_helper(body)
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/ai/run":
+                res = state.start_ai_helper(body)
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/ai/stop":
+                res = state.stop_ai_helper()
                 self._send_json(200, res)
                 return
 
             if path == "/api/pick-folder":
-                try:
-                    folder = pick_windows_folder()
-                    self._send_json(200, {"ok": True, "path": folder})
-                except Exception as exc:
-                    self._send_json(500, {"ok": False, "error": str(exc)})
+                init_dir = body.get("initial_dir") or state.root
+                res = pick_windows_folder(initial_dir=init_dir)
+                self._send_json(200 if res.get("ok") else 500, res)
                 return
 
             if path == "/api/ingest":
@@ -1585,7 +1986,7 @@ def make_handler(state: WorkbenchState):
                 return
 
             if path == "/api/pipeline/run":
-                res = state.start_pipeline(body.get("batch_id"))
+                res = state.start_pipeline(body.get("batch_id"), source=str(body.get("source") or "gui"))
                 self._send_json(200 if res.get("ok") else 400, res)
                 return
 
@@ -1595,7 +1996,7 @@ def make_handler(state: WorkbenchState):
                 return
 
             if path == "/api/pipeline/retry-failed":
-                res = state.start_retry_failed(body.get("batch_id"))
+                res = state.start_retry_failed(body.get("batch_id"), source=str(body.get("source") or "gui"))
                 self._send_json(200 if res.get("ok") else 400, res)
                 return
 
