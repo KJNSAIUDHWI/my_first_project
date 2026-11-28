@@ -374,7 +374,7 @@ async function pollLive() {
       state.workMode = data.work_mode;
       state.showUnmatchedFills = state.workMode === "iteration";
       updateTopbar();
-      refreshOverviewPanel();
+      renderRightPanel();
       draw();
     }
     if (data.grading) state.grading = data.grading;

@@ -145,9 +145,33 @@ function updateTopbar() {
   $("leftSummary").textContent = `${state.pages.filter(isPageDone).length}/${state.pages.length}`;
   $("btnPrev").disabled = state.pageIdx <= 0;
   $("btnPrev").innerHTML = `${uiIcon("arrowLeft")}<span>上一张 (${escHtml(primaryKeyLabel("prevPage"))})</span>`;
-  $("btnSubmitNext").innerHTML = state.pageIdx < state.pages.length - 1
-    ? `${uiIcon("check")}<span>确认并下一张 (${escHtml(primaryKeyLabel("nextSubmit"))})</span>`
-    : `${uiIcon("check")}<span>确认并保存 (${escHtml(primaryKeyLabel("nextSubmit"))})</span>`;
+  const isIter = state.workMode === "iteration";
+  const nextKey = primaryKeyLabel("nextSubmit");
+  const submitBtn = $("btnSubmitNext");
+  submitBtn.innerHTML = isIter
+    ? `${uiIcon("layers")}<span>确认并回流训练 (${escHtml(nextKey)})</span>`
+    : (state.pageIdx < state.pages.length - 1
+        ? `${uiIcon("check")}<span>确认并下一张 (${escHtml(nextKey)})</span>`
+        : `${uiIcon("check")}<span>确认并保存 (${escHtml(nextKey)})</span>`);
+  if (typeof bindRevHoverTip === "function") {
+    bindRevHoverTip(submitBtn, () => (state.workMode === "iteration"
+      ? {
+          title: "确认并回流训练库",
+          badge: "非临时生效",
+          color: "#2563eb",
+          dot: true,
+          placement: "below",
+          body: "修改的框不再只是临时生效：会保存本页结果，并自动创建/写入 data/m1、data/m2、data/m3 训练文件夹（含整页图、区域裁图与标注日志），随后自动跳至下一张。",
+        }
+      : {
+          title: "确认并保存本页",
+          badge: "仅本批生效",
+          color: "#15803d",
+          dot: true,
+          placement: "below",
+          body: "保存本页判分、改字与临时调框结果并跳至下一张，不会写入训练库或新建训练目录。",
+        }));
+  }
   $("btnModeEdit").innerHTML = `${uiIcon("crop")}<span>调框 (${escHtml(primaryKeyLabel("toggleMode"))})</span>`;
   $("btnFit").textContent = `适配 (${primaryKeyLabel("fitCanvas")})`;
 
@@ -156,14 +180,29 @@ function updateTopbar() {
   const msPill = $("modeSwitchPill");
   if (msPill) msPill.dataset.mode = state.mode;
   const pgGrade = getPageGrading(p);
-  $("btnModeView").innerHTML = `${uiIcon("eye")}<span>${(pgGrade && state.workMode === "grading") ? "看分数" : "看答案"}</span>`;
+  $("btnModeView").innerHTML = `${uiIcon("eye")}<span>${(pgGrade && !isIter) ? "看分数" : "看答案"}</span>`;
 
-  const wp = $("revWorkPill");
-  if (wp) {
-    wp.dataset.work = state.workMode;
-    wp.querySelectorAll(".work-pill-btn").forEach(b => b.classList.toggle("active", b.dataset.work === state.workMode));
+  const iterBadge = $("iterModeBadge");
+  if (iterBadge) {
+    iterBadge.classList.toggle("show", isIter);
+    if (typeof bindRevHoverTip === "function") {
+      bindRevHoverTip(iterBadge, () => (state.workMode === "iteration"
+        ? {
+            title: "当前为模型迭代模式",
+            badge: "同步 8888",
+            color: "#2563eb",
+            dot: true,
+            placement: "below",
+            body: "调框改动不再是临时调整，按确认后会持久写入并自动创建 data/m1、data/m2、data/m3 训练目录与标注日志；若只需常规改卷，可在 8888 工作台或右上角「更多」切回改卷模式。",
+          }
+        : null));
+    }
   }
-  document.body.dataset.work = state.workMode === "iteration" ? "iteration" : "grading";
+  const swLbl = $("btnSwitchWorkModeLabel");
+  if (swLbl) {
+    swLbl.textContent = isIter ? "切回改卷模式（关闭回流）" : "切换到模型迭代模式";
+  }
+  document.body.dataset.work = isIter ? "iteration" : "grading";
   const sp = $("topScorePill");
   if (sp) {
     if (pgGrade && pgGrade.has_schema) {

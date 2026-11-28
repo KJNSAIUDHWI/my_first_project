@@ -64,6 +64,7 @@ async function applyReviewMirrorStateIfNeeded() {
     const qReviewMode = REV_URL_PARAMS.get("review_mode") || "";
     const qLayers = REV_URL_PARAMS.get("layers") || "";
     const qTipCls = REV_URL_PARAMS.get("tip_cls") || "";
+    const qTipEl = REV_URL_PARAMS.get("tip_el") || "";
     const qItem = REV_URL_PARAMS.get("item") || "";
     if (qWorkMode) {
       state.workMode = qWorkMode === "iteration" ? "iteration" : "grading";
@@ -110,6 +111,12 @@ async function applyReviewMirrorStateIfNeeded() {
           dot: true,
           body: m.desc,
         });
+      }
+    } else if (qTipEl && typeof showRevHoverTip === "function") {
+      const el = $(qTipEl);
+      if (el && el._revTipSpec) {
+        const opts = typeof el._revTipSpec === "function" ? el._revTipSpec() : el._revTipSpec;
+        if (opts) showRevHoverTip(el, opts);
       }
     }
   } catch {}
@@ -190,6 +197,7 @@ function connectReviewSSE() {
         state.workMode = ev.work_mode;
         state.showUnmatchedFills = state.workMode === "iteration";
         updateTopbar();
+        renderRightPanel();
         draw();
         if (ev.message) toast(ev.message, 2200);
       } else if (ev.type === "ui_command") {
@@ -448,10 +456,14 @@ if ($("btnRevAiStop")) {
   };
 }
 
-// 绑定双模式药丸、未配题号清理、成绩导出与局部重识别浮条
-document.querySelectorAll("#revWorkPill .work-pill-btn").forEach(btn => {
-  btn.onclick = () => { if (btn.dataset.work && btn.dataset.work !== state.workMode) switchWorkMode(btn.dataset.work); };
-});
+// 绑定「更多」菜单中的模式切换、未配题号清理、成绩导出与局部重识别浮条
+if ($("btnSwitchWorkMode")) {
+  $("btnSwitchWorkMode").onclick = () => {
+    const menu = $("moreMenu");
+    if (menu) menu.classList.remove("open");
+    switchWorkMode(state.workMode === "iteration" ? "grading" : "iteration");
+  };
+}
 if ($("btnExportCsv")) {
   $("btnExportCsv").onclick = () => window.open("/api/grading.csv", "_blank");
 }

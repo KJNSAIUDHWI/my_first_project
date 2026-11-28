@@ -578,6 +578,82 @@ class TestWorkbenchDualModeAndSchemaAPI(unittest.TestCase):
                 srv.shutdown()
                 srv.server_close()
 
+    def test_grading_temp_vs_iteration_training_sync_auto_dirs(self):
+        """验证改卷模式调框仅本批临时生效、不建训练目录；迭代模式自动创建 data/m1/m2/m3 并同步整页/裁图与日志。"""
+        from unittest import mock
+        from apps.review import server as review_srv
+        from training import box_log
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rec_dir = root / "recognized"
+            (rec_dir / "pages").mkdir(parents=True)
+            img_path = rec_dir / "pages" / "p001.jpg"
+            Image.new("RGB", (1000, 1400), (255, 255, 255)).save(img_path, format="JPEG")
+            boxes = [
+                {"cls": 0, "box": [20, 40, 120, 400]},
+                {"cls": 1, "box": [150, 120, 880, 420]},
+                {"cls": 2, "box": [180, 150, 230, 190]},
+                {"cls": 3, "box": [240, 150, 420, 190]},
+                {"cls": 4, "box": [150, 480, 900, 1200]},
+                {"cls": 5, "box": [180, 520, 860, 760]},
+                {"cls": 6, "box": [190, 535, 235, 575]},
+            ]
+            (rec_dir / "manifest.json").write_text(json.dumps({"batch": "test_sync"}), encoding="utf-8")
+            (rec_dir / "results.json").write_text(json.dumps({
+                "status": "完成",
+                "pages": [{
+                    "id": "p001",
+                    "name": "20261128_test_0001",
+                    "image": "pages/p001.jpg",
+                    "width": 1000,
+                    "height": 1400,
+                    "boxes": boxes,
+                    "items": [],
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            fake_data = root / "data"
+            store = review_srv.ReviewStore(rec_dir)
+
+            with mock.patch.object(box_log, "m_dir", side_effect=lambda m: fake_data / m), \
+                 mock.patch.object(box_log, "m_progress", side_effect=lambda m: fake_data / m / "progress.csv"), \
+                 mock.patch.object(review_srv, "ROOT_DIR", root):
+                # 1) 改卷模式（allow_sync_data=False）：不建训练目录，只改本批 results.json
+                out_grade = store.submit_page({
+                    "page_id": "p001",
+                    "reviewer": "老师A",
+                    "boxes": boxes,
+                    "boxes_modified": True,
+                    "sync_log": True,
+                }, allow_sync_data=False)
+                self.assertTrue(out_grade["ok"])
+                self.assertFalse(out_grade["sync"]["synced"])
+                self.assertFalse(fake_data.exists())
+
+                # 2) 模型迭代模式（allow_sync_data=True）：整页 submit_page 自动创建 data/m1/m2/m3 并回流图+日志+进度表
+                out_iter_resp = store.submit_page({
+                    "page_id": "p001",
+                    "reviewer": "老师A",
+                    "boxes": boxes,
+                    "boxes_modified": True,
+                    "sync_log": True,
+                }, allow_sync_data=True)
+                self.assertTrue(out_iter_resp["ok"])
+                out_iter = out_iter_resp["sync"]
+                self.assertTrue(out_iter["synced"])
+                self.assertEqual(out_iter["m1_boxes"], 3)
+                self.assertEqual(out_iter["m2_crops"], 1)
+                self.assertEqual(out_iter["m3_crops"], 1)
+                self.assertGreaterEqual(len(out_iter["created_dirs"]), 6)
+                self.assertTrue((fake_data / "m1" / "images" / "20261128_test_0001.jpg").is_file())
+                self.assertTrue((fake_data / "m1" / "log" / "20261128_test_0001.log").is_file())
+                self.assertTrue((fake_data / "m2" / "images" / "20261128_test_0001.选择题区.jpg").is_file())
+                self.assertTrue((fake_data / "m2" / "log" / "20261128_test_0001.选择题区.log").is_file())
+                self.assertTrue((fake_data / "m3" / "images" / "20261128_test_0001.填空题区.jpg").is_file())
+                self.assertTrue((fake_data / "m3" / "log" / "20261128_test_0001.填空题区.log").is_file())
+                self.assertTrue((fake_data / "m3" / "progress.csv").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

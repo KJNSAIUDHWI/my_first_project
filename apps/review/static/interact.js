@@ -453,6 +453,7 @@ async function submitCurrentPage(goNext = true) {
     state.workingBoxes = JSON.parse(JSON.stringify(getPageBoxes(p)));
     state.workingItems = JSON.parse(JSON.stringify(getRawPageItems(p)));
     bindBoxesAndItems(state.workingBoxes, state.workingItems);
+    const hadBoxChange = state.boxesModified;
     state.boxesModified = false;
     state.itemsModified = false;
     state.itemEdits = {};
@@ -461,7 +462,16 @@ async function submitCurrentPage(goNext = true) {
     renderLeftList();
     updateTopbar();
 
-    const syncMsg = res.sync && res.sync.synced ? `（已同步标框记录）` : "";
+    let syncMsg = "";
+    if (res.sync && res.sync.synced) {
+      const parts = [`M1 ${res.sync.m1_boxes || 0}框`];
+      if (res.sync.m2_crops) parts.push(`M2 ${res.sync.m2_crops}区`);
+      if (res.sync.m3_crops) parts.push(`M3 ${res.sync.m3_crops}区`);
+      const dirHint = (res.sync.created_dirs && res.sync.created_dirs.length) ? " · 已自动创建训练目录" : "";
+      syncMsg = `（已回流训练库：${parts.join(" / ")}${dirHint}）`;
+    } else if (hadBoxChange && state.workMode === "grading") {
+      syncMsg = "（调框仅本批临时生效，未写入训练库）";
+    }
     if (goNext) {
       // 多人协作优先通过 /api/claim 自动领取下一张「无人锁定且未审」的试卷，避免撞车
       let nextIdx = -1;

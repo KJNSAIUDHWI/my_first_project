@@ -546,9 +546,14 @@ async function switchWorkMode(nextMode) {
     hubApi("/config", { work_mode: wm }).catch(() => {});
   } catch {}
   updateTopbar();
-  refreshOverviewPanel();
+  renderRightPanel();
   draw();
-  toast(wm === "grading" ? "改试卷模式：无题号填空框默认隐藏，聚焦判分" : "模型迭代模式：显示全部未配题号框并支持一键清理与训练回流", 2600);
+  toast(
+    wm === "grading"
+      ? "已切回改卷模式：调框仅本批临时生效，不会写入训练库"
+      : "已切至模型迭代模式：确认保存时将自动建目录并回流 M1/M2/M3 训练数据",
+    2800
+  );
 }
 function getChoiceConfs(it) {
   const r = it.recognition || {};

@@ -524,6 +524,7 @@ def read_progress(m):
 
 def write_progress(m, by):
     p = str(m_progress(m))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=PROGRESS_FIELDS)

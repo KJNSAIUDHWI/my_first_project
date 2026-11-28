@@ -809,43 +809,142 @@ class ReviewStore:
         stats['identity_items'] = sum(1 for it in all_items if it.get('kind') == 'identity')
         stats['items_with_transcription'] = sum(1 for it in all_items if 'transcription' in it and it.get('transcription'))
 
-    def _sync_m1_log(self, page, boxes, reviewer):
-        """把整页修正后的 M1 框（0/1/4）按中文事件日志格式同步写入 data/m1/log/<stem>.log。"""
+    def _sync_training_data(self, page, boxes, reviewer, data_root=None):
+        """模型迭代模式回流：自动创建 data/m1、data/m2、data/m3 训练目录，写入整页/区域裁图与标注日志。"""
         stem = str(page.get('name') or '').strip()
         if not stem:
             return {'synced': False, 'reason': '缺少页名'}
         w = max(1.0, float(page.get('width') or 1))
         h = max(1.0, float(page.get('height') or 1))
+        src_img = self.folder / (page.get('image') or '')
+        if not src_img.is_file():
+            return {'synced': False, 'reason': '未找到工作图，跳过同步'}
+
+        base_data = Path(data_root) if data_root is not None else (ROOT_DIR / 'data')
+        created_dirs = []
+
+        def _ensure_stage_dirs(stage_name):
+            img_dir = base_data / stage_name / 'images'
+            lg_dir = base_data / stage_name / 'log'
+            for d in (img_dir, lg_dir):
+                if not d.is_dir():
+                    d.mkdir(parents=True, exist_ok=True)
+                    try:
+                        created_dirs.append(str(d.relative_to(ROOT_DIR)).replace('\\', '/'))
+                    except ValueError:
+                        created_dirs.append(str(d))
+            return img_dir, lg_dir
+
+        # 1) M1 整页图与版面总区框（0/1/4）
         m1_norm = []
+        choice_zones = []
+        fill_zones = []
         for b in boxes:
-            if int(b['cls']) not in M1_CLS:
+            cid = int(b['cls'])
+            if cid not in M1_CLS:
                 continue
-            x1, y1, x2, y2 = b['box']
+            x1, y1, x2, y2 = [float(v) for v in b['box']]
             cx = max(0.0, min(1.0, (x1 + x2) / 2.0 / w))
             cy = max(0.0, min(1.0, (y1 + y2) / 2.0 / h))
             bw = max(0.0, min(1.0, (x2 - x1) / w))
             bh = max(0.0, min(1.0, (y2 - y1) / h))
             if bw <= 0 or bh <= 0:
                 continue
-            m1_norm.append([int(b['cls']), round(cx, 6), round(cy, 6), round(bw, 6), round(bh, 6)])
+            m1_norm.append([cid, round(cx, 6), round(cy, 6), round(bw, 6), round(bh, 6)])
+            if cid == 1:
+                choice_zones.append((x1, y1, x2, y2))
+            elif cid == 4:
+                fill_zones.append((x1, y1, x2, y2))
 
-        m1_img_dir = ROOT_DIR / 'data' / 'm1' / 'images'
-        if not m1_img_dir.is_dir():
-            return {'synced': False, 'reason': 'data/m1/images 目录不存在'}
-        target_img = m1_img_dir / (stem + '.jpg')
-        if not target_img.is_file():
-            # 使用当前批次转正后的工作图，确保与画布框像素坐标完全一致
-            src_img = self.folder / (page.get('image') or '')
-            if src_img.is_file():
-                shutil.copy2(src_img, target_img)
-            else:
-                return {'synced': False, 'reason': '未找到工作图，跳过同步'}
-        ev_data = {'e': 'review', 'boxes': m1_norm}
+        m1_img_dir, _ = _ensure_stage_dirs('m1')
+        target_m1_img = m1_img_dir / (stem + '.jpg')
+        if not target_m1_img.is_file():
+            shutil.copy2(src_img, target_m1_img)
+        ev_m1 = {'e': 'review', 'boxes': m1_norm}
         if reviewer:
-            ev_data['reviewer'] = reviewer
-        ev = label_events.append_event('m1', stem, ev_data)
+            ev_m1['reviewer'] = reviewer
+        ev1 = label_events.append_event('m1', stem, ev_m1)
         label_events.sync_progress('m1', stem)
-        return {'synced': True, 'stem': stem, 'm1_boxes': len(m1_norm), 'unchanged': ev is None}
+
+        # 2) M2 选择题区裁图与细框（2/3） & 3) M3 非选答题区裁图与单题框（5/6）
+        m2_boxes_all = [b for b in boxes if int(b['cls']) in M2_CLS]
+        m3_boxes_all = [b for b in boxes if int(b['cls']) in M3_CLS]
+        m2_crops = 0
+        m3_crops = 0
+        any_changed = ev1 is not None
+
+        def _sync_zone_stage(stage_name, zones, suffix_label, child_boxes):
+            nonlocal any_changed
+            if not zones or not child_boxes:
+                return 0
+            zones_sorted = sorted(zones, key=lambda z: (round(z[1], 1), round(z[0], 1)))
+            img_dir, _ = _ensure_stage_dirs(stage_name)
+            synced_n = 0
+            with Image.open(src_img) as raw_im:
+                im_rgb = raw_im.convert('RGB')
+                iw, ih = im_rgb.size
+                for z_idx, (zx1, zy1, zx2, zy2) in enumerate(zones_sorted, 1):
+                    ix1 = max(0, min(iw - 1, int(round(zx1))))
+                    iy1 = max(0, min(ih - 1, int(round(zy1))))
+                    ix2 = max(ix1 + 1, min(iw, int(round(zx2))))
+                    iy2 = max(iy1 + 1, min(ih, int(round(zy2))))
+                    zw = float(ix2 - ix1)
+                    zh = float(iy2 - iy1)
+                    if zw < 8 or zh < 8:
+                        continue
+                    rel_boxes = []
+                    for cb in child_boxes:
+                        bx1, by1, bx2, by2 = [float(v) for v in cb['box']]
+                        bcx = (bx1 + bx2) * 0.5
+                        bcy = (by1 + by2) * 0.5
+                        if not (ix1 <= bcx <= ix2 and iy1 <= bcy <= iy2):
+                            continue
+                        rx1 = max(0.0, min(zw, bx1 - ix1))
+                        ry1 = max(0.0, min(zh, by1 - iy1))
+                        rx2 = max(0.0, min(zw, bx2 - ix1))
+                        ry2 = max(0.0, min(zh, by2 - iy1))
+                        rw = (rx2 - rx1) / zw
+                        rh = (ry2 - ry1) / zh
+                        if rw <= 0.001 or rh <= 0.001:
+                            continue
+                        rel_boxes.append([
+                            int(cb['cls']),
+                            round((rx1 + rx2) * 0.5 / zw, 6),
+                            round((ry1 + ry2) * 0.5 / zh, 6),
+                            round(rw, 6),
+                            round(rh, 6),
+                        ])
+                    if not rel_boxes:
+                        continue
+                    crop_stem = f'{stem}.{suffix_label}' if z_idx == 1 else f'{stem}.{suffix_label}.{z_idx}'
+                    crop_path = img_dir / (crop_stem + '.jpg')
+                    im_rgb.crop((ix1, iy1, ix2, iy2)).save(crop_path, format='JPEG', quality=95)
+                    ev_c = {'e': 'review', 'boxes': rel_boxes}
+                    if reviewer:
+                        ev_c['reviewer'] = reviewer
+                    ev_res = label_events.append_event(stage_name, crop_stem, ev_c)
+                    label_events.sync_progress(stage_name, crop_stem)
+                    if ev_res is not None:
+                        any_changed = True
+                    synced_n += 1
+            return synced_n
+
+        m2_crops = _sync_zone_stage('m2', choice_zones, '选择题区', m2_boxes_all)
+        m3_crops = _sync_zone_stage('m3', fill_zones, '填空题区', m3_boxes_all)
+        stages = ['data/m1'] + (['data/m2'] if m2_crops else []) + (['data/m3'] if m3_crops else [])
+        return {
+            'synced': True,
+            'stem': stem,
+            'm1_boxes': len(m1_norm),
+            'm2_crops': m2_crops,
+            'm3_crops': m3_crops,
+            'stages': stages,
+            'created_dirs': created_dirs,
+            'unchanged': not any_changed,
+        }
+
+    def _sync_m1_log(self, page, boxes, reviewer):
+        return self._sync_training_data(page, boxes, reviewer)
 
     def submit_page(self, request, allow_sync_data=True):
         """整页提交：保存整页确认状态、答案/手写文字订正、原地改框与删/改答案同步，并同步提交 data/m1 log。"""
@@ -975,11 +1074,11 @@ class ReviewStore:
                 for row in history_rows:
                     fh.write(json.dumps(row, ensure_ascii=False) + '\n')
 
-            # 4. 同步提交 M1 训练日志（data/m1/log/<stem>.log）
+            # 4. 迭代模式下同步回流 M1/M2/M3 训练目录（整页图/区域裁图与标注日志）
             sync_info = {'synced': False, 'reason': '未开启同步'}
             if sync_log:
                 try:
-                    sync_info = self._sync_m1_log(page, clean_boxes, reviewer)
+                    sync_info = self._sync_training_data(page, clean_boxes, reviewer)
                 except Exception as exc:
                     sync_info = {'synced': False, 'reason': str(exc)}
 

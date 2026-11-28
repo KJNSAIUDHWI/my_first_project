@@ -20,7 +20,9 @@ function showRevHoverTip(anchor, opts) {
   const el = ensureRevHoverTip();
   _revTipAnchor = anchor;
   const color = opts.color || "var(--accent)";
+  const placement = opts.placement || "left";
   el.style.setProperty("--tip-color", color);
+  el.classList.toggle("pos-below", placement === "below");
   el.innerHTML = `
     <div class="rev-tip-head">
       <span class="rev-tip-title">${opts.dot ? `<span class="rev-tip-dot"></span>` : ""}${escHtml(opts.title || "")}</span>
@@ -35,10 +37,18 @@ function showRevHoverTip(anchor, opts) {
   el.setAttribute("aria-hidden", "false");
   const tw = el.offsetWidth || 248;
   const th = el.offsetHeight || 72;
-  let left = Math.round(r.left - tw - 10);
-  if (left < 10) left = Math.round(Math.min(window.innerWidth - tw - 10, r.right + 10));
-  let top = Math.round(r.top + r.height / 2 - th / 2);
-  top = Math.max(58, Math.min(window.innerHeight - th - 12, top));
+  let left, top;
+  if (placement === "below" || r.top < 56) {
+    left = Math.round(r.left + r.width / 2 - tw / 2);
+    left = Math.max(10, Math.min(window.innerWidth - tw - 10, left));
+    top = Math.round(r.bottom + 8);
+    if (top + th > window.innerHeight - 10) top = Math.max(10, Math.round(r.top - th - 8));
+  } else {
+    left = Math.round(r.left - tw - 10);
+    if (left < 10) left = Math.round(Math.min(window.innerWidth - tw - 10, r.right + 10));
+    top = Math.round(r.top + r.height / 2 - th / 2);
+    top = Math.max(58, Math.min(window.innerHeight - th - 12, top));
+  }
   el.style.left = left + "px";
   el.style.top = top + "px";
 }
@@ -54,16 +64,25 @@ function hideRevHoverTip() {
   }
 }
 
-function bindRevHoverTip(el, opts) {
-  if (!el || !opts) return;
+function bindRevHoverTip(el, optsOrFn) {
+  if (!el || !optsOrFn) return;
+  el._revTipSpec = optsOrFn;
+  if (el._revTipBound) return;
+  el._revTipBound = true;
+  const resolveOpts = () => (typeof el._revTipSpec === "function" ? el._revTipSpec() : el._revTipSpec);
   const open = () => {
+    const opts = resolveOpts();
+    if (!opts) return;
     clearTimeout(_revTipTimer);
     const tip = $("revHoverTip");
     const alreadyOpen = Boolean(tip && tip.classList.contains("show"));
     if (alreadyOpen) {
       showRevHoverTip(el, opts);
     } else {
-      _revTipTimer = setTimeout(() => showRevHoverTip(el, opts), 85);
+      _revTipTimer = setTimeout(() => {
+        const curOpts = resolveOpts();
+        if (curOpts) showRevHoverTip(el, curOpts);
+      }, 85);
     }
   };
   el.addEventListener("mouseenter", open);
@@ -126,6 +145,31 @@ function renderRightPanel() {
     const recogKey = primaryKeyLabel("recognizeBox");
     const delKey = primaryKeyLabel("deleteBox");
     const fitKey = primaryKeyLabel("fitCanvas");
+    const submitKey = primaryKeyLabel("nextSubmit");
+    const isIter = state.workMode === "iteration";
+
+    const scopeBar = document.createElement("div");
+    scopeBar.className = "edit-scope-bar" + (isIter ? " iter" : "");
+    scopeBar.innerHTML = isIter
+      ? `<span class="edit-scope-left">${uiIcon("layers", "ui-ico-xs")}<span>改动将同步回流训练库</span></span><span class="edit-scope-tag">非临时</span>`
+      : `<span class="edit-scope-left">${uiIcon("crop", "ui-ico-xs")}<span>临时调框 · 仅本批生效</span></span><span class="edit-scope-tag">改卷模式</span>`;
+    bindRevHoverTip(scopeBar, isIter
+      ? {
+          title: "模型迭代模式 · 持久回流",
+          badge: `按 ${submitKey} 写入`,
+          color: "#2563eb",
+          dot: true,
+          body: "调框改动不只是本批临时生效：确认保存后会自动创建或更新 data/m1、data/m2、data/m3 训练文件夹，保存原图/裁图与标注日志，供后续模型训练使用。",
+        }
+      : {
+          title: "改卷模式 · 临时修正",
+          badge: "不写训练库",
+          color: "#15803d",
+          dot: true,
+          body: "用于处理偶发框错位或漏框，只对当前批次识别与判分生效，不会写入训练库也不会创建训练目录；如需回流训练数据，请在 8888 工作台或「更多」菜单切到迭代模式。",
+        }
+    );
+    body.appendChild(scopeBar);
 
     const secLayer = document.createElement("div");
     secLayer.className = "sec-card";
