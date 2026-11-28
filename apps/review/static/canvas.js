@@ -254,8 +254,117 @@ function drawBaseCanvas() {
   ctx.restore();
 }
 
-/* 顶层轻量特效画布：仅绘悬停聚光压暗 + 半透明蒙版 + 拖拽框（零 shadowBlur、零底图重绘，<0.2ms） */
-function drawFxCanvas() {
+function traceRoundedRect(c, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w * 0.5, h * 0.5));
+  c.moveTo(x + rr, y);
+  c.arcTo(x + w, y, x + w, y + h, rr);
+  c.arcTo(x + w, y + h, x, y + h, rr);
+  c.arcTo(x, y + h, x, y, rr);
+  c.arcTo(x, y, x + w, y, rr);
+  c.closePath();
+}
+
+/* 悬停/固定聚焦框顺滑衔接动画状态（图像坐标系插值，平移缩放零漂移，静止自动休眠 0% 占用） */
+const _fxAnim = {
+  alpha: 0,
+  targetAlpha: 0,
+  box: null,
+  targetBox: null,
+  rgb: [22, 163, 74],
+  targetRgb: [22, 163, 74],
+  fillA: 0.13,
+  targetFillA: 0.13,
+  isPinned: false,
+  raf: 0,
+  lastTs: 0,
+};
+
+function resolveFocusTargetSpec() {
+  const p = currentPage();
+  if (state.mode !== "view" || !p || state.subboxTarget || !state.img) return null;
+  const lockedId = getLockedFillItemId();
+  const focusId = lockedId || state.hoverItemId || state.selectedItemId;
+  if (!focusId) return null;
+  const focusItem = getPageItems(p).find(it =>
+    it.id === focusId
+    && (it.kind !== "fill" || shouldShowFillInView(it))
+    && it.box && it.box.length === 4
+  );
+  if (!focusItem) return null;
+
+  const pgGrade = getPageGrading(p);
+  const isPinned = focusItem.id === lockedId;
+  // 参考选择题清透翠绿风格：默认统一清透绿蒙版，判分有错/漏选时对应暖橙/珊瑚红
+  let rgb = [22, 163, 74];
+  let fillA = isPinned ? 0.18 : 0.13;
+  if (focusItem.kind === "choice") {
+    const cg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
+    if (cg && cg.status === "correct") { rgb = [22, 163, 74]; fillA = 0.18; }
+    else if (cg && cg.status === "partial") { rgb = [234, 88, 12]; fillA = 0.18; }
+    else if (cg && cg.status === "wrong") { rgb = [220, 38, 38]; fillA = 0.17; }
+    else { rgb = [21, 128, 61]; fillA = 0.16; }
+  } else if (focusItem.kind === "fill") {
+    const fg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
+    if (fg && fg.blanks) {
+      const sts = Object.values(fg.blanks).map(x => x && x.status);
+      if (sts.includes("wrong")) { rgb = [220, 38, 38]; fillA = isPinned ? 0.16 : 0.12; }
+      else if (sts.includes("partial") || sts.includes("pending")) { rgb = [234, 88, 12]; fillA = isPinned ? 0.16 : 0.12; }
+    }
+  } else if (focusItem.kind === "identity") {
+    rgb = [22, 163, 74];
+    fillA = 0.14;
+  }
+  return { box: focusItem.box, rgb, fillA, isPinned };
+}
+
+function stepFxAnim(ts) {
+  _fxAnim.raf = 0;
+  const dt = _fxAnim.lastTs ? Math.min(0.05, Math.max(0.004, (ts - _fxAnim.lastTs) / 1000)) : 0.016;
+  _fxAnim.lastTs = ts;
+
+  const kBox = 1 - Math.exp(-dt * 24);
+  const kAlpha = 1 - Math.exp(-dt * 18);
+  const kColor = 1 - Math.exp(-dt * 20);
+
+  _fxAnim.alpha += (_fxAnim.targetAlpha - _fxAnim.alpha) * kAlpha;
+  _fxAnim.fillA += (_fxAnim.targetFillA - _fxAnim.fillA) * kColor;
+  for (let i = 0; i < 3; i++) {
+    _fxAnim.rgb[i] += (_fxAnim.targetRgb[i] - _fxAnim.rgb[i]) * kColor;
+  }
+
+  let boxDone = true;
+  if (_fxAnim.box && _fxAnim.targetBox) {
+    for (let i = 0; i < 4; i++) {
+      const diff = _fxAnim.targetBox[i] - _fxAnim.box[i];
+      _fxAnim.box[i] += diff * kBox;
+      if (Math.abs(diff) > 0.35) boxDone = false;
+    }
+    if (boxDone) {
+      for (let i = 0; i < 4; i++) _fxAnim.box[i] = _fxAnim.targetBox[i];
+    }
+  }
+
+  const alphaDone = Math.abs(_fxAnim.targetAlpha - _fxAnim.alpha) < 0.008;
+  const colorDone = Math.abs(_fxAnim.targetRgb[0] - _fxAnim.rgb[0]) < 0.8
+    && Math.abs(_fxAnim.targetRgb[1] - _fxAnim.rgb[1]) < 0.8
+    && Math.abs(_fxAnim.targetRgb[2] - _fxAnim.rgb[2]) < 0.8;
+
+  if (alphaDone) _fxAnim.alpha = _fxAnim.targetAlpha;
+  if (_fxAnim.alpha <= 0.005 && _fxAnim.targetAlpha === 0) {
+    _fxAnim.alpha = 0;
+    _fxAnim.box = null;
+  }
+
+  renderFxCanvasNow();
+
+  if (!alphaDone || !boxDone || !colorDone) {
+    _fxAnim.raf = requestAnimationFrame(stepFxAnim);
+  } else {
+    _fxAnim.lastTs = 0;
+  }
+}
+
+function renderFxCanvasNow() {
   if (!fxCanvas || !fxCtx) return;
   const rect = getHostMetrics();
   const dpr = window.devicePixelRatio || 1;
@@ -263,79 +372,58 @@ function drawFxCanvas() {
   fxCtx.clearRect(0, 0, rect.width, rect.height);
   if (!state.img) return;
 
-  const p = currentPage();
   const inv = 1 / Math.max(0.15, state.scale);
 
   fxCtx.save();
   fxCtx.translate(state.tx, state.ty);
   fxCtx.scale(state.scale, state.scale);
 
-  if (state.mode === "view" && p && !state.subboxTarget) {
-    const lockedId = getLockedFillItemId();
-    const focusId = lockedId || state.hoverItemId || state.selectedItemId;
-    const focusItem = focusId
-      ? getPageItems(p).find(it =>
-          it.id === focusId
-          && (it.kind !== "fill" || shouldShowFillInView(it))
-          && it.box && it.box.length === 4
-        ) || null
-      : null;
+  if (state.mode === "view" && !state.subboxTarget && _fxAnim.alpha > 0.005 && _fxAnim.box) {
+    const [fx1, fy1, fx2, fy2] = _fxAnim.box;
+    const fw = Math.max(2, fx2 - fx1);
+    const fh = Math.max(2, fy2 - fy1);
+    const rad = Math.min(8 * inv, fw * 0.25, fh * 0.25);
+    const a = _fxAnim.alpha;
 
-    if (focusItem) {
-      const [fx1, fy1, fx2, fy2] = focusItem.box;
-      // 压暗卷面其余区域（连同下方未选中框线一并柔和降亮）
-      fxCtx.fillStyle = "rgba(15, 23, 42, 0.24)";
-      fxCtx.beginPath();
-      fxCtx.rect(0, 0, state.img.width, state.img.height);
-      fxCtx.rect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-      fxCtx.fill("evenodd");
+    // 清透浅雾白柔化蒙版（改卷用淡绿白纸雾、迭代用清透浅蓝雾），保留试卷明净感且柔和淡化未选中字迹
+    const veilRgb = state.workMode === "iteration" ? "234, 241, 252" : "244, 248, 245";
+    fxCtx.fillStyle = `rgba(${veilRgb}, ${(0.62 * a).toFixed(3)})`;
+    fxCtx.beginPath();
+    fxCtx.rect(0, 0, state.img.width, state.img.height);
+    traceRoundedRect(fxCtx, fx1, fy1, fw, fh, rad);
+    fxCtx.fill("evenodd");
 
-      const pgGrade = getPageGrading(p);
-      const isPinned = focusItem.id === lockedId;
-      const isEdited = Boolean(state.itemEdits[focusItem.id] || ((state.feedback.items || {})[focusItem.id] || {}).correction);
-      let fillTint = isPinned ? "rgba(37, 99, 235, 0.20)" : "rgba(37, 99, 235, 0.14)";
-      let strokeClr = isPinned ? "#1d4ed8" : "#2563eb";
-      let haloClr = "rgba(37, 99, 235, 0.24)";
-      if (focusItem.kind === "choice") {
-        const cg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
-        if (cg && cg.status === "correct") {
-          fillTint = "rgba(22, 163, 74, 0.22)"; strokeClr = "#16a34a"; haloClr = "rgba(22, 163, 74, 0.24)";
-        } else if (cg && cg.status === "partial") {
-          fillTint = "rgba(234, 88, 12, 0.22)"; strokeClr = "#ea580c"; haloClr = "rgba(234, 88, 12, 0.24)";
-        } else if (cg && cg.status === "wrong") {
-          fillTint = "rgba(220, 38, 38, 0.22)"; strokeClr = "#dc2626"; haloClr = "rgba(220, 38, 38, 0.24)";
-        } else {
-          fillTint = "rgba(37, 99, 235, 0.18)"; strokeClr = "#2563eb"; haloClr = "rgba(37, 99, 235, 0.24)";
-        }
-      } else if (isEdited) {
-        fillTint = isPinned ? "rgba(22, 163, 74, 0.18)" : "rgba(22, 163, 74, 0.14)";
-        strokeClr = "#15803d";
-        haloClr = "rgba(22, 163, 74, 0.24)";
-      }
+    const r = Math.round(_fxAnim.rgb[0]);
+    const g = Math.round(_fxAnim.rgb[1]);
+    const b = Math.round(_fxAnim.rgb[2]);
+    const isPinned = _fxAnim.isPinned;
 
-      // 选中框半透明蒙版 + 零开销双层矢量亮边（替代昂贵的 shadowBlur）
-      fxCtx.fillStyle = fillTint;
-      fxCtx.fillRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-      fxCtx.lineWidth = (isPinned ? 7.0 : 6.0) * inv;
-      fxCtx.strokeStyle = haloClr;
-      fxCtx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-      fxCtx.lineWidth = (isPinned ? 3.0 : 2.5) * inv;
-      fxCtx.strokeStyle = strokeClr;
-      fxCtx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-    }
+    // 选中框内透亮半透明染色蒙版 + 柔和双层圆角亮边（零 shadowBlur 高帧率）
+    fxCtx.beginPath();
+    traceRoundedRect(fxCtx, fx1, fy1, fw, fh, rad);
+    fxCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(_fxAnim.fillA * a).toFixed(3)})`;
+    fxCtx.fill();
+
+    fxCtx.lineWidth = (isPinned ? 6.5 : 5.5) * inv;
+    fxCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(0.22 * a).toFixed(3)})`;
+    fxCtx.stroke();
+
+    fxCtx.lineWidth = (isPinned ? 2.8 : 2.3) * inv;
+    fxCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${(0.95 * a).toFixed(3)})`;
+    fxCtx.stroke();
   }
 
-  // 局部真子集小框聚焦重识别：压暗父大框外区域 + 亮起父大框引导边 + 绘制真子集小框
+  // 局部真子集小框聚焦重识别：清透雾白压暗父大框外区域 + 亮起父大框引导边 + 绘制真子集小框
   if (state.subboxTarget && state.subboxTarget.parentBox) {
     const [px1, py1, px2, py2] = state.subboxTarget.parentBox;
     fxCtx.save();
-    fxCtx.fillStyle = "rgba(15, 23, 42, 0.42)";
+    fxCtx.fillStyle = "rgba(226, 234, 246, 0.68)";
     fxCtx.beginPath();
     fxCtx.rect(-5000, -5000, state.img.width + 10000, state.img.height + 10000);
     fxCtx.rect(px1, py1, px2 - px1, py2 - py1);
     fxCtx.fill("evenodd");
     fxCtx.lineWidth = 3.0 * inv;
-    fxCtx.strokeStyle = "#38bdf8";
+    fxCtx.strokeStyle = "#2563eb";
     fxCtx.setLineDash([8 * inv, 5 * inv]);
     fxCtx.strokeRect(px1, py1, px2 - px1, py2 - py1);
     fxCtx.setLineDash([]);
@@ -346,9 +434,9 @@ function drawFxCanvas() {
     const x1 = Math.min(d.ix0, d.ix1), y1 = Math.min(d.iy0, d.iy1);
     const rw = Math.abs(d.ix1 - d.ix0), rh = Math.abs(d.iy1 - d.iy0);
     fxCtx.save();
-    fxCtx.fillStyle = "rgba(34, 197, 94, 0.18)";
+    fxCtx.fillStyle = "rgba(16, 185, 129, 0.16)";
     fxCtx.fillRect(x1, y1, rw, rh);
-    fxCtx.strokeStyle = "#16a34a";
+    fxCtx.strokeStyle = "#059669";
     fxCtx.lineWidth = 2.6 * inv;
     fxCtx.strokeRect(x1, y1, rw, rh);
     fxCtx.restore();
@@ -379,6 +467,69 @@ function drawFxCanvas() {
   }
 
   fxCtx.restore();
+}
+
+/* 顶层轻量特效画布入口：自动驱动聚焦框形变衔接动效（零底图重绘） */
+function drawFxCanvas(immediate = false) {
+  const spec = resolveFocusTargetSpec();
+  if (spec) {
+    const prevTarget = _fxAnim.targetBox;
+    const boxChanged = !prevTarget
+      || Math.abs(prevTarget[0] - spec.box[0]) > 0.5
+      || Math.abs(prevTarget[1] - spec.box[1]) > 0.5
+      || Math.abs(prevTarget[2] - spec.box[2]) > 0.5
+      || Math.abs(prevTarget[3] - spec.box[3]) > 0.5;
+    _fxAnim.targetBox = [...spec.box];
+    _fxAnim.targetAlpha = 1;
+    _fxAnim.targetRgb = [...spec.rgb];
+    _fxAnim.targetFillA = spec.fillA;
+    _fxAnim.isPinned = spec.isPinned;
+    // 从无聚焦进入首框（或要求立即定位）时直接就位，避免从旧页飞入
+    if (immediate || !_fxAnim.box || _fxAnim.alpha <= 0.02) {
+      _fxAnim.box = [...spec.box];
+      _fxAnim.rgb = [...spec.rgb];
+      _fxAnim.fillA = spec.fillA;
+      if (immediate) _fxAnim.alpha = 1;
+    }
+    if (immediate) {
+      if (_fxAnim.raf) { cancelAnimationFrame(_fxAnim.raf); _fxAnim.raf = 0; }
+      _fxAnim.lastTs = 0;
+      renderFxCanvasNow();
+      return;
+    }
+    if (boxChanged || _fxAnim.alpha < 0.995) {
+      if (!_fxAnim.raf) {
+        _fxAnim.lastTs = 0;
+        _fxAnim.raf = requestAnimationFrame(stepFxAnim);
+      }
+    }
+    renderFxCanvasNow();
+  } else {
+    _fxAnim.targetBox = null;
+    _fxAnim.targetAlpha = 0;
+    if (immediate || _fxAnim.alpha <= 0.02 || state.mode !== "view" || state.subboxTarget) {
+      if (_fxAnim.raf) { cancelAnimationFrame(_fxAnim.raf); _fxAnim.raf = 0; }
+      _fxAnim.alpha = 0;
+      _fxAnim.box = null;
+      _fxAnim.lastTs = 0;
+      renderFxCanvasNow();
+      return;
+    }
+    if (!_fxAnim.raf) {
+      _fxAnim.lastTs = 0;
+      _fxAnim.raf = requestAnimationFrame(stepFxAnim);
+    }
+    renderFxCanvasNow();
+  }
+}
+
+function resetFxAnim() {
+  if (_fxAnim.raf) { cancelAnimationFrame(_fxAnim.raf); _fxAnim.raf = 0; }
+  _fxAnim.alpha = 0;
+  _fxAnim.targetAlpha = 0;
+  _fxAnim.box = null;
+  _fxAnim.targetBox = null;
+  _fxAnim.lastTs = 0;
 }
 
 function drawCanvasOnly() {

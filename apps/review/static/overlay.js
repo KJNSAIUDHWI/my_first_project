@@ -501,16 +501,22 @@ function setHoverFillItem(itemId) {
   setHoverCanvasItem(itemId);
 }
 function syncHoverPopoverOnly() {
-  // 仅重绘顶层轻量特效画布（0ms 底图重绘）
+  // 仅驱动顶层轻量特效画布形变衔接动效（0ms 底图重绘）
   if (typeof drawFxCanvas === "function") drawFxCanvas();
   else drawCanvasOnly();
-  overlayLayer.querySelectorAll(".fill-hover-pop").forEach(el => el.remove());
   syncFocusHighlightClasses(false);
   const p = currentPage();
   const popId = getFloatingPopoverItemId();
-  if (!p || !state.img || !popId) return;
+  const existingPop = overlayLayer.querySelector(".fill-hover-pop");
+  if (!p || !state.img || !popId) {
+    if (existingPop) existingPop.remove();
+    return;
+  }
   const it = getPageItems(p).find(x => x.id === popId && x.kind === "fill");
-  if (!it || !it.box || it.box.length !== 4) return;
+  if (!it || !it.box || it.box.length !== 4) {
+    if (existingPop) existingPop.remove();
+    return;
+  }
   const [x1, y1, x2, y2] = it.box;
   const rect = getHostMetrics();
   renderFillHoverPopover({
@@ -519,17 +525,23 @@ function syncHoverPopoverOnly() {
     sy1: y1 * state.scale + state.ty,
     sx2: x2 * state.scale + state.tx,
     sy2: y2 * state.scale + state.ty,
-  }, rect);
+  }, rect, existingPop, true);
 }
 
-function renderFillHoverPopover(row, rect) {
+function renderFillHoverPopover(row, rect, reuseEl = null, animate = false) {
   const { it, sx1, sy1, sx2, sy2 } = row;
   const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
   const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
   const isPinned = Boolean(getLockedFillItemId() === it.id);
 
-  const pop = document.createElement("div");
-  pop.className = "fill-hover-pop" + (edited ? " edited" : "") + (isPinned ? " pinned" : "");
+  const isReuse = Boolean(reuseEl);
+  const pop = reuseEl || document.createElement("div");
+  pop.innerHTML = "";
+  pop.className = "fill-hover-pop"
+    + (edited ? " edited" : "")
+    + (isPinned ? " pinned" : "")
+    + (!animate ? " no-anim" : "")
+    + (animate && !isReuse ? " pop-enter" : "");
   const head = document.createElement("div");
   head.className = "fill-hover-pop-head";
   const headLeft = document.createElement("div");
@@ -593,10 +605,12 @@ function renderFillHoverPopover(row, rect) {
     }
   };
 
-  // 先挂载测宽高，再精准贴靠到题框正上方或正下方（附带透明 hover 桥接区，鼠标移动绝不断链）
-  pop.style.left = "0px";
-  pop.style.top = "-9999px";
-  overlayLayer.appendChild(pop);
+  // 新建时先就位再淡入；复用切题时保持旧坐标，测完新宽高后平滑滑向新题位
+  if (!isReuse) {
+    pop.style.left = "0px";
+    pop.style.top = "-9999px";
+    overlayLayer.appendChild(pop);
+  }
   const pw = pop.offsetWidth || 280;
   const ph = pop.offsetHeight || 72;
 
@@ -621,8 +635,17 @@ function renderFillHoverPopover(row, rect) {
     posClass = "pos-below";
   }
   pop.classList.add(posClass);
-  pop.style.left = left + "px";
-  pop.style.top = top + "px";
+  if (!isReuse && animate) {
+    pop.classList.add("no-anim");
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    void pop.offsetWidth;
+    pop.classList.remove("no-anim");
+    pop.classList.remove("pop-enter");
+  } else {
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+  }
 }
 
 function renderEditBoxActionBar() {

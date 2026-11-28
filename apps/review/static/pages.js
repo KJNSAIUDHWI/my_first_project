@@ -92,6 +92,7 @@ async function openPage(idx, skipDirtyWarn = false, skipLockWarn = false) {
   state.hoverItemId = null;
   state.hoverSource = null;
   state.hoverInPopover = false;
+  if (typeof resetFxAnim === "function") resetFxAnim();
   state.selectedBoxIdx = -1;
   state.editingPopItemId = null;
   state.inlineBlankEdit = null;
