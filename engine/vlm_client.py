@@ -134,9 +134,9 @@ def load_vlm_config(root=None) -> dict:
     }
 
 
-# 1x1 纯白 PNG（用于视觉接口极简连通性验证，几乎零 token 消耗）
+# 32x32 纯白 PNG（兼容豆包/Qwen-VL 等要求 >=14px 或 >=28px 的视觉模型最小尺寸限制，且体积仅 ~100 字节）
 _TINY_PNG_B64 = (
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='
+    'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQEAAAQEMPTvfErw2wqsk9SnqWcCgUAgEAgEAoHgygLH8QM9BsqtpQAAAABJRU5ErkJggg=='
 )
 
 
@@ -228,9 +228,15 @@ def test_vlm_connection(
         except Exception:
             pass
         hint = ''
+        low_err = err_body.lower()
         if exc.code in (401, 403):
             hint = '（密钥无效、已过期或无权访问该模型）'
-        elif exc.code == 400 and check_vision and ('image' in err_body.lower() or 'vision' in err_body.lower() or 'multimodal' in err_body.lower()):
+        elif (
+            exc.code == 400
+            and check_vision
+            and any(k in low_err for k in ('image', 'vision', 'multimodal', 'image_url'))
+            and not any(k in low_err for k in ('dimension', 'too small', 'too large', 'size'))
+        ):
             hint = '（该模型不支持图片输入！请更换支持视觉/看图的模型）'
         elif exc.code == 404:
             hint = '（接口地址或模型名称不存在，请检查 Base URL 与 Model ID）'
