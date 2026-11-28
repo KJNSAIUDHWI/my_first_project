@@ -61,7 +61,7 @@ const TOUR_STEPS = [
   {
     selector: "#canvasHost",
     title: "核对原卷与修改答案",
-    desc: "填空题默认<b>鼠标滑到题框上</b>即就近弹出答案（顶栏可切「右侧列表」），学生没写的空位会显示<b>「未作答」</b>胶囊，发现认错了点框或点气泡直接改。中键/右键拖图，滚轮缩放，按住 <b>Alt</b> 透视原图。",
+    desc: "填空题默认<b>鼠标滑到题框上预览</b>，<b>点一下题框即可 📌 固定气泡</b>再从容改字（顶栏也可一键切「📋 侧栏总览」按题号整齐核对）；单击胶囊改字、双击单空重识，按住 <b>Alt</b> 透视原图。",
     onEnter: () => { if (state.mode !== "view") setMode("view"); },
   },
   {
@@ -209,26 +209,22 @@ $("chkOverlay").onchange = (ev) => { state.showOverlay = ev.target.checked; fitC
 $("btnFillDisplayMode").onclick = () => {
   state.fillDisplayMode = state.fillDisplayMode === "hover" ? "margin" : "hover";
   localStorage.setItem("reviewFillDisplayMode", state.fillDisplayMode);
+  state.pinnedItemId = null;
   state.hoverItemId = null;
   state.hoverInPopover = false;
-  let autoCollapsed = false;
   if (state.fillDisplayMode === "margin") {
-    const sides = getMarginSidesForPage(currentPage());
     const leftBar = $("sidebarLeft");
-    if (leftBar && !leftBar.classList.contains("collapsed") && (sides.hasLeft && sides.hasRight || window.innerWidth < 1500)) {
+    if (leftBar && !leftBar.classList.contains("collapsed") && window.innerWidth < 1280) {
       leftBar.classList.add("collapsed");
-      autoCollapsed = true;
     }
   }
   updateTopbar();
-  fitCanvas();
+  renderRightPanel();
+  syncRightSidebarVisibility(true);
   draw();
-  if (autoCollapsed) {
-    setTimeout(() => { resizeCanvas(); fitCanvas(); draw(); }, 210);
-  }
   toast(state.fillDisplayMode === "hover"
-    ? "已切换为「悬停看答案」（鼠标滑到填空题框显示）"
-    : "已切换为「左右双侧总览」（左栏贴左、右栏贴右，零跨卷连线）", 2200);
+    ? "已切换为「悬停看答案」（滑过预览，点击题框 📌 固定改字）"
+    : "已切换为「右侧答案总览」（按题号升序排列，点击题头定位原卷）", 2200);
 };
 $("btnRefreshNow").onclick = () => hotReloadResults(true);
 
@@ -277,10 +273,11 @@ window.addEventListener("keydown", (ev) => {
 
   if (ev.key === "Escape") {
     if (state.subboxTarget) { cancelSubboxReOcr(); return; }
-    if (state.multiSelect) { state.multiSelect = null; updateMultiBlankBarUI(); draw(); return; }
+    if (state.multiSelect) { state.multiSelect = null; updateMultiBlankBarUI(); refreshOverviewPanel(); draw(); return; }
     if (state.inlineBlankEdit || state.inlineChipEdit) {
       state.inlineBlankEdit = null;
       state.inlineChipEdit = null;
+      refreshOverviewPanel();
       draw();
       return;
     }
@@ -291,10 +288,14 @@ window.addEventListener("keydown", (ev) => {
       draw();
       return;
     }
-    if (state.editingPopItemId || state.selectedItemId || state.focusedLowConf) {
+    if (state.editingPopItemId || state.pinnedItemId || state.selectedItemId || state.focusedLowConf) {
       state.editingPopItemId = null;
+      state.pinnedItemId = null;
       state.selectedItemId = null;
+      state.hoverItemId = null;
+      state.hoverInPopover = false;
       state.focusedLowConf = null;
+      refreshOverviewPanel();
       draw();
       return;
     }
@@ -367,6 +368,7 @@ async function pollLive() {
       state.workMode = data.work_mode;
       state.showUnmatchedFills = state.workMode === "iteration";
       updateTopbar();
+      refreshOverviewPanel();
       draw();
     }
     if (data.grading) state.grading = data.grading;
@@ -375,6 +377,7 @@ async function pollLive() {
     } else if (locksChanged || nextRev !== prevRev) {
       renderLeftList();
       updateWorkloadBar();
+      if (nextRev !== prevRev) refreshOverviewPanel();
       $("leftSummary").textContent = `${state.pages.filter(isPageDone).length}/${state.pages.length}`;
     }
   } catch {}

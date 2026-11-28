@@ -1,4 +1,61 @@
-/* ==================== 右侧栏（调框工具 / 可选清单） ==================== */
+/* ==================== 右侧栏（调框工具 / 右侧停靠整页答案总览栏） ==================== */
+function syncRightSidebarVisibility(triggerResize = true) {
+  const sb = $("sidebarRight");
+  if (!sb) return;
+  const isOverview = state.mode === "view" && state.fillDisplayMode === "margin";
+  const shouldOpen = state.mode === "edit" || isOverview;
+  sb.classList.toggle("overview-open", isOverview);
+  sb.classList.toggle("collapsed", !shouldOpen);
+  if (triggerResize) {
+    setTimeout(() => { resizeCanvas(); fitCanvas(); draw(); }, 210);
+  }
+}
+
+function refreshOverviewPanel() {
+  if (state.mode !== "view" || state.fillDisplayMode !== "margin") return;
+  const body = $("rightBody");
+  const prevScroll = body ? body.scrollTop : 0;
+  renderRightPanel();
+  if (body) body.scrollTop = prevScroll;
+}
+
+function syncOverviewHighlightOnly(scrollToSelected = false) {
+  drawCanvasOnly();
+  const hoverId = state.hoverItemId || "";
+  const selId = state.selectedItemId || "";
+  const activeId = hoverId || selId;
+  overlayLayer.querySelectorAll(".fill-mini-tag").forEach(el => {
+    const id = el.dataset.itemId;
+    el.classList.toggle("active", Boolean(id && id === activeId));
+  });
+  const body = $("rightBody");
+  if (!body) return;
+  let targetCard = null;
+  body.querySelectorAll(".ov-card").forEach(card => {
+    const id = card.dataset.itemId || "";
+    card.classList.toggle("hovered", Boolean(hoverId && id === hoverId));
+    card.classList.toggle("active", Boolean(selId && id === selId));
+    if (scrollToSelected && selId && id === selId) targetCard = card;
+  });
+  if (targetCard) {
+    try { targetCard.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch {}
+  }
+}
+
+function compareQuestionItem(a, b) {
+  const qa = String((a.transcription && a.transcription.question_number) || a.number || "").trim();
+  const qb = String((b.transcription && b.transcription.question_number) || b.number || "").trim();
+  const na = (qa.match(/\d+/) || [null])[0];
+  const nb = (qb.match(/\d+/) || [null])[0];
+  if (na !== null && nb !== null && Number(na) !== Number(nb)) return Number(na) - Number(nb);
+  if (na !== null && nb === null) return -1;
+  if (na === null && nb !== null) return 1;
+  if (qa !== qb) return qa.localeCompare(qb, "zh-CN");
+  const ba = a.box || [0, 0, 0, 0];
+  const bb = b.box || [0, 0, 0, 0];
+  return (ba[1] - bb[1]) || (ba[0] - bb[0]);
+}
+
 function renderRightPanel() {
   const body = $("rightBody");
   body.innerHTML = "";
@@ -115,14 +172,180 @@ function renderRightPanel() {
     return;
   }
 
-  // 看答案模式下的可选右侧汇总（平时默认收起）
+  // 看答案模式：右侧停靠「整页答案总览栏」（按题号升序整齐排列，零几何 if/else、双向联动定位）
+  const pgGrade = getPageGrading(p);
+  const allFills = getPageItems(p)
+    .filter(it => {
+      if (it.kind !== "fill" || !shouldShowFillInView(it)) return false;
+      const b = it.box || [0, 0, 0, 0];
+      const bw = b[2] - b[0], bh = b[3] - b[1];
+      if (bh > bw * 1.4 && bw < 95) return false; // 竖条姓名栏单独处理
+      return true;
+    })
+    .sort(compareQuestionItem);
+
+  const isEditedFill = (it) => Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
+  const hasWrongOrPending = (it) => {
+    const itG = pgGrade && pgGrade.items ? pgGrade.items[it.id] : null;
+    if (!itG || !itG.blanks) return false;
+    return Object.values(itG.blanks).some(bg => bg && ["wrong", "partial", "pending"].includes(bg.status));
+  };
+
+  const cntAll = allFills.length;
+  const cntWrong = allFills.filter(hasWrongOrPending).length;
+  const cntUnans = allFills.filter(it => !isEditedFill(it) && hasUnansweredBlank(it)).length;
+  const cntEdited = allFills.filter(isEditedFill).length;
+
+  // 若当前筛选条件已无数据则自动回退到全部
+  if ((state.overviewFilter === "wrong" && cntWrong === 0)
+    || (state.overviewFilter === "unanswered" && cntUnans === 0)
+    || (state.overviewFilter === "edited" && cntEdited === 0)) {
+    state.overviewFilter = "all";
+  }
+
+  const filteredFills = allFills.filter(it => {
+    if (state.overviewFilter === "wrong") return hasWrongOrPending(it);
+    if (state.overviewFilter === "unanswered") return !isEditedFill(it) && hasUnansweredBlank(it);
+    if (state.overviewFilter === "edited") return isEditedFill(it);
+    return true;
+  });
+
+  const header = document.createElement("div");
+  header.className = "ov-header";
+  const sm = pgGrade && pgGrade.has_schema ? (pgGrade.summary || {}) : null;
+  header.innerHTML = `
+    <div class="ov-head-top">
+      <div class="ov-head-title">
+        <span>📋 整页答案总览</span>
+        <span class="ov-count-pill">${cntAll} 题</span>
+        ${sm ? `<span class="ov-score-pill">${fmtScoreNum(sm.total_earned)}/${fmtScoreNum(sm.total_possible)}分</span>` : ""}
+      </div>
+      <button type="button" class="ov-close-btn" id="btnCloseOverviewDock" title="收起右侧总览栏，切回悬停气泡模式">收起 ✕</button>
+    </div>
+    <div class="ov-filters" id="ovFilterBar"></div>
+  `;
+  body.appendChild(header);
+
+  const closeDockBtn = header.querySelector("#btnCloseOverviewDock");
+  if (closeDockBtn) {
+    closeDockBtn.onclick = () => {
+      if (state.fillDisplayMode !== "hover") {
+        $("btnFillDisplayMode").click();
+      } else {
+        $("sidebarRight").classList.add("collapsed");
+        setTimeout(() => { resizeCanvas(); fitCanvas(); draw(); }, 210);
+      }
+    };
+  }
+
+  const filterBar = header.querySelector("#ovFilterBar");
+  const filterDefs = [{ key: "all", label: `全部 (${cntAll})` }];
+  if (pgGrade && pgGrade.has_schema && cntWrong > 0) filterDefs.push({ key: "wrong", label: `错/待核 (${cntWrong})` });
+  if (cntUnans > 0) filterDefs.push({ key: "unanswered", label: `未作答 (${cntUnans})` });
+  if (cntEdited > 0) filterDefs.push({ key: "edited", label: `已改 (${cntEdited})` });
+  filterDefs.forEach(fd => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ov-filter-btn" + (state.overviewFilter === fd.key ? " active" : "");
+    b.textContent = fd.label;
+    b.onclick = () => {
+      state.overviewFilter = fd.key;
+      renderRightPanel();
+    };
+    filterBar.appendChild(b);
+  });
+
+  const list = document.createElement("div");
+  list.className = "ov-list";
+  if (!filteredFills.length) {
+    const empty = document.createElement("div");
+    empty.className = "ov-empty";
+    empty.textContent = cntAll ? "当前筛选条件下没有题目" : "本页暂无填空/简答题框";
+    list.appendChild(empty);
+  } else {
+    filteredFills.forEach(it => {
+      const edited = isEditedFill(it);
+      const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+      const itG = pgGrade && pgGrade.items ? pgGrade.items[it.id] : null;
+      const card = document.createElement("div");
+      card.dataset.itemId = it.id;
+      card.className = "ov-card"
+        + (edited ? " edited" : "")
+        + (state.selectedItemId === it.id ? " active" : "")
+        + (state.hoverItemId === it.id ? " hovered" : "");
+
+      const cHead = document.createElement("div");
+      cHead.className = "ov-card-head";
+      cHead.title = "点击将左侧原卷居中定位到本题";
+
+      const leftInfo = document.createElement("div");
+      leftInfo.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;";
+      const qBadge = document.createElement("span");
+      qBadge.className = "margin-qno";
+      qBadge.textContent = `第 ${qno} 题`;
+      leftInfo.appendChild(qBadge);
+      if (itG) {
+        const sc = document.createElement("span");
+        const full = Number(itG.earned) >= Number(itG.possible) && Number(itG.possible) > 0;
+        const zero = Number(itG.earned) <= 0;
+        sc.className = "ov-score-tag " + (full ? "full" : (zero ? "zero" : "part"));
+        sc.textContent = `${fmtScoreNum(itG.earned)}/${fmtScoreNum(itG.possible)}`;
+        leftInfo.appendChild(sc);
+      } else if (edited) {
+        const ed = document.createElement("span");
+        ed.className = "ov-score-tag full";
+        ed.textContent = "已订正";
+        leftInfo.appendChild(ed);
+      }
+      cHead.appendChild(leftInfo);
+
+      const locBtn = document.createElement("span");
+      locBtn.className = "ov-locate-btn";
+      locBtn.textContent = "🎯 定位";
+      cHead.appendChild(locBtn);
+
+      cHead.onclick = (e) => {
+        e.stopPropagation();
+        state.selectedItemId = it.id;
+        panToBoxOnCanvas(it.box);
+        syncOverviewHighlightOnly(false);
+        draw();
+      };
+      card.appendChild(cHead);
+
+      const ansEl = document.createElement("div");
+      ansEl.className = "margin-ans";
+      renderFillMarginInto(ansEl, it);
+      card.appendChild(ansEl);
+
+      card.onmouseenter = () => {
+        if (state.hoverItemId !== it.id) {
+          state.hoverItemId = it.id;
+          syncOverviewHighlightOnly(false);
+        }
+      };
+      card.onmouseleave = () => {
+        if (state.hoverItemId === it.id) {
+          state.hoverItemId = null;
+          syncOverviewHighlightOnly(false);
+        }
+      };
+      list.appendChild(card);
+    });
+  }
+  body.appendChild(list);
+
+  // 选择题紧凑速览（默认折叠在底部，不干扰填空主清单）
   const choices = getPageItems(p).filter(i => i.kind === "choice");
   if (choices.length) {
-    const sec = document.createElement("div");
-    sec.className = "sec-card";
-    sec.innerHTML = `<div class="sec-title"><span>选择题速览（${choices.length} 题）</span></div>`;
+    const det = document.createElement("details");
+    det.className = "ov-choice-details";
+    const sum = document.createElement("summary");
+    sum.textContent = `选择题速览（${choices.length} 题 · 点击展开）`;
+    det.appendChild(sum);
     const grid = document.createElement("div");
     grid.className = "choice-grid";
+    grid.style.marginTop = "8px";
     choices.forEach(it => {
       const chip = document.createElement("div");
       const edited = Boolean(
@@ -134,18 +357,15 @@ function renderRightPanel() {
         <div class="choice-top"><span class="choice-no">${escHtml(it.number || "?")}</span><span class="choice-ans">${escHtml(getChoiceDisplayAnswer(it))}</span></div>
         <div class="choice-conf">${escHtml(choiceConfText(it) || "—")}</div>
       `;
-      chip.onclick = () => openInlineEditor(it);
+      chip.onclick = () => {
+        panToBoxOnCanvas(it.box);
+        openInlineEditor(it);
+      };
       grid.appendChild(chip);
     });
-    sec.appendChild(grid);
-    body.appendChild(sec);
+    det.appendChild(grid);
+    body.appendChild(det);
   }
-  const tip = document.createElement("div");
-  tip.className = "sec-card";
-  tip.style.color = "var(--muted)";
-  tip.style.lineHeight = "1.6";
-  tip.innerHTML = `所有手写与选择识别结果已直接显示在原卷框上，<b>点击原卷上的任意框即可直接修改答案</b>。平时可收起右侧栏让原卷更大。`;
-  body.appendChild(tip);
 }
 
 /* ==================== 画布绘制与精准命中检测（整边 + 四角缩放） ==================== */

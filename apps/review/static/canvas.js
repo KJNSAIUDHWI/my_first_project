@@ -11,28 +11,13 @@ function fitCanvas() {
   if (!state.img) return;
   const rect = host.getBoundingClientRect();
   const pad = 16;
-  let reserveLeft = 0, reserveRight = 0;
-  if (state.mode === "view" && state.showOverlay && state.fillDisplayMode === "margin" && rect.width >= 760) {
-    const sides = getMarginSidesForPage(currentPage());
-    if (sides.hasLeft && sides.hasRight) {
-      const wing = Math.max(210, Math.min(310, Math.floor(rect.width * 0.22)));
-      reserveLeft = wing + 14;
-      reserveRight = wing + 14;
-    } else if (sides.hasLeft) {
-      const wing = Math.max(240, Math.min(350, Math.floor(rect.width * 0.27)));
-      reserveLeft = wing + 14;
-    } else if (sides.hasRight) {
-      const wing = Math.max(240, Math.min(350, Math.floor(rect.width * 0.27)));
-      reserveRight = wing + 14;
-    }
-  }
-  const availW = Math.max(260, rect.width - reserveLeft - reserveRight - pad * 2);
+  const availW = Math.max(220, rect.width - pad * 2);
   const availH = Math.max(180, rect.height - pad * 2);
   const sw = availW / state.img.width;
   const sh = availH / state.img.height;
   state.scale = Math.max(0.05, Math.min(sw, sh));
   const paperW = state.img.width * state.scale;
-  state.tx = pad + reserveLeft + Math.max(0, (availW - paperW) / 2);
+  state.tx = pad + Math.max(0, (availW - paperW) / 2);
   state.ty = (rect.height - state.img.height * state.scale) / 2;
   $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
 }
@@ -206,7 +191,8 @@ function drawCanvasOnly() {
     getPageItems(p).forEach(it => {
       if (it.kind === "fill" && !shouldShowFillInView(it)) return;
       const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
-      const isSel = it.id === state.selectedItemId || it.id === state.hoverItemId;
+      const isPinned = it.id === state.pinnedItemId;
+      const isSel = isPinned || it.id === state.selectedItemId || it.id === state.hoverItemId;
       if (it.kind === "choice") {
         const cg = pgGrade && pgGrade.items ? pgGrade.items[it.id] : null;
         const low = isLowConfChoice(it);
@@ -228,10 +214,10 @@ function drawCanvasOnly() {
         }
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
       } else if (isSel) {
-        ctx.fillStyle = "rgba(37, 99, 235, 0.08)";
+        ctx.fillStyle = isPinned ? "rgba(37, 99, 235, 0.11)" : "rgba(37, 99, 235, 0.07)";
         ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.lineWidth = 2.6 * inv;
-        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = (isPinned ? 3.0 : 2.4) * inv;
+        ctx.strokeStyle = isPinned ? "#1d4ed8" : "#2563eb";
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
       }
     });

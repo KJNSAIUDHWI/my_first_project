@@ -270,11 +270,24 @@ function connectReviewHubSSE() {
   es.onerror = () => { try { es.close(); } catch {} setTimeout(connectReviewHubSSE, 5000); };
 }
 
+const _revDrawerDrag = window.initDraggableDrawer
+  ? window.initDraggableDrawer({
+      drawer: $("reviewAiDrawer"),
+      handle: $("revAiDrawerHead"),
+      resizeHandle: $("revAiResizeHandle"),
+      storageKey: "revAiDrawerRect",
+      defaultWidth: 430,
+      minWidth: 320,
+      minHeight: 340,
+    })
+  : null;
+
 if ($("btnReviewAi")) {
   $("btnReviewAi").onclick = () => {
     const d = $("reviewAiDrawer");
     d.classList.toggle("hidden");
     if (!d.classList.contains("hidden")) {
+      if (_revDrawerDrag) _revDrawerDrag.sync();
       hubApi("/agents").then(renderRevAgentsUI).catch(e => { $("revAiHint").textContent = e.message; });
       hubApi("/ai/sessions").then(r => {
         for (const s of (r.sessions || [])) REV_AI_SESSIONS[s.chat_id] = s;
@@ -400,7 +413,7 @@ if ($("btnExportCsv")) {
 }
 if ($("btnCancelSubbox")) $("btnCancelSubbox").onclick = cancelSubboxReOcr;
 if ($("btnClearMultiSel")) {
-  $("btnClearMultiSel").onclick = () => { state.multiSelect = null; updateMultiBlankBarUI(); draw(); };
+  $("btnClearMultiSel").onclick = () => { state.multiSelect = null; updateMultiBlankBarUI(); refreshOverviewPanel(); draw(); };
 }
 if ($("btnStartMultiSubbox")) {
   $("btnStartMultiSubbox").onclick = () => {
@@ -417,6 +430,7 @@ if ($("btnUnmatchedFills")) {
     if (state.workMode === "grading") {
       state.showUnmatchedFills = !state.showUnmatchedFills;
       updateTopbar();
+      refreshOverviewPanel();
       draw();
       return;
     }

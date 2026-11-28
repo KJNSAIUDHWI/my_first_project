@@ -117,6 +117,8 @@ const state = {
   fillDisplayMode: localStorage.getItem("reviewFillDisplayMode") || "hover", // "hover" | "margin"
   showConf: false,
   selectedItemId: null,
+  pinnedItemId: null,
+  overviewFilter: "all", // "all" | "wrong" | "unanswered" | "edited"
   selectedBoxIdx: -1,
   workingBoxes: [],
   workingItems: [],
@@ -313,6 +315,7 @@ function cancelSubboxReOcr() {
   state.subboxTarget = null;
   if (state.drag && state.drag.type === "subbox_draw") state.drag = null;
   updateSubboxHudUI();
+  refreshOverviewPanel();
   draw();
 }
 async function submitSubboxReOcr(box) {
@@ -342,8 +345,9 @@ async function submitSubboxReOcr(box) {
     updateSubboxHudUI();
     updateTopbar();
     renderLeftList();
+    refreshOverviewPanel();
     draw();
-    setTimeout(() => { draw(); }, 2300);
+    setTimeout(() => { refreshOverviewPanel(); draw(); }, 2300);
   } catch (err) {
     st.busy = false;
     updateSubboxHudUI();
@@ -397,6 +401,7 @@ function toggleMultiBlankSelection(it, sub, blank, isShift) {
     state.multiSelect = curIdxs.length ? { itemId: it.id, slots: curIdxs.map(k => slots[k]) } : null;
   }
   updateMultiBlankBarUI();
+  refreshOverviewPanel();
   draw();
 }
 async function commitInlineBlankEdit(it, sub, blank, nextVal, moveDir = 0) {
@@ -435,6 +440,7 @@ async function commitInlineBlankEdit(it, sub, blank, nextVal, moveDir = 0) {
   }
   updateTopbar();
   renderLeftList();
+  refreshOverviewPanel();
   draw();
 }
 async function cycleBlankJudge(it, slotKey, curStatus) {
@@ -456,6 +462,7 @@ async function cycleBlankJudge(it, slotKey, curStatus) {
     const lbl = { correct: "判对 ✓", partial: "判半分 ½", wrong: "判错 ✗", auto: "恢复自动判分" }[nextStatus];
     toast(lbl, 1400);
     updateTopbar();
+    refreshOverviewPanel();
     draw();
   } catch (err) {
     toast("改判失败：" + err.message, 2500);
@@ -470,6 +477,7 @@ async function switchWorkMode(nextMode) {
     hubApi("/config", { work_mode: wm }).catch(() => {});
   } catch {}
   updateTopbar();
+  refreshOverviewPanel();
   draw();
   toast(wm === "grading" ? "改试卷模式：无题号填空框默认隐藏，聚焦判分" : "模型迭代模式：显示全部未配题号框并支持一键清理与训练回流", 2600);
 }

@@ -77,11 +77,15 @@ host.addEventListener("mousedown", (ev) => {
       state.drag = { type: "view_pending", sx, sy, tx0: state.tx, ty0: state.ty, hitItem: hit };
       return;
     }
-    if (state.selectedItemId || state.focusedLowConf || state.inlineBlankEdit || state.inlineChipEdit) {
+    if (state.selectedItemId || state.pinnedItemId || state.focusedLowConf || state.inlineBlankEdit || state.inlineChipEdit) {
       state.selectedItemId = null;
+      state.pinnedItemId = null;
+      state.hoverItemId = null;
+      state.hoverInPopover = false;
       state.focusedLowConf = null;
       state.inlineBlankEdit = null;
       state.inlineChipEdit = null;
+      refreshOverviewPanel();
       draw();
     }
     state.drag = { type: "pan", sx, sy, tx0: state.tx, ty0: state.ty };
@@ -153,33 +157,40 @@ window.addEventListener("mousemove", (ev) => {
       else if (selHit && selHit.kind === "move") host.style.cursor = "move";
       else host.style.cursor = "crosshair";
     } else if (state.mode === "view") {
+      // 关键修复：鼠标位于悬停/固定气泡（或其透明桥接区）内时直接忽略底层画布命中，绝不穿透切题！
+      const overPop = ev.target && ev.target.closest && ev.target.closest(".fill-hover-pop");
+      if (overPop) {
+        clearTimeout(hoverHideTimer);
+        state.hoverInPopover = true;
+        return;
+      }
+      const overRightDock = ev.target && ev.target.closest && ev.target.closest("#sidebarRight");
+      if (overRightDock) return;
+
       if (state.showOverlay && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
         const p = currentPage();
         const hitFill = getPageItems(p).find(it => {
-          if (it.kind !== "fill" || !it.box || it.box.length !== 4) return false;
+          if (it.kind !== "fill" || !shouldShowFillInView(it) || !it.box || it.box.length !== 4) return false;
           const [x1, y1, x2, y2] = it.box;
           return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
         });
         if (state.fillDisplayMode === "hover") {
-          if (hitFill) {
-            host.style.cursor = "pointer";
-            setHoverFillItem(hitFill.id);
-          } else {
-            host.style.cursor = "grab";
-            if (state.hoverItemId && !state.hoverInPopover) {
+          host.style.cursor = hitFill ? "pointer" : "grab";
+          // 一旦点击固定或正在编辑，鼠标滑过其他题框绝不切题、不销毁气泡
+          if (!getLockedFillItemId()) {
+            if (hitFill) {
+              setHoverFillItem(hitFill.id);
+            } else if (state.hoverItemId && !state.hoverInPopover) {
               scheduleHoverClear();
             }
           }
         } else {
-          // 双侧总览模式：悬停原卷题框时双向高亮对应的左/右批注卡与引导线
-          const overCard = ev.target && ev.target.closest && ev.target.closest(".margin-card");
-          if (!overCard) {
-            const nextId = hitFill ? hitFill.id : null;
-            host.style.cursor = hitFill ? "pointer" : "grab";
-            if (state.hoverItemId !== nextId) {
-              state.hoverItemId = nextId;
-              syncMarginHighlightOnly();
-            }
+          // 右侧停靠总览栏模式：悬停原卷题框时双向高亮右侧对应题卡
+          const nextId = hitFill ? hitFill.id : null;
+          host.style.cursor = hitFill ? "pointer" : "grab";
+          if (state.hoverItemId !== nextId) {
+            state.hoverItemId = nextId;
+            syncOverviewHighlightOnly(false);
           }
         }
       } else {
@@ -279,10 +290,14 @@ window.addEventListener("mouseup", () => {
   if (d.type === "view_pending") {
     if (d.hitItem) {
       if (d.hitItem.kind === "fill") {
-        // 点击大题框只锁定展示气泡/胶囊，不弹出丑文本框，用户直接单击想改的空或双击单空重识
-        state.selectedItemId = d.hitItem.id;
-        state.hoverItemId = d.hitItem.id;
-        draw();
+        if (state.fillDisplayMode === "hover") {
+          // 点击大题框立即 📌 固定气泡，鼠标移过去改字绝不溜走
+          pinFillItem(d.hitItem.id);
+        } else {
+          // 侧栏总览模式：选中并平滑滚到右侧对应题卡
+          state.selectedItemId = d.hitItem.id;
+          syncOverviewHighlightOnly(true);
+        }
       } else {
         openInlineEditor(d.hitItem);
       }
@@ -456,16 +471,13 @@ async function submitCurrentPage(goNext = true) {
 function setMode(m) {
   state.mode = m;
   state.editingPopItemId = null;
-  // 调框模式自动展开右栏选类别；看答案模式自动收起右栏把空间全给原卷
-  $("sidebarRight").classList.toggle("collapsed", m === "view");
+  if (m === "edit") {
+    state.pinnedItemId = null;
+    state.hoverItemId = null;
+    state.hoverInPopover = false;
+  }
   updateTopbar();
   renderRightPanel();
-  setTimeout(() => {
-    resizeCanvas();
-    if (m === "view" && state.fillDisplayMode === "margin") {
-      fitCanvas();
-      draw();
-    }
-  }, 200);
+  syncRightSidebarVisibility(true);
 }
 

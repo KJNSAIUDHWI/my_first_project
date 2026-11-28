@@ -39,7 +39,7 @@
     <div class="top-right">
       <button class="unmatched-pill" id="btnUnmatchedFills" type="button" title="未匹配到大题题号的填空框">无题号框</button>
       <button class="btn-warn" id="btnLowConf" style="display:none;" title="循环定位低置信度项 (L)">⚠ 低置</button>
-      <button id="btnFillDisplayMode" title="切换填空题展示：悬停气泡（默认） / 左右双侧总览">💬 悬停</button>
+      <button id="btnFillDisplayMode" title="切换填空题展示：悬停气泡（点框固定） / 右侧整页总览栏">💬 悬停</button>
       <button id="btnExportCsv" style="display:none;" title="导出整批成绩汇总 CSV">📊 成绩</button>
       <button id="btnPrev">← 上一张</button>
       <button class="btn-primary" id="btnSubmitNext">✓ 确认并下一张 (D)</button>
@@ -102,10 +102,11 @@
     </aside>
   </div>
 
-  <!-- 8904 全局非阻塞 AI 帮手抽屉 -->
+  <!-- 8904 全局非阻塞 AI 帮手抽屉（支持拖拽与右下角缩放） -->
   <aside class="rev-ai-drawer hidden" id="reviewAiDrawer" aria-label="审阅 AI 帮手抽屉">
-    <div class="rev-ai-head">
+    <div class="rev-ai-head" id="revAiDrawerHead" title="按住此处拖动位置 · 双击复位">
       <div style="display:flex;align-items:center;gap:6px">
+        <span class="rev-ai-grip" aria-hidden="true">⠿</span>
         <strong style="font-size:13.5px">🤖 审阅 AI 帮手</strong>
         <span class="badge badge-todo" id="revAiBadge">就绪</span>
       </div>
@@ -167,6 +168,7 @@
         <button class="btn-primary" id="btnRevAiSend" type="button" style="padding:6px 12px">发送</button>
       </div>
     </div>
+    <div class="rev-ai-resize-handle" id="revAiResizeHandle" title="拖动调整窗口大小"></div>
   </aside>
   <div class="rev-focus-ring hidden" id="revFocusRing"><span class="rev-focus-tag" id="revFocusTag">🤖 AI 聚焦</span></div>
 
@@ -218,6 +220,7 @@
 <script src="/static/canvas.js"></script>
 <script src="/static/interact.js"></script>
 <script src="/static/controls.js"></script>
+<script src="/shared/draggable_drawer.js"></script>
 <script src="/static/ai_drawer.js"></script>
 </body>
 </html>

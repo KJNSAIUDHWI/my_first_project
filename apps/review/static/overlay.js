@@ -136,6 +136,7 @@ function renderFillMarginInto(el, it) {
                     commitInlineBlankEdit(it, sub, k, inp.value, moveDir);
                   } else {
                     state.inlineBlankEdit = null;
+                    refreshOverviewPanel();
                     draw();
                   }
                 };
@@ -174,9 +175,18 @@ function renderFillMarginInto(el, it) {
 
                 const stdTip = (bg && bg.standard) ? `参考答案：${bg.standard}\n` : "";
                 pill.title = `${stdTip}单击：原地改字 · 双击：聚焦大框拉小框精准重识别 · Shift/Ctrl+点：连续多空联合重识别`;
-                pill.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
+                pill.onmousedown = (e) => {
+                  if (e.button === 0 && !spaceDown) {
+                    e.stopPropagation();
+                    // 鼠标刚按下即静默锁定当前题，不重绘DOM，避免在点击/双击期间气泡溜走
+                    if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+                    state.selectedItemId = it.id;
+                  }
+                };
                 pill.onclick = (e) => {
                   e.stopPropagation();
+                  if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+                  state.selectedItemId = it.id;
                   if (e.shiftKey || e.ctrlKey || e.metaKey) {
                     clearTimeout(_pillClickTimer);
                     toggleMultiBlankSelection(it, sub, k, Boolean(e.shiftKey));
@@ -185,8 +195,10 @@ function renderFillMarginInto(el, it) {
                   clearTimeout(_pillClickTimer);
                   _pillClickTimer = setTimeout(() => {
                     state.selectedItemId = it.id;
+                    if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
                     state.inlineChipEdit = null;
                     state.inlineBlankEdit = { itemId: it.id, sub: String(sub), blank: String(k) };
+                    refreshOverviewPanel();
                     draw();
                   }, 185);
                 };
@@ -238,10 +250,19 @@ function renderFillMarginInto(el, it) {
     const pill = document.createElement("span");
     pill.className = "blank-pill unanswered";
     pill.textContent = "未作答";
+    pill.onmousedown = (e) => {
+      if (e.button === 0 && !spaceDown) {
+        e.stopPropagation();
+        if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+        state.selectedItemId = it.id;
+      }
+    };
     pill.onclick = (e) => {
       e.stopPropagation();
+      if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
       state.selectedItemId = it.id;
       state.inlineBlankEdit = { itemId: it.id, sub: "无小题号", blank: "1" };
+      refreshOverviewPanel();
       draw();
     };
     pill.ondblclick = (e) => { e.stopPropagation(); enterSubboxReOcr(it, [{ sub: "无小题号", blank: "1" }]); };
@@ -254,10 +275,19 @@ function renderFillMarginInto(el, it) {
     const pill = document.createElement("span");
     pill.className = "blank-pill";
     appendLatexText(pill, line);
+    pill.onmousedown = (e) => {
+      if (e.button === 0 && !spaceDown) {
+        e.stopPropagation();
+        if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+        state.selectedItemId = it.id;
+      }
+    };
     pill.onclick = (e) => {
       e.stopPropagation();
+      if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
       state.selectedItemId = it.id;
       state.inlineBlankEdit = { itemId: it.id, sub: "无小题号", blank: String(li + 1) };
+      refreshOverviewPanel();
       draw();
     };
     pill.ondblclick = (e) => { e.stopPropagation(); enterSubboxReOcr(it, [{ sub: "无小题号", blank: String(li + 1) }]); };
@@ -330,16 +360,40 @@ function renderLowConfFocusOverlay() {
 }
 
 let hoverHideTimer = null;
+function getLockedFillItemId() {
+  if (state.inlineBlankEdit && state.inlineBlankEdit.itemId) return state.inlineBlankEdit.itemId;
+  if (state.pinnedItemId) return state.pinnedItemId;
+  return null;
+}
+function pinFillItem(itemId) {
+  clearTimeout(hoverHideTimer);
+  state.pinnedItemId = itemId;
+  state.selectedItemId = itemId;
+  state.hoverItemId = itemId;
+  draw();
+}
+function unpinFillItem() {
+  clearTimeout(hoverHideTimer);
+  state.pinnedItemId = null;
+  state.selectedItemId = null;
+  state.hoverItemId = null;
+  state.hoverInPopover = false;
+  state.inlineBlankEdit = null;
+  draw();
+}
 function scheduleHoverClear() {
+  if (getLockedFillItemId()) return;
   clearTimeout(hoverHideTimer);
   hoverHideTimer = setTimeout(() => {
-    if (!state.hoverInPopover && state.hoverItemId) {
+    if (!getLockedFillItemId() && !state.hoverInPopover && state.hoverItemId) {
       state.hoverItemId = null;
       syncHoverPopoverOnly();
     }
-  }, 180);
+  }, 190);
 }
 function setHoverFillItem(itemId) {
+  // 已点击固定或正在编辑空位时，鼠标滑过其他题框绝不抢焦、绝不销毁气泡
+  if (getLockedFillItemId()) return;
   clearTimeout(hoverHideTimer);
   if (state.hoverItemId !== itemId) {
     state.hoverItemId = itemId;
@@ -349,14 +403,15 @@ function setHoverFillItem(itemId) {
 function syncHoverPopoverOnly() {
   drawCanvasOnly();
   overlayLayer.querySelectorAll(".fill-hover-pop").forEach(el => el.remove());
+  const lockedId = getLockedFillItemId();
+  const activeId = lockedId || state.hoverItemId;
   overlayLayer.querySelectorAll(".fill-mini-tag").forEach(el => {
     const id = el.dataset.itemId;
-    const isAct = id && (id === state.hoverItemId || id === state.selectedItemId);
-    el.classList.toggle("active", Boolean(isAct));
+    el.classList.toggle("active", Boolean(id && id === activeId));
+    el.classList.toggle("pinned", Boolean(id && id === lockedId));
   });
   const p = currentPage();
   if (!p || !state.img || state.mode !== "view" || !state.showOverlay || state.fillDisplayMode !== "hover" || state.editingPopItemId) return;
-  const activeId = state.hoverItemId || state.selectedItemId;
   if (!activeId) return;
   const it = getPageItems(p).find(x => x.id === activeId && x.kind === "fill");
   if (!it || !it.box || it.box.length !== 4) return;
@@ -371,49 +426,54 @@ function syncHoverPopoverOnly() {
   }, rect);
 }
 
-function syncMarginHighlightOnly() {
-  drawCanvasOnly();
-  const activeId = state.hoverItemId || state.selectedItemId || "";
-  overlayLayer.querySelectorAll(".margin-card").forEach(card => {
-    const ids = (card.dataset.itemIds || "").split(",");
-    card.classList.toggle("active", Boolean(activeId && ids.includes(activeId)));
-  });
-  overlayLayer.querySelectorAll(".margin-connector").forEach(path => {
-    const ids = (path.dataset.itemIds || "").split(",");
-    const on = Boolean(activeId && ids.includes(activeId));
-    path.setAttribute("stroke", on ? "#2563eb" : "rgba(37, 99, 235, 0.34)");
-    path.setAttribute("stroke-width", on ? "2.2" : "1.25");
-    path.setAttribute("stroke-dasharray", on ? "" : "4 3");
-  });
-  overlayLayer.querySelectorAll(".margin-anchor-dot").forEach(dot => {
-    const ids = (dot.dataset.itemIds || "").split(",");
-    const on = Boolean(activeId && ids.includes(activeId));
-    dot.setAttribute("fill", on ? "#2563eb" : "rgba(37, 99, 235, 0.55)");
-    dot.setAttribute("r", on ? "4" : "2.8");
-  });
-}
-
 function renderFillHoverPopover(row, rect) {
   const { it, sx1, sy1, sx2, sy2 } = row;
   const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
   const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
+  const isPinned = Boolean(getLockedFillItemId() === it.id);
 
   const pop = document.createElement("div");
-  pop.className = "fill-hover-pop" + (edited ? " edited" : "");
+  pop.className = "fill-hover-pop" + (edited ? " edited" : "") + (isPinned ? " pinned" : "");
   const head = document.createElement("div");
   head.className = "fill-hover-pop-head";
+  const headLeft = document.createElement("div");
+  headLeft.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;";
   const badge = document.createElement("span");
   badge.className = "margin-qno";
   badge.textContent = `第 ${qno} 题`;
+  headLeft.appendChild(badge);
+  if (isPinned) {
+    const pinBadge = document.createElement("span");
+    pinBadge.className = "pop-pin-badge";
+    pinBadge.textContent = "📌 已固定";
+    headLeft.appendChild(pinBadge);
+  }
+  const headRight = document.createElement("div");
+  headRight.style.cssText = "display:inline-flex;align-items:center;gap:6px;";
   const hint = document.createElement("span");
   hint.className = "fill-hover-pop-hint";
   const pgG = getPageGrading();
   const itG = pgG && pgG.items ? pgG.items[it.id] : null;
-  hint.textContent = itG
-    ? `得分 ${fmtScoreNum(itG.earned)}/${fmtScoreNum(itG.possible)} · 单击改字 / 双击重识`
-    : (edited ? "已订正 · 单击改字 / 双击单空重识" : "单击胶囊改字 · 双击单空重识");
-  head.appendChild(badge);
-  head.appendChild(hint);
+  if (itG) {
+    hint.textContent = `得分 ${fmtScoreNum(itG.earned)}/${fmtScoreNum(itG.possible)} · 单击改字 / 双击重识`;
+  } else if (isPinned) {
+    hint.textContent = edited ? "已订正 · 单击改字 / 双击重识" : "单击胶囊改字 · 双击单空重识";
+  } else {
+    hint.textContent = "点题框固定 · 单击胶囊直接改字";
+  }
+  headRight.appendChild(hint);
+  if (isPinned) {
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "pop-close-btn";
+    closeBtn.textContent = "✕";
+    closeBtn.title = "取消固定 (Esc)";
+    closeBtn.onmousedown = (e) => e.stopPropagation();
+    closeBtn.onclick = (e) => { e.stopPropagation(); unpinFillItem(); };
+    headRight.appendChild(closeBtn);
+  }
+  head.appendChild(headLeft);
+  head.appendChild(headRight);
   pop.appendChild(head);
 
   const ansEl = document.createElement("div");
@@ -427,12 +487,17 @@ function renderFillHoverPopover(row, rect) {
   };
   pop.onmouseleave = () => {
     state.hoverInPopover = false;
-    if (!state.inlineBlankEdit) scheduleHoverClear();
+    if (!getLockedFillItemId()) scheduleHoverClear();
   };
   pop.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
-  pop.onclick = (e) => { e.stopPropagation(); };
+  pop.onclick = (e) => {
+    e.stopPropagation();
+    if (!isPinned) {
+      pinFillItem(it.id);
+    }
+  };
 
-  // 先挂载测宽高，再精准贴靠到题框正上方或正下方（不遮挡学生作答区）
+  // 先挂载测宽高，再精准贴靠到题框正上方或正下方（附带透明 hover 桥接区，鼠标移动绝不断链）
   pop.style.left = "0px";
   pop.style.top = "-9999px";
   overlayLayer.appendChild(pop);
@@ -444,16 +509,22 @@ function renderFillHoverPopover(row, rect) {
   left = Math.max(10, left);
 
   let top;
+  let posClass = "pos-above";
   if (sy1 - ph - 8 >= 8) {
     top = Math.round(sy1 - ph - 8);
+    posClass = "pos-above";
   } else if (sy2 + 8 + ph <= rect.height - 46) {
     top = Math.round(sy2 + 8);
+    posClass = "pos-below";
   } else if (sx2 + 10 + pw <= rect.width - 10) {
     left = Math.round(sx2 + 10);
     top = Math.max(8, Math.min(rect.height - ph - 48, Math.round(sy1)));
+    posClass = "pos-right";
   } else {
-    top = Math.max(8, Math.round(sy2 + 6));
+    top = Math.max(8, Math.min(rect.height - ph - 52, Math.round(sy2 + 6)));
+    posClass = "pos-below";
   }
+  pop.classList.add(posClass);
   pop.style.left = left + "px";
   pop.style.top = top + "px";
 }
@@ -696,25 +767,30 @@ function renderOverlays() {
     }
   });
 
-  if (fillRows.length && state.fillDisplayMode === "hover") {
-    // 默认悬停模式：每道填空题左上角放紧凑题号微徽章；鼠标滑到题框或徽章时就近弹出答案气泡
-    let hoveredRow = null;
+  if (fillRows.length) {
+    // 悬停模式 & 右侧总览栏模式共用卷面右上角紧凑题号徽章（零遮挡手写、零蜘蛛网连线）
+    const isHoverMode = state.fillDisplayMode === "hover";
+    const lockedId = isHoverMode ? getLockedFillItemId() : null;
+    const activeId = isHoverMode ? (lockedId || state.hoverItemId) : (state.hoverItemId || state.selectedItemId);
+    let popRow = null;
     fillRows.forEach(row => {
-      const { it, sx1, sy1 } = row;
+      const { it } = row;
       const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
       const isPending = !edited && !it.transcription && (it.status === "等待视觉转录" || it.status === "等待豆包");
       const isFailed = !edited && !it.transcription && (it.status === "调用失败" || it.status === "结构异常" || Boolean(it.error));
       const hasBlank = !edited && hasUnansweredBlank(it);
-      const isActive = it.id === state.hoverItemId || it.id === state.selectedItemId;
-      if (isActive && !state.editingPopItemId) hoveredRow = row;
+      const isActive = Boolean(activeId && it.id === activeId);
+      const isPinned = Boolean(lockedId && it.id === lockedId);
+      if (isHoverMode && isActive && !state.editingPopItemId) popRow = row;
 
       const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
       const tag = document.createElement("div");
       tag.dataset.itemId = it.id;
       tag.className = "fill-mini-tag"
         + (edited ? " edited" : (isFailed ? " failed" : (isPending ? " pending" : "")))
-        + (isActive ? " active" : "");
-      const prefix = edited ? "✓ " : (isFailed ? "⚠ " : (isPending ? "⏳ " : ""));
+        + (isActive ? " active" : "")
+        + (isPinned ? " pinned" : "");
+      const prefix = isPinned ? "📌 " : (edited ? "✓ " : (isFailed ? "⚠ " : (isPending ? "⏳ " : "")));
       tag.textContent = `${prefix}${qno}`;
       if (hasBlank) {
         const dot = document.createElement("span");
@@ -724,11 +800,27 @@ function renderOverlays() {
       }
       tag.style.left = "0px";
       tag.style.top = "-9999px";
-      tag.title = `第 ${qno} 题（悬停查看答案，点击原地修改）`;
-      tag.onmouseenter = () => setHoverFillItem(it.id);
-      tag.onmouseleave = () => scheduleHoverClear();
+      tag.title = isHoverMode
+        ? `第 ${qno} 题（悬停预览，点击固定改字）`
+        : `第 ${qno} 题（点击在右侧总览栏定位并高亮）`;
       tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
-      tag.onclick = (e) => { e.stopPropagation(); openInlineEditor(it); };
+      if (isHoverMode) {
+        tag.onmouseenter = () => setHoverFillItem(it.id);
+        tag.onmouseleave = () => scheduleHoverClear();
+        tag.onclick = (e) => { e.stopPropagation(); pinFillItem(it.id); };
+      } else {
+        tag.onmouseenter = () => {
+          if (state.hoverItemId !== it.id) { state.hoverItemId = it.id; syncOverviewHighlightOnly(false); }
+        };
+        tag.onmouseleave = () => {
+          if (state.hoverItemId === it.id) { state.hoverItemId = null; syncOverviewHighlightOnly(false); }
+        };
+        tag.onclick = (e) => {
+          e.stopPropagation();
+          state.selectedItemId = it.id;
+          syncOverviewHighlightOnly(true);
+        };
+      }
       overlayLayer.appendChild(tag);
       // 嵌在题框右上角内侧（紧贴框内右边缘，彻底避免压到上一题答案或遮挡左侧手写开头）
       const tw = tag.offsetWidth || 24;
@@ -740,173 +832,9 @@ function renderOverlays() {
       tag.style.left = Math.max(4, Math.min(rect.width - tw - 4, insideLeft)) + "px";
       tag.style.top = Math.max(4, insideTop) + "px";
     });
-    if (hoveredRow) {
-      renderFillHoverPopover(hoveredRow, rect);
+    if (isHoverMode && popRow) {
+      renderFillHoverPopover(popRow, rect);
     }
-  } else if (fillRows.length) {
-    // 方案 A：智能左右双侧就近批注总览模式（左栏贴左、右栏贴右，彻底消灭跨卷长虚线）
-    const paperLeft = state.tx;
-    const paperRight = state.img.width * state.scale + state.tx;
-    const imgMidX = state.img.width * 0.5;
-    const leftRows = [];
-    const rightRows = [];
-    fillRows.forEach(r => {
-      const cx = (r.it.box[0] + r.it.box[2]) * 0.5;
-      if (cx < imgMidX) leftRows.push(r);
-      else rightRows.push(r);
-    });
-
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("class", "connector-svg");
-    overlayLayer.appendChild(svg);
-
-    const layoutMarginSide = (rows, side) => {
-      if (!rows.length) return;
-      rows.sort((a, b) => a.midY - b.midY || a.sx1 - b.sx1);
-      // 仅当两题真正在同一水平行且左右不重叠时合并，避免重叠框被糊成一张卡
-      const groups = [];
-      for (const r of rows) {
-        const last = groups[groups.length - 1];
-        const sameRow = last && Math.abs(r.midY - last.midY) <= 14;
-        const noOverlapX = last && last.items.every(prev => {
-          const ov = Math.min(prev.sx2, r.sx2) - Math.max(prev.sx1, r.sx1);
-          const minW = Math.max(1, Math.min(prev.sx2 - prev.sx1, r.sx2 - r.sx1));
-          return (ov / minW) < 0.25;
-        });
-        if (sameRow && noOverlapX) {
-          last.items.push(r);
-          last.midY = last.items.reduce((s, x) => s + x.midY, 0) / last.items.length;
-          last.minSx1 = Math.min(last.minSx1, r.sx1);
-          last.maxSx2 = Math.max(last.maxSx2, r.sx2);
-        } else {
-          groups.push({ items: [r], midY: r.midY, minSx1: r.sx1, maxSx2: r.sx2 });
-        }
-      }
-      groups.forEach(g => g.items.sort((a, b) => a.sx1 - b.sx1));
-
-      let cardW, cardLeft;
-      if (side === "left") {
-        const availLeft = paperLeft - 22;
-        if (availLeft >= 200) {
-          cardW = Math.min(350, Math.floor(availLeft));
-          cardLeft = Math.round(paperLeft - 14 - cardW);
-        } else {
-          cardW = Math.min(310, Math.max(200, Math.floor(rect.width * 0.28)));
-          cardLeft = 10;
-        }
-      } else {
-        const availRight = rect.width - paperRight - 22;
-        if (availRight >= 200) {
-          cardW = Math.min(350, Math.floor(availRight));
-          cardLeft = Math.round(paperRight + 14);
-        } else {
-          cardW = Math.min(310, Math.max(200, Math.floor(rect.width * 0.28)));
-          cardLeft = Math.round(rect.width - cardW - 10);
-        }
-      }
-
-      const placed = [];
-      let prevBottom = 8;
-      groups.forEach(g => {
-        const itemIds = g.items.map(x => x.it.id);
-        const card = document.createElement("div");
-        const anyEdited = g.items.some(x => Boolean(state.itemEdits[x.it.id] || ((state.feedback.items || {})[x.it.id] || {}).correction));
-        const anyActive = g.items.some(x => x.it.id === state.hoverItemId || x.it.id === state.selectedItemId);
-        card.className = "margin-card" + (side === "left" ? " side-left" : "") + (anyEdited ? " edited" : "") + (anyActive ? " active" : "");
-        card.dataset.itemIds = itemIds.join(",");
-        card.style.left = cardLeft + "px";
-        card.style.width = cardW + "px";
-        card.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
-
-        g.items.forEach(({ it }) => {
-          const rowEl = document.createElement("div");
-          const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
-          rowEl.className = "margin-item" + (edited ? " edited" : "");
-          const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
-          const badge = document.createElement("span");
-          badge.className = "margin-qno";
-          badge.textContent = `第${qno}题`;
-          rowEl.appendChild(badge);
-
-          const ansEl = document.createElement("span");
-          ansEl.className = "margin-ans";
-          renderFillMarginInto(ansEl, it);
-          rowEl.appendChild(ansEl);
-
-          rowEl.title = `单击各空位胶囊原地改字 · 双击单空聚焦重识别`;
-          rowEl.onmouseenter = () => {
-            if (state.hoverItemId !== it.id) { state.hoverItemId = it.id; syncMarginHighlightOnly(); }
-          };
-          rowEl.onmouseleave = () => {
-            if (state.hoverItemId === it.id) { state.hoverItemId = null; syncMarginHighlightOnly(); }
-          };
-          rowEl.onclick = (e) => { e.stopPropagation(); state.selectedItemId = it.id; syncMarginHighlightOnly(); };
-          card.appendChild(rowEl);
-        });
-
-        overlayLayer.appendChild(card);
-        const ch = card.offsetHeight || 42;
-        const idealTop = Math.round(g.midY - ch / 2);
-        const top = Math.max(prevBottom, Math.max(8, idealTop));
-        prevBottom = top + ch + 7;
-        placed.push({ g, card, ch, top, anyActive, itemIds });
-      });
-
-      // 底部防裁切回推：底部卡片永不压住底部缩放条或被截断
-      const maxBottom = Math.max(120, rect.height - 52);
-      if (placed.length) {
-        const overflow = (placed[placed.length - 1].top + placed[placed.length - 1].ch) - maxBottom;
-        if (overflow > 0) {
-          let curBottom = maxBottom;
-          for (let k = placed.length - 1; k >= 0; k--) {
-            const item = placed[k];
-            if (item.top + item.ch > curBottom) {
-              item.top = Math.max(6, curBottom - item.ch);
-            }
-            curBottom = item.top - 6;
-          }
-        }
-        placed.forEach(({ g, card, ch, top, anyActive, itemIds }) => {
-          card.style.top = Math.round(top) + "px";
-          const edgeY = Math.round(top + ch / 2);
-          const anchorY = Math.round(g.midY);
-          const idsAttr = itemIds.join(",");
-          let edgeX, anchorX;
-          if (side === "left") {
-            edgeX = cardLeft + cardW;
-            anchorX = Math.round(g.minSx1);
-          } else {
-            edgeX = cardLeft;
-            anchorX = Math.round(g.maxSx2);
-          }
-          const span = side === "left" ? (anchorX - edgeX) : (edgeX - anchorX);
-          if (span >= 4) {
-            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            const midX = Math.round((edgeX + anchorX) / 2);
-            path.setAttribute("class", "margin-connector");
-            path.dataset.itemIds = idsAttr;
-            path.setAttribute("d", `M ${anchorX} ${anchorY} C ${midX} ${anchorY}, ${midX} ${edgeY}, ${edgeX} ${edgeY}`);
-            path.setAttribute("fill", "none");
-            path.setAttribute("stroke", anyActive ? "#2563eb" : "rgba(37, 99, 235, 0.34)");
-            path.setAttribute("stroke-width", anyActive ? "2.2" : "1.25");
-            path.setAttribute("stroke-dasharray", anyActive ? "" : "4 3");
-            svg.appendChild(path);
-
-            const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            dot.setAttribute("class", "margin-anchor-dot");
-            dot.dataset.itemIds = idsAttr;
-            dot.setAttribute("cx", String(anchorX));
-            dot.setAttribute("cy", String(anchorY));
-            dot.setAttribute("r", anyActive ? "4" : "2.8");
-            dot.setAttribute("fill", anyActive ? "#2563eb" : "rgba(37, 99, 235, 0.55)");
-            svg.appendChild(dot);
-          }
-        });
-      }
-    };
-
-    layoutMarginSide(leftRows, "left");
-    layoutMarginSide(rightRows, "right");
   }
 
   // 仅保留原地胶囊直改，不再弹出蠢蠢的大文本框
@@ -922,11 +850,13 @@ function openInlineEditor(it) {
     state.inlineBlankEdit = null;
     state.inlineChipEdit = { itemId: it.id, kind: it.kind };
   } else if (it.kind === "fill") {
+    if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
     state.inlineChipEdit = null;
     const slots = getOrderedFillSlotsJS(it);
     if (slots.length) {
       state.inlineBlankEdit = { itemId: it.id, sub: slots[0].sub, blank: slots[0].blank };
     }
+    refreshOverviewPanel();
   }
   draw();
 }

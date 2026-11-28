@@ -50,6 +50,8 @@ async function loadAll() {
   });
   if (startIdx < 0) startIdx = state.pages.findIndex(p => !isPageDone(p));
   if (startIdx < 0) startIdx = 0;
+  syncRightSidebarVisibility(false);
+  resizeCanvas();
   await openPage(startIdx, true, true);
 }
 
@@ -87,6 +89,9 @@ async function openPage(idx, skipDirtyWarn = false, skipLockWarn = false) {
   state.undoStack = [];
   state.itemEdits = {};
   state.selectedItemId = null;
+  state.pinnedItemId = null;
+  state.hoverItemId = null;
+  state.hoverInPopover = false;
   state.selectedBoxIdx = -1;
   state.editingPopItemId = null;
   state.inlineBlankEdit = null;
@@ -184,14 +189,15 @@ function updateTopbar() {
 
   const fillBtn = $("btnFillDisplayMode");
   if (fillBtn) {
-    fillBtn.textContent = state.fillDisplayMode === "hover" ? "💬 悬停" : "⇄ 双侧总览";
+    fillBtn.textContent = state.fillDisplayMode === "hover" ? "💬 悬停" : "📋 侧栏总览";
+    fillBtn.classList.toggle("btn-ai-soft", state.fillDisplayMode === "margin");
     fillBtn.style.display = state.mode === "view" ? "" : "none";
   }
   $("canvasHint").textContent = state.mode === "edit"
     ? `左键长按拖画新框 · 单击选中后缩放/移动 · 右键删框 · ${primaryKeyLabel("recognizeBox")} 识别选中框 · Ctrl+Z 撤销`
     : (state.fillDisplayMode === "hover"
-        ? `单击胶囊原地改字 · 双击单空框选重识 · Shift/Ctrl连续多选 · Alt透视 · ${primaryKeyLabel("toggleMode")} 调框`
-        : `左右双侧总览 · 单击胶囊改字 · 双击单空局部重识 · Shift/Ctrl多空联合 · ${primaryKeyLabel("toggleMode")} 调框`);
+        ? `滑过预览 · 点题框📌固定 · 单击胶囊改字 · 双击单空重识 · Alt透视 · ${primaryKeyLabel("toggleMode")} 调框`
+        : `右侧总览栏 · 点题头定位原卷 · 单击胶囊改字 · 双击单空重识 · ${primaryKeyLabel("toggleMode")} 调框`);
   updateWorkloadBar();
   updateLowConfButton();
   updateLiveRunBanner();
@@ -272,19 +278,22 @@ function updateLowConfButton() {
   }
 }
 
-function getMarginSidesForPage(p) {
-  let hasLeft = false, hasRight = false;
-  if (!p || !state.img || !state.img.width) return { hasLeft, hasRight };
-  const midX = state.img.width * 0.5;
-  getPageItems(p).forEach(it => {
-    if (it.kind !== "fill" || !it.box || it.box.length !== 4) return;
-    const [x1, y1, x2, y2] = it.box;
-    const bw = x2 - x1, bh = y2 - y1;
-    if (bh > bw * 1.4 && bw < 95) return;
-    if ((x1 + x2) * 0.5 < midX) hasLeft = true;
-    else hasRight = true;
-  });
-  return { hasLeft, hasRight };
+function panToBoxOnCanvas(box) {
+  if (!state.img || !box || box.length !== 4) return;
+  const rect = host.getBoundingClientRect();
+  const [x1, y1, x2, y2] = box;
+  const bw = Math.max(40, x2 - x1);
+  const bh = Math.max(24, y2 - y1);
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  // 若当前整页缩得很小看不清手写，温和拉近到舒适可读倍率；否则保留当前缩放直接居中对齐
+  if (bw * state.scale < Math.min(220, rect.width * 0.36) || bh * state.scale < 36) {
+    const targetScale = Math.min((rect.width * 0.72) / bw, (rect.height * 0.38) / bh);
+    state.scale = Math.max(state.scale, Math.max(0.5, Math.min(1.45, targetScale)));
+  }
+  state.tx = rect.width * 0.5 - cx * state.scale;
+  state.ty = rect.height * 0.45 - cy * state.scale;
+  $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
 }
 
 function focusBoxOnCanvas(box) {
@@ -296,15 +305,9 @@ function focusBoxOnCanvas(box) {
   const cx = (x1 + x2) / 2;
   const cy = (y1 + y2) / 2;
   // 按目标框尺寸智能计算特写比例：小框（如选择题）放大到清晰可辨，大框保持完整可见
-  const idealScale = Math.min((rect.width * 0.38) / bw, (rect.height * 0.34) / bh);
+  const idealScale = Math.min((rect.width * 0.42) / bw, (rect.height * 0.36) / bh);
   state.scale = Math.max(0.55, Math.min(2.2, idealScale));
-  let centerRatioX = 0.5;
-  if (state.mode === "view" && state.fillDisplayMode === "margin") {
-    const sides = getMarginSidesForPage(currentPage());
-    if (sides.hasLeft && !sides.hasRight) centerRatioX = 0.60;
-    else if (!sides.hasLeft && sides.hasRight) centerRatioX = 0.40;
-  }
-  state.tx = rect.width * centerRatioX - cx * state.scale;
+  state.tx = rect.width * 0.5 - cx * state.scale;
   state.ty = rect.height * 0.48 - cy * state.scale;
   $("zoomLabel").textContent = Math.round(state.scale * 100) + "%";
 }
