@@ -10,7 +10,7 @@
 <body>
   <div class="topbar">
     <div class="top-left">
-      <button id="btnToggleLeft" title="收起/展开页码栏">☰</button>
+      <button id="btnToggleLeft" class="btn-icon" title="收起/展开页码栏"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg></button>
       <span class="page-title" id="topPageTitle">加载中...</span>
       <div class="workload-bar" id="workloadBar" title="审阅进度">
         <span>已审 <b id="wlPages">0/0</b>（我 <b id="wlMine">0</b>）</span>
@@ -19,40 +19,40 @@
           <span>移<b id="wlMove">0</b> 增<b id="wlAdd">0</b> 删<b id="wlDel">0</b></span>
         </span>
       </div>
-      <span class="dirty-pill" id="dirtyPill">● 未保存</span>
+      <span class="dirty-pill" id="dirtyPill"><i class="status-dot warn"></i>未保存</span>
     </div>
 
     <div class="top-center">
       <div class="mode-switch" id="modeSwitchPill" data-mode="view">
         <span class="mode-thumb"></span>
-        <button class="mode-btn active" id="btnModeView">👁 看分数</button>
-        <button class="mode-btn" id="btnModeEdit">✎ 调框 (E)</button>
+        <button class="mode-btn active" id="btnModeView">看答案</button>
+        <button class="mode-btn" id="btnModeEdit">调框 (E)</button>
       </div>
       <div class="work-pill" id="revWorkPill" data-work="grading" title="切换「改试卷模式」与「模型迭代模式」（同步 8888 工作台）">
         <span class="work-pill-thumb"></span>
-        <button class="work-pill-btn active" type="button" data-work="grading">📝 改卷</button>
-        <button class="work-pill-btn" type="button" data-work="iteration">🔬 迭代</button>
+        <button class="work-pill-btn active" type="button" data-work="grading"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/><path d="m9.5 14.5 1.8 1.8 3.7-3.8"/></svg><span>改卷</span></button>
+        <button class="work-pill-btn" type="button" data-work="iteration"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/></svg><span>迭代</span></button>
       </div>
       <span class="score-pill" id="topScorePill" title="当前页自动判分汇总">得分 0/0</span>
     </div>
 
     <div class="top-right">
       <button class="unmatched-pill" id="btnUnmatchedFills" type="button" title="未匹配到大题题号的填空框">无题号框</button>
-      <button class="btn-warn" id="btnLowConf" style="display:none;" title="循环定位低置信度项 (L)">⚠ 低置</button>
-      <button id="btnFillDisplayMode" title="切换填空题展示：悬停气泡（点框固定） / 右侧整页总览栏">💬 悬停</button>
-      <button id="btnExportCsv" style="display:none;" title="导出整批成绩汇总 CSV">📊 成绩</button>
-      <button id="btnPrev">← 上一张</button>
-      <button class="btn-primary" id="btnSubmitNext">✓ 确认并下一张 (D)</button>
-      <button class="btn-ai-soft" id="btnReviewAi" title="全局 AI 帮手（同构改题/调框/导入配置/离屏截图，不阻塞审阅）">🤖 AI 帮手</button>
+      <button class="btn-warn" id="btnLowConf" style="display:none;" title="循环定位低置信度项 (L)">低置</button>
+      <button id="btnFillDisplayMode" title="展开或收起右侧整页答案总览栏（展开与收起时，卷面悬停与点击固定看答案均可用）">侧栏总览</button>
+      <button id="btnExportCsv" style="display:none;" title="导出整批成绩汇总 CSV"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>成绩</span></button>
+      <button id="btnPrev">上一张</button>
+      <button class="btn-primary" id="btnSubmitNext">确认并下一张 (D)</button>
+      <button class="btn-ai-soft" id="btnReviewAi" title="全局 AI 帮手（同构改题/调框/导入配置/离屏截图，不阻塞审阅）"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.2L5 10l5.1 1.8L12 17l1.9-5.2L19 10l-5.1-1.8Z"/><path d="M5 3v3"/><path d="M3.5 4.5h3"/><path d="M19 17v3"/><path d="M17.5 18.5h3"/></svg><span>AI 帮手</span></button>
       <div class="more-wrap">
-        <button id="btnMoreMenu" title="显示选项、快捷键与教程">⚙ 更多 ▾</button>
+        <button id="btnMoreMenu" title="显示选项、快捷键与教程"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg><span>更多</span></button>
         <div class="more-menu" id="moreMenu">
           <label class="more-item"><span>显示答案叠加</span><input type="checkbox" id="chkOverlay" checked></label>
           <label class="more-item"><span>显示置信度</span><input type="checkbox" id="chkConf"></label>
-          <button class="more-item" id="btnToggleRight" type="button"><span>◨ 展开/收起右侧栏</span></button>
+          <button class="more-item" id="btnToggleRight" type="button"><span class="more-item-label"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>展开/收起右侧栏</span></button>
           <div class="more-sep"></div>
-          <button class="more-item" id="btnKeybinds" type="button"><span>⌨ 自定义快捷键</span></button>
-          <button class="more-item" id="btnGuide" type="button"><span>? 操作教程</span></button>
+          <button class="more-item" id="btnKeybinds" type="button"><span class="more-item-label"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="6" y1="9" x2="6.01" y2="9"/><line x1="10" y1="9" x2="10.01" y2="9"/><line x1="14" y1="9" x2="14.01" y2="9"/><line x1="18" y1="9" x2="18.01" y2="9"/><line x1="7" y1="15" x2="17" y2="15"/></svg>自定义快捷键</span></button>
+          <button class="more-item" id="btnGuide" type="button"><span class="more-item-label"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.6 2.6 0 0 1 5 .8c0 1.7-2.5 2.1-2.5 3.7"/><line x1="12" y1="17.2" x2="12.01" y2="17.2"/></svg>操作教程</span></button>
         </div>
       </div>
     </div>
@@ -62,7 +62,7 @@
     <!-- 左栏：多人实时同步完整试卷列表 -->
     <aside class="sidebar-left" id="sidebarLeft">
       <div class="side-head">
-        <span>本批试卷 <span id="liveSyncDot" title="每 3 秒自动同步多人审阅进度与锁定状态" style="color:#16a34a;font-size:10px;">● 实时</span></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;">本批试卷 <span id="liveSyncDot" title="每 3 秒自动同步多人审阅进度与锁定状态" class="live-sync-tag"><i class="status-dot ok"></i>实时</span></span>
         <span id="leftSummary">0/0</span>
       </div>
       <div class="page-list" id="pageList"></div>
@@ -71,12 +71,12 @@
     <!-- 中栏：绝对主视觉原卷画布 + 框内答案贴条叠层 -->
     <main class="stage-wrap">
       <div class="subbox-hud" id="subboxHud">
-        <span id="subboxHudText">🎯 请在亮起的大框内拖出局部手写区域</span>
+        <span id="subboxHudText">请在亮起的大框内拖出局部手写区域</span>
         <button id="btnCancelSubbox" type="button" style="background:#ef4444;color:#fff;border:none;">取消 (Esc)</button>
       </div>
       <div class="multi-blank-bar" id="multiBlankBar">
         <span id="multiBlankText">已连续选中 0 空（请将印刷小题号一并框入）</span>
-        <button id="btnStartMultiSubbox" type="button" style="background:#22c55e;color:#fff;border:none;">🎯 联合划框重识别 (R)</button>
+        <button id="btnStartMultiSubbox" type="button" style="background:#22c55e;color:#fff;border:none;"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg><span>联合划框重识别 (R)</span></button>
         <button id="btnClearMultiSel" type="button" style="background:rgba(255,255,255,0.18);color:#fff;border:none;">清空</button>
       </div>
       <div class="live-run-banner" id="liveRunBanner">
@@ -88,15 +88,15 @@
         <div class="overlay-layer" id="overlayLayer"></div>
       </div>
       <div class="canvas-float-bar">
-        <button id="btnZoomOut" title="缩小">－</button>
+        <button id="btnZoomOut" class="btn-icon-sm" title="缩小"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         <span class="zoom-val" id="zoomLabel">100%</span>
-        <button id="btnZoomIn" title="放大">＋</button>
+        <button id="btnZoomIn" class="btn-icon-sm" title="放大"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         <button id="btnFit">适配 (F)</button>
         <span id="canvasHint"></span>
       </div>
     </main>
 
-    <!-- 右栏：看答案模式默认收起，调框模式自动展开 -->
+    <!-- 右栏：侧栏总览开启或调框模式时平滑展开 -->
     <aside class="sidebar-right collapsed" id="sidebarRight">
       <div class="right-scroll" id="rightBody"></div>
     </aside>
@@ -106,17 +106,18 @@
   <aside class="rev-ai-drawer hidden" id="reviewAiDrawer" aria-label="审阅 AI 帮手抽屉">
     <div class="rev-ai-head" id="revAiDrawerHead" title="按住此处拖动位置 · 双击复位">
       <div style="display:flex;align-items:center;gap:6px">
-        <span class="rev-ai-grip" aria-hidden="true">⠿</span>
-        <strong style="font-size:13.5px">🤖 审阅 AI 帮手</strong>
+        <span class="rev-ai-grip" aria-hidden="true"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" aria-hidden="true"><circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/></svg></span>
+        <svg class="ui-ico" style="color:#2563eb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.9 5.2L5 10l5.1 1.8L12 17l1.9-5.2L19 10l-5.1-1.8Z"/><path d="M5 3v3"/><path d="M3.5 4.5h3"/><path d="M19 17v3"/><path d="M17.5 18.5h3"/></svg>
+        <strong style="font-size:13.5px">审阅 AI 帮手</strong>
         <span class="badge badge-todo" id="revAiBadge">就绪</span>
       </div>
       <div style="display:flex;gap:5px">
-        <button id="btnRevAiCfg" type="button" style="padding:3px 7px;font-size:11.5px">⚙ 配置</button>
-        <button id="btnRevAiClose" type="button" style="padding:3px 7px;font-size:11.5px">收起</button>
+        <button id="btnRevAiCfg" type="button" style="padding:3px 8px;font-size:11.5px"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.2" fill="currentColor"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2.2" fill="currentColor"/></svg><span>配置</span></button>
+        <button id="btnRevAiClose" type="button" style="padding:3px 8px;font-size:11.5px">收起</button>
       </div>
     </div>
     <div class="rev-ai-tabs" id="revAiTabs">
-      <button id="btnRevNewChat" type="button" style="padding:3px 8px;font-size:11.5px">＋ 新并发对话</button>
+      <button id="btnRevNewChat" type="button" style="padding:3px 8px;font-size:11.5px"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>新并发对话</span></button>
     </div>
     <div class="rev-ai-cfg hidden" id="revAiCfg">
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -141,8 +142,8 @@
         <button id="btnRevTestAgent" type="button" style="padding:3px 7px;font-size:11px">测试</button>
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-        <button id="btnRevDeepScan" type="button" style="padding:3px 7px;font-size:11px">🔍 扩展扫描(可选)</button>
-        <button id="btnRevImportCfg" type="button" style="padding:3px 7px;font-size:11px">📥 导入配置/密钥</button>
+        <button id="btnRevDeepScan" type="button" style="padding:3px 8px;font-size:11px"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg><span>扩展扫描(可选)</span></button>
+        <button id="btnRevImportCfg" type="button" style="padding:3px 8px;font-size:11px"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span>导入配置/密钥</span></button>
         <input id="revCfgFile" type="file" accept=".json,.env,.txt" style="display:none">
         <span id="revAiScanMsg" style="color:var(--muted);font-size:11px"></span>
       </div>
@@ -161,7 +162,7 @@
         <label style="display:inline-flex;align-items:center;gap:4px;color:var(--muted);cursor:pointer" title="默认仅传文字快照，AI 需要时自动调 capture 截高清试卷图或 UI 图；勾选后发送即附带实时截图并精简提示词">
           <input id="chkRevAiShot" type="checkbox"> 附带当前画面截图
         </label>
-        <button id="btnRevAiStop" type="button" class="btn-danger" style="display:none;padding:2px 8px;font-size:11px">■ 停止</button>
+        <button id="btnRevAiStop" type="button" class="btn-danger" style="display:none;padding:2px 8px;font-size:11px"><svg class="ui-ico ui-ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/></svg><span>停止</span></button>
       </div>
       <div style="display:flex;gap:6px">
         <input id="revAiInput" type="text" placeholder="输入中文指令（支持改字/删框/重识/修报错/导入密钥）..." style="flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:12px">
@@ -170,12 +171,12 @@
     </div>
     <div class="rev-ai-resize-handle" id="revAiResizeHandle" title="拖动调整窗口大小"></div>
   </aside>
-  <div class="rev-focus-ring hidden" id="revFocusRing"><span class="rev-focus-tag" id="revFocusTag">🤖 AI 聚焦</span></div>
+  <div class="rev-focus-ring hidden" id="revFocusRing"><span class="rev-focus-tag" id="revFocusTag">AI 聚焦</span></div>
 
   <!-- 游戏风键位设置弹窗（支持主/副双键位 + 鼠标手势说明） -->
   <dialog class="kb-dlg" id="kbDialog">
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h3 style="margin:0;font-size:16px;">⌨ 自定义快捷键（主/副双键位）</h3>
+      <h3 style="margin:0;font-size:16px;display:inline-flex;align-items:center;gap:7px;"><svg class="ui-ico" style="width:16px;height:16px;color:var(--brand)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="6" y1="9" x2="6.01" y2="9"/><line x1="10" y1="9" x2="10.01" y2="9"/><line x1="14" y1="9" x2="14.01" y2="9"/><line x1="18" y1="9" x2="18.01" y2="9"/><line x1="7" y1="15" x2="17" y2="15"/></svg><span>自定义快捷键（主/副双键位）</span></h3>
       <button id="btnCloseKb">关闭</button>
     </div>
     <div class="kb-mouse-tip">
@@ -198,14 +199,14 @@
   <div class="tour-pop" id="tourPop">
     <div class="tour-head">
       <span class="tour-step-badge" id="tourStepBadge">1 / 6</span>
-      <button id="tourClose" style="padding:2px 8px;font-size:11.5px;">跳过 ✕</button>
+      <button id="tourClose" style="padding:2px 8px;font-size:11.5px;">跳过</button>
     </div>
     <div class="tour-title" id="tourTitle"></div>
     <div class="tour-desc" id="tourDesc"></div>
     <div class="tour-try-row" id="tourTryRow" style="display:none;"></div>
     <div class="tour-foot">
-      <button id="tourPrev" style="padding:4px 10px;font-size:12px;">← 上一步</button>
-      <button class="btn-primary" id="tourNext" style="padding:4px 12px;font-size:12px;">下一步 →</button>
+      <button id="tourPrev" style="padding:4px 10px;font-size:12px;">上一步</button>
+      <button class="btn-primary" id="tourNext" style="padding:4px 12px;font-size:12px;">下一步</button>
     </div>
   </div>
 
@@ -213,6 +214,7 @@
 
 <script src="/asset/vendor/katex/katex.min.js"></script>
 <script>const TOKEN='__TOKEN__';</script>
+<script src="/shared/icons.js"></script>
 <script src="/static/state.js"></script>
 <script src="/static/pages.js"></script>
 <script src="/static/overlay.js"></script>

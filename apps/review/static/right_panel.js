@@ -21,24 +21,8 @@ function refreshOverviewPanel() {
 
 function syncOverviewHighlightOnly(scrollToSelected = false) {
   drawCanvasOnly();
-  const hoverId = state.hoverItemId || "";
-  const selId = state.selectedItemId || "";
-  const activeId = hoverId || selId;
-  overlayLayer.querySelectorAll(".fill-mini-tag").forEach(el => {
-    const id = el.dataset.itemId;
-    el.classList.toggle("active", Boolean(id && id === activeId));
-  });
-  const body = $("rightBody");
-  if (!body) return;
-  let targetCard = null;
-  body.querySelectorAll(".ov-card").forEach(card => {
-    const id = card.dataset.itemId || "";
-    card.classList.toggle("hovered", Boolean(hoverId && id === hoverId));
-    card.classList.toggle("active", Boolean(selId && id === selId));
-    if (scrollToSelected && selId && id === selId) targetCard = card;
-  });
-  if (targetCard) {
-    try { targetCard.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch {}
+  if (typeof syncFocusHighlightClasses === "function") {
+    syncFocusHighlightClasses(scrollToSelected);
   }
 }
 
@@ -117,18 +101,20 @@ function renderRightPanel() {
     const recogKey = primaryKeyLabel("recognizeBox");
     const busy = state.recognizingBusy;
     const selBtnLabel = busy
-      ? "⏳ 正在调用 API…"
-      : (selHasAns ? `↻ 重新识别此框 (${recogKey})` : `✨ 调用 API 识别此框 (${recogKey})`);
+      ? `${uiIcon("loader", "ui-ico-sm ui-ico-spin")}<span>正在调用 API…</span>`
+      : (selHasAns
+          ? `${uiIcon("refresh", "ui-ico-sm")}<span>重新识别此框 (${escHtml(recogKey)})</span>`
+          : `${uiIcon("sparkles", "ui-ico-sm")}<span>调用 API 识别此框 (${escHtml(recogKey)})</span>`);
 
     secAct.innerHTML = `
       <div class="sec-title"><span>快捷操作</span><span>共 ${state.workingBoxes.length} 框</span></div>
       ${selBox ? `<div style="font-size:12px;margin-bottom:7px;color:var(--text);">当前选中：<b>${escHtml(selMeta.name)}</b> <span style="color:var(--muted);">（${escHtml(selConf)}）</span>${selBox._needsRecog ? ` <span style="color:#b45309;font-weight:700;">· 待识别</span>` : ""}</div>` : ""}
       <div style="display:flex;flex-direction:column;gap:6px;">
         ${selCanVlm ? `<button class="${(selBox._needsRecog || !selHasAns) ? "btn-ai" : "btn-ai-soft"}" id="btnRecogSel" ${busy ? "disabled" : ""} style="width:100%;padding:7px 10px;">${selBtnLabel}</button>` : ""}
-        ${pendingIndices.length > 0 ? `<button class="btn-ai-soft" id="btnRecogPending" ${busy ? "disabled" : ""} style="width:100%;padding:6px 10px;">${busy ? "⏳ 识别中…" : `✨ 一键识别本页全部待识别框 (${pendingIndices.length})`}</button>` : ""}
+        ${pendingIndices.length > 0 ? `<button class="btn-ai-soft" id="btnRecogPending" ${busy ? "disabled" : ""} style="width:100%;padding:6px 10px;">${busy ? `${uiIcon("loader", "ui-ico-sm ui-ico-spin")}<span>识别中…</span>` : `${uiIcon("sparkles", "ui-ico-sm")}<span>一键识别本页全部待识别框 (${pendingIndices.length})</span>`}</button>` : ""}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button id="btnUndoBox" ${state.undoStack.length && !busy ? "" : "disabled"} style="flex:1;">↶ 撤销 (Ctrl+Z)</button>
-          <button class="btn-danger" id="btnDelBox" ${selBox && !busy ? "" : "disabled"} style="flex:1;">🗑 ${selBound ? "删框并消卡" : "删除框"} (${primaryKeyLabel("deleteBox")})</button>
+          <button id="btnUndoBox" ${state.undoStack.length && !busy ? "" : "disabled"} style="flex:1;">${uiIcon("undo", "ui-ico-sm")}<span>撤销 (Ctrl+Z)</span></button>
+          <button class="btn-danger" id="btnDelBox" ${selBox && !busy ? "" : "disabled"} style="flex:1;">${uiIcon("trash", "ui-ico-sm")}<span>${selBound ? "删框并消卡" : "删除框"} (${escHtml(primaryKeyLabel("deleteBox"))})</span></button>
         </div>
       </div>
       <div id="selRecogPreview"></div>
@@ -164,7 +150,7 @@ function renderRightPanel() {
       if (selBound.kind === "identity") {
         ansHolder.textContent = getIdentityCompactText(selBound);
       } else {
-        renderFillMarginInto(ansHolder, selBound);
+        renderFillMarginInto(ansHolder, selBound, "edit");
       }
       boxDiv.appendChild(ansHolder);
       prevWrap.appendChild(boxDiv);
@@ -216,11 +202,12 @@ function renderRightPanel() {
   header.innerHTML = `
     <div class="ov-head-top">
       <div class="ov-head-title">
-        <span>📋 整页答案总览</span>
+        ${uiIcon("panelRight")}
+        <span>整页答案总览</span>
         <span class="ov-count-pill">${cntAll} 题</span>
         ${sm ? `<span class="ov-score-pill">${fmtScoreNum(sm.total_earned)}/${fmtScoreNum(sm.total_possible)}分</span>` : ""}
       </div>
-      <button type="button" class="ov-close-btn" id="btnCloseOverviewDock" title="收起右侧总览栏，切回悬停气泡模式">收起 ✕</button>
+      <button type="button" class="ov-close-btn" id="btnCloseOverviewDock" title="收起右侧总览栏"><span>收起</span>${uiIcon("x", "ui-ico-xs")}</button>
     </div>
     <div class="ov-filters" id="ovFilterBar"></div>
   `;
@@ -255,8 +242,9 @@ function renderRightPanel() {
     filterBar.appendChild(b);
   });
 
+  const focusId = getLockedFillItemId() || state.hoverItemId || state.selectedItemId || "";
   const list = document.createElement("div");
-  list.className = "ov-list";
+  list.className = "ov-list" + (focusId && filteredFills.some(x => x.id === focusId) ? " has-focus" : "");
   if (!filteredFills.length) {
     const empty = document.createElement("div");
     empty.className = "ov-empty";
@@ -271,7 +259,7 @@ function renderRightPanel() {
       card.dataset.itemId = it.id;
       card.className = "ov-card"
         + (edited ? " edited" : "")
-        + (state.selectedItemId === it.id ? " active" : "")
+        + ((state.selectedItemId === it.id || state.pinnedItemId === it.id) ? " active" : "")
         + (state.hoverItemId === it.id ? " hovered" : "");
 
       const cHead = document.createElement("div");
@@ -301,33 +289,41 @@ function renderRightPanel() {
 
       const locBtn = document.createElement("span");
       locBtn.className = "ov-locate-btn";
-      locBtn.textContent = "🎯 定位";
+      locBtn.innerHTML = `${uiIcon("crosshair", "ui-ico-xs")}<span>定位</span>`;
       cHead.appendChild(locBtn);
 
       cHead.onclick = (e) => {
         e.stopPropagation();
+        state.pinnedItemId = null;
         state.selectedItemId = it.id;
+        state.hoverItemId = it.id;
+        state.hoverSource = "overview";
         panToBoxOnCanvas(it.box);
-        syncOverviewHighlightOnly(false);
         draw();
+        syncOverviewHighlightOnly(false);
       };
       card.appendChild(cHead);
 
       const ansEl = document.createElement("div");
       ansEl.className = "margin-ans";
-      renderFillMarginInto(ansEl, it);
+      renderFillMarginInto(ansEl, it, "overview");
       card.appendChild(ansEl);
 
       card.onmouseenter = () => {
-        if (state.hoverItemId !== it.id) {
+        if (getLockedFillItemId()) return;
+        clearTimeout(hoverHideTimer);
+        if (state.hoverItemId !== it.id || state.hoverSource !== "overview") {
           state.hoverItemId = it.id;
-          syncOverviewHighlightOnly(false);
+          state.hoverSource = "overview";
+          syncHoverPopoverOnly();
         }
       };
       card.onmouseleave = () => {
-        if (state.hoverItemId === it.id) {
+        if (getLockedFillItemId()) return;
+        if (state.hoverSource === "overview" && state.hoverItemId === it.id) {
           state.hoverItemId = null;
-          syncOverviewHighlightOnly(false);
+          state.hoverSource = null;
+          syncHoverPopoverOnly();
         }
       };
       list.appendChild(card);

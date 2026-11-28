@@ -80,7 +80,7 @@ function castReviewFocus(rect, label = "AI 聚焦") {
   ring.style.top = Math.max(2, rect.top - 5) + "px";
   ring.style.width = (rect.width + 10) + "px";
   ring.style.height = (rect.height + 10) + "px";
-  if (tag) tag.textContent = "🤖 " + label;
+  if (tag) tag.innerHTML = `${uiIcon("sparkles", "ui-ico-xs")}<span>${escHtml(label)}</span>`;
   ring.classList.remove("hidden");
   clearTimeout(_revFocusTimer);
   _revFocusTimer = setTimeout(() => ring.classList.add("hidden"), 4500);
@@ -135,11 +135,11 @@ function connectReviewSSE() {
         const cur = currentPage();
         if (ev.page_id && cur && cur.id === ev.page_id) {
           await hotReloadResults(false);
-          toast("🤖 " + (ev.message || "当前页已由 AI 实时更新"), 2600);
+          toast(ev.message || "当前页已由 AI 实时更新", 2600);
         } else {
           await pollLive();
           if (ev.source === "ai" && ev.message) {
-            toast("🤖 " + ev.message + "（未打断当前页）", 3200);
+            toast(ev.message + "（未打断当前页）", 3200);
           }
         }
       } else if (ev.type === "work_mode" && ev.work_mode) {
@@ -150,7 +150,7 @@ function connectReviewSSE() {
         if (ev.message) toast(ev.message, 2200);
       } else if (ev.type === "ui_command") {
         focusReviewTarget(ev);
-        if (ev.label) toast("🤖 " + ev.label, 2800);
+        if (ev.label) toast(ev.label, 2800);
       }
     } catch {}
   };
@@ -180,7 +180,7 @@ function renderRevAgentsUI(info) {
   if (sel && info && Array.isArray(info.list)) {
     const cur = sel.value || info.preferred || "auto";
     sel.innerHTML = `<option value="auto">自动优选 (${escHtml(info.recommended || "无")})</option>` +
-      info.list.map(a => `<option value="${escHtml(a.id)}">${a.available ? "✓ " : "✗ "}${escHtml(a.label)}</option>`).join("");
+      info.list.map(a => `<option value="${escHtml(a.id)}">${a.available ? "[可用] " : "[未检测到] "}${escHtml(a.label)}</option>`).join("");
     sel.value = cur;
   }
   const targetId = (sel && sel.value !== "auto") ? sel.value : (info?.recommended || "");
@@ -188,7 +188,7 @@ function renderRevAgentsUI(info) {
   if ($("revAiHint")) {
     $("revAiHint").textContent = ag && ag.available
       ? `引擎：${ag.label} · 改动实时推给本页（发送瞬间冻结当前页，发完可继续翻页）`
-      : "未检测到本机 CLI Agent，可点「⚙ 配置」填路径或执行可选扩展扫描。";
+      : "未检测到本机 CLI Agent，可点「配置」填路径或执行可选扩展扫描。";
   }
 }
 function renderRevAiTabs() {
@@ -199,7 +199,7 @@ function renderRevAiTabs() {
     const act = s.chat_id === REV_ACTIVE_CHAT ? " active" : "";
     const dot = s.running ? '<i class="dot-run"></i>' : "";
     return `<button class="rev-ai-tab${act}" type="button" data-chat-id="${escHtml(s.chat_id)}">${dot}${escHtml(s.title || ("对话 " + (i + 1)))}</button>`;
-  }).join("") + `<button id="btnRevNewChat" type="button" style="padding:3px 8px;font-size:11.5px">＋ 新并发对话</button>`;
+  }).join("") + `<button id="btnRevNewChat" type="button" style="padding:3px 8px;font-size:11.5px">${uiIcon("plus", "ui-ico-xs")}<span>新并发对话</span></button>`;
   bar.querySelectorAll("[data-chat-id]").forEach(b => {
     b.onclick = () => {
       REV_ACTIVE_CHAT = b.dataset.chatId;
@@ -244,11 +244,11 @@ function renderRevAiSession(s) {
     return;
   }
   const html = msgs.map(m => {
-    const att = (m.attach && m.attach.length) ? ` · 📷 ${escHtml(m.attach.join(", "))}` : "";
+    const att = (m.attach && m.attach.length) ? ` · 附件 ${escHtml(m.attach.join(", "))}` : "";
     return `<div class="rev-ai-msg ${m.role === "user" ? "user" : "assistant"}"><div class="rev-ai-msg-meta">${m.role === "user" ? "你" : "AI 帮手"} · ${escHtml(m.ts || "")}${att}</div>${escHtml(m.text || "")}</div>`;
   });
   if (running) {
-    html.push(`<div class="rev-ai-msg assistant"><div class="rev-ai-msg-meta">AI 帮手 · 执行中</div>${escHtml(s.response || "⏳ 正在分析当前冻结页面并执行同构操作，你可以继续自由审阅...")}</div>`);
+    html.push(`<div class="rev-ai-msg assistant"><div class="rev-ai-msg-meta">AI 帮手 · 执行中</div>${escHtml(s.response || "正在分析当前冻结页面并执行同构操作，你可以继续自由审阅...")}</div>`);
   }
   body.innerHTML = html.join("");
   body.scrollTop = body.scrollHeight;
@@ -320,8 +320,8 @@ if ($("btnRevTestAgent")) {
     $("revAiScanMsg").textContent = `测试 ${p}...`;
     try {
       const r = await hubApi("/agents/test", { provider: p });
-      $("revAiScanMsg").textContent = `✓ ${p} 正常 (${r.version || "OK"})`;
-    } catch (e) { $("revAiScanMsg").textContent = `✗ ${e.message}`; }
+      $("revAiScanMsg").textContent = `${p} 正常 (${r.version || "OK"})`;
+    } catch (e) { $("revAiScanMsg").textContent = `测试失败：${e.message}`; }
   };
 }
 if ($("btnRevDeepScan")) {
@@ -354,9 +354,9 @@ if ($("btnRevImportCfg")) {
         payload = { env };
       }
       const r = await hubApi("/config/import", payload);
-      $("revAiScanMsg").textContent = "✓ " + (r.message || "已导入");
+      $("revAiScanMsg").textContent = r.message || "已导入";
       toast(r.message || "配置/密钥导入完成", 3200);
-    } catch (e) { $("revAiScanMsg").textContent = "✗ " + e.message; }
+    } catch (e) { $("revAiScanMsg").textContent = "导入失败：" + e.message; }
     finally { $("revCfgFile").value = ""; }
   };
 }
@@ -443,7 +443,7 @@ if ($("btnUnmatchedFills")) {
     try {
       const res = await api("/api/review/purge-unmatched-fills", { scope, page_id: p.id, reviewer: REVIEWER || "审阅员" });
       await hotReloadResults(false);
-      toast(`✓ 已清理 ${res.removed_count || 0} 个未配题号填空框`, 2800);
+      toast(`已清理 ${res.removed_count || 0} 个未配题号填空框`, 2800);
     } catch (err) {
       toast("清理失败：" + err.message, 3200);
     }

@@ -60,7 +60,7 @@ function compareSubKey(a, b) {
 }
 
 let _pillClickTimer = null;
-function renderFillMarginInto(el, it) {
+function renderFillMarginInto(el, it, containerSource = "pop") {
   el.innerHTML = "";
   const effAns = getEffectiveFillAnswersJS(it);
   const pgGrade = getPageGrading();
@@ -97,7 +97,8 @@ function renderFillMarginInto(el, it) {
                 state.inlineBlankEdit &&
                 state.inlineBlankEdit.itemId === it.id &&
                 String(state.inlineBlankEdit.sub) === String(sub) &&
-                String(state.inlineBlankEdit.blank) === String(k)
+                String(state.inlineBlankEdit.blank) === String(k) &&
+                (!state.inlineBlankEdit.source || state.inlineBlankEdit.source === containerSource)
               );
               const isMulti = isBlankMultiSelected(it.id, sub, k);
               const isFlash = Boolean((state.flashSlots[`${it.id}|${slotKey}`] || 0) > nowTs);
@@ -163,10 +164,10 @@ function renderFillMarginInto(el, it) {
                   jb.type = "button";
                   jb.className = "blank-judge-btn " + bg.status;
                   jb.textContent = bg.status === "correct"
-                    ? `✓+${fmtScoreNum(bg.earned)}`
-                    : (bg.status === "partial" ? `½+${fmtScoreNum(bg.earned)}`
-                    : (bg.status === "pending" ? "?" : "✗"));
-                  jb.title = (bg.standard ? `参考答案：${bg.standard} · ` : "") + "点击切换人工判分（✓/½/✗/自动）";
+                    ? `对 +${fmtScoreNum(bg.earned)}`
+                    : (bg.status === "partial" ? `半 +${fmtScoreNum(bg.earned)}`
+                    : (bg.status === "pending" ? "待核" : "错"));
+                  jb.title = (bg.standard ? `参考答案：${bg.standard} · ` : "") + "点击切换人工判分（对/半/错/自动）";
                   jb.onmousedown = (e) => e.stopPropagation();
                   jb.onclick = (e) => { e.stopPropagation(); clearTimeout(_pillClickTimer); cycleBlankJudge(it, slotKey, bg.status); };
                   jb.ondblclick = (e) => e.stopPropagation();
@@ -178,14 +179,14 @@ function renderFillMarginInto(el, it) {
                 pill.onmousedown = (e) => {
                   if (e.button === 0 && !spaceDown) {
                     e.stopPropagation();
-                    // 鼠标刚按下即静默锁定当前题，不重绘DOM，避免在点击/双击期间气泡溜走
-                    if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+                    // 鼠标刚按下即静默锁定当前题，不重绘 DOM，避免点击/双击期间气泡溜走
+                    if (containerSource === "pop") state.pinnedItemId = it.id;
                     state.selectedItemId = it.id;
                   }
                 };
                 pill.onclick = (e) => {
                   e.stopPropagation();
-                  if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+                  if (containerSource === "pop") state.pinnedItemId = it.id;
                   state.selectedItemId = it.id;
                   if (e.shiftKey || e.ctrlKey || e.metaKey) {
                     clearTimeout(_pillClickTimer);
@@ -195,9 +196,10 @@ function renderFillMarginInto(el, it) {
                   clearTimeout(_pillClickTimer);
                   _pillClickTimer = setTimeout(() => {
                     state.selectedItemId = it.id;
-                    if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+                    if (containerSource === "pop") state.pinnedItemId = it.id;
+                    else if (containerSource === "overview") state.pinnedItemId = null;
                     state.inlineChipEdit = null;
-                    state.inlineBlankEdit = { itemId: it.id, sub: String(sub), blank: String(k) };
+                    state.inlineBlankEdit = { itemId: it.id, sub: String(sub), blank: String(k), source: containerSource };
                     refreshOverviewPanel();
                     draw();
                   }, 185);
@@ -230,7 +232,7 @@ function renderFillMarginInto(el, it) {
     if (it.status === "等待视觉转录" || it.status === "等待豆包") {
       const pill = document.createElement("span");
       pill.className = "blank-pill pending";
-      pill.textContent = "⏳ 正在识别中…";
+      pill.innerHTML = `${uiIcon("loader", "ui-ico-xs ui-ico-spin")}<span>正在识别中…</span>`;
       el.appendChild(pill);
       return;
     }
@@ -238,7 +240,7 @@ function renderFillMarginInto(el, it) {
       const pill = document.createElement("span");
       pill.className = "blank-pill failed";
       const reason = it.error || (it.issues && it.issues[0]) || it.status || "识别失败";
-      pill.textContent = `⚠ ${reason}`;
+      pill.innerHTML = `${uiIcon("alert", "ui-ico-xs")}<span>${escHtml(reason)}</span>`;
       pill.title = "双击直接进入聚焦局部重识别";
       pill.ondblclick = (e) => { e.stopPropagation(); enterSubboxReOcr(it, [{ sub: "无小题号", blank: "1" }]); };
       el.appendChild(pill);
@@ -253,15 +255,16 @@ function renderFillMarginInto(el, it) {
     pill.onmousedown = (e) => {
       if (e.button === 0 && !spaceDown) {
         e.stopPropagation();
-        if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+        if (containerSource === "pop") state.pinnedItemId = it.id;
         state.selectedItemId = it.id;
       }
     };
     pill.onclick = (e) => {
       e.stopPropagation();
-      if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+      if (containerSource === "pop") state.pinnedItemId = it.id;
+      else if (containerSource === "overview") state.pinnedItemId = null;
       state.selectedItemId = it.id;
-      state.inlineBlankEdit = { itemId: it.id, sub: "无小题号", blank: "1" };
+      state.inlineBlankEdit = { itemId: it.id, sub: "无小题号", blank: "1", source: containerSource };
       refreshOverviewPanel();
       draw();
     };
@@ -278,15 +281,16 @@ function renderFillMarginInto(el, it) {
     pill.onmousedown = (e) => {
       if (e.button === 0 && !spaceDown) {
         e.stopPropagation();
-        if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+        if (containerSource === "pop") state.pinnedItemId = it.id;
         state.selectedItemId = it.id;
       }
     };
     pill.onclick = (e) => {
       e.stopPropagation();
-      if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+      if (containerSource === "pop") state.pinnedItemId = it.id;
+      else if (containerSource === "overview") state.pinnedItemId = null;
       state.selectedItemId = it.id;
-      state.inlineBlankEdit = { itemId: it.id, sub: "无小题号", blank: String(li + 1) };
+      state.inlineBlankEdit = { itemId: it.id, sub: "无小题号", blank: String(li + 1), source: containerSource };
       refreshOverviewPanel();
       draw();
     };
@@ -318,12 +322,13 @@ function renderLowConfFocusOverlay() {
     ? (state.mode === "edit" ? "已选中可调" : "点文字调框")
     : "点文字改答案";
   const txt = document.createElement("span");
-  txt.textContent = `⚠ 低置 ${f.index}/${f.total} · ${f.label} · ${actionHint}`;
+  txt.style.cssText = "display:inline-flex;align-items:center;gap:4px;";
+  txt.innerHTML = `${uiIcon("alert", "ui-ico-xs")}<span>低置 ${f.index}/${f.total} · ${escHtml(f.label)} · ${escHtml(actionHint)}</span>`;
   tag.appendChild(txt);
 
   const trustBtn = document.createElement("button");
   trustBtn.className = "lowconf-trust-btn";
-  trustBtn.textContent = "✓ 信任无误";
+  trustBtn.innerHTML = `${uiIcon("check", "ui-ico-xs")}<span>信任无误</span>`;
   trustBtn.title = "确认此处识别无误，立即清除低置信度橙色警告";
   trustBtn.onmousedown = (e) => { e.stopPropagation(); };
   trustBtn.onclick = (e) => {
@@ -361,59 +366,113 @@ function renderLowConfFocusOverlay() {
 
 let hoverHideTimer = null;
 function getLockedFillItemId() {
-  if (state.inlineBlankEdit && state.inlineBlankEdit.itemId) return state.inlineBlankEdit.itemId;
+  if (state.inlineBlankEdit && state.inlineBlankEdit.itemId && state.inlineBlankEdit.source !== "overview") {
+    return state.inlineBlankEdit.itemId;
+  }
   if (state.pinnedItemId) return state.pinnedItemId;
   return null;
+}
+function getActiveFocusItemId() {
+  return getLockedFillItemId() || state.hoverItemId || state.selectedItemId || null;
+}
+function getFloatingPopoverItemId() {
+  if (state.mode !== "view" || !state.showOverlay || state.editingPopItemId || state.subboxTarget) return null;
+  if (state.inlineBlankEdit && state.inlineBlankEdit.source === "overview") return null;
+  const lockedId = getLockedFillItemId();
+  if (lockedId) return lockedId;
+  if (state.hoverItemId && state.hoverSource !== "overview") return state.hoverItemId;
+  return null;
+}
+function syncFocusHighlightClasses(scrollOverview = false) {
+  const lockedId = getLockedFillItemId() || "";
+  const focusId = getActiveFocusItemId() || "";
+  const hoverId = state.hoverItemId || "";
+  const selId = lockedId || state.selectedItemId || "";
+
+  overlayLayer.classList.toggle("has-focus", Boolean(state.mode === "view" && focusId));
+  overlayLayer.querySelectorAll(".fill-mini-tag").forEach(el => {
+    const id = el.dataset.itemId || "";
+    el.classList.toggle("active", Boolean(id && id === focusId));
+    el.classList.toggle("pinned", Boolean(id && id === lockedId));
+  });
+  overlayLayer.querySelectorAll(".overlay-choice, .overlay-identity").forEach(el => {
+    const id = el.dataset.itemId || "";
+    el.classList.toggle("active", Boolean(id && id === focusId));
+  });
+
+  const body = $("rightBody");
+  if (!body) return;
+  const ovList = body.querySelector(".ov-list");
+  let matchedCard = false;
+  let targetCard = null;
+  body.querySelectorAll(".ov-card").forEach(card => {
+    const id = card.dataset.itemId || "";
+    const isHov = Boolean(hoverId && id === hoverId);
+    const isAct = Boolean(selId && id === selId);
+    card.classList.toggle("hovered", isHov);
+    card.classList.toggle("active", isAct);
+    if (isHov || isAct) matchedCard = true;
+    if (scrollOverview && selId && id === selId) targetCard = card;
+  });
+  if (ovList) ovList.classList.toggle("has-focus", matchedCard);
+  if (targetCard) {
+    try { targetCard.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch {}
+  }
 }
 function pinFillItem(itemId) {
   clearTimeout(hoverHideTimer);
   state.pinnedItemId = itemId;
   state.selectedItemId = itemId;
   state.hoverItemId = itemId;
+  state.hoverSource = "canvas";
   draw();
+  if (state.fillDisplayMode === "margin") {
+    syncFocusHighlightClasses(true);
+  }
 }
 function unpinFillItem() {
   clearTimeout(hoverHideTimer);
   state.pinnedItemId = null;
   state.selectedItemId = null;
   state.hoverItemId = null;
+  state.hoverSource = null;
   state.hoverInPopover = false;
   state.inlineBlankEdit = null;
   draw();
+  syncFocusHighlightClasses(false);
 }
 function scheduleHoverClear() {
   if (getLockedFillItemId()) return;
   clearTimeout(hoverHideTimer);
   hoverHideTimer = setTimeout(() => {
-    if (!getLockedFillItemId() && !state.hoverInPopover && state.hoverItemId) {
+    if (!getLockedFillItemId() && !state.hoverInPopover && state.hoverItemId && state.hoverSource !== "overview") {
       state.hoverItemId = null;
+      state.hoverSource = null;
       syncHoverPopoverOnly();
     }
   }, 190);
 }
-function setHoverFillItem(itemId) {
-  // 已点击固定或正在编辑空位时，鼠标滑过其他题框绝不抢焦、绝不销毁气泡
+function setHoverCanvasItem(itemId) {
+  // 已点击固定或正在气泡内编辑时，鼠标滑过其他题框绝不抢焦、绝不销毁气泡
   if (getLockedFillItemId()) return;
   clearTimeout(hoverHideTimer);
-  if (state.hoverItemId !== itemId) {
+  if (state.hoverItemId !== itemId || state.hoverSource !== "canvas") {
     state.hoverItemId = itemId;
+    state.hoverSource = "canvas";
     syncHoverPopoverOnly();
   }
+}
+function setHoverFillItem(itemId) {
+  setHoverCanvasItem(itemId);
 }
 function syncHoverPopoverOnly() {
   drawCanvasOnly();
   overlayLayer.querySelectorAll(".fill-hover-pop").forEach(el => el.remove());
-  const lockedId = getLockedFillItemId();
-  const activeId = lockedId || state.hoverItemId;
-  overlayLayer.querySelectorAll(".fill-mini-tag").forEach(el => {
-    const id = el.dataset.itemId;
-    el.classList.toggle("active", Boolean(id && id === activeId));
-    el.classList.toggle("pinned", Boolean(id && id === lockedId));
-  });
+  syncFocusHighlightClasses(false);
   const p = currentPage();
-  if (!p || !state.img || state.mode !== "view" || !state.showOverlay || state.fillDisplayMode !== "hover" || state.editingPopItemId) return;
-  if (!activeId) return;
-  const it = getPageItems(p).find(x => x.id === activeId && x.kind === "fill");
+  const popId = getFloatingPopoverItemId();
+  if (!p || !state.img || !popId) return;
+  const it = getPageItems(p).find(x => x.id === popId && x.kind === "fill");
   if (!it || !it.box || it.box.length !== 4) return;
   const [x1, y1, x2, y2] = it.box;
   const rect = host.getBoundingClientRect();
@@ -445,7 +504,7 @@ function renderFillHoverPopover(row, rect) {
   if (isPinned) {
     const pinBadge = document.createElement("span");
     pinBadge.className = "pop-pin-badge";
-    pinBadge.textContent = "📌 已固定";
+    pinBadge.innerHTML = `${uiIcon("pin", "ui-ico-xs")}<span>已固定</span>`;
     headLeft.appendChild(pinBadge);
   }
   const headRight = document.createElement("div");
@@ -466,7 +525,7 @@ function renderFillHoverPopover(row, rect) {
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "pop-close-btn";
-    closeBtn.textContent = "✕";
+    closeBtn.innerHTML = uiIcon("x", "ui-ico-xs");
     closeBtn.title = "取消固定 (Esc)";
     closeBtn.onmousedown = (e) => e.stopPropagation();
     closeBtn.onclick = (e) => { e.stopPropagation(); unpinFillItem(); };
@@ -478,7 +537,7 @@ function renderFillHoverPopover(row, rect) {
 
   const ansEl = document.createElement("div");
   ansEl.className = "margin-ans";
-  renderFillMarginInto(ansEl, it);
+  renderFillMarginInto(ansEl, it, "pop");
   pop.appendChild(ansEl);
 
   pop.onmouseenter = () => {
@@ -558,9 +617,11 @@ function renderEditBoxActionBar() {
     recBtn.className = (b._needsRecog || !hasAns) ? "btn-ai" : "btn-ai-soft";
     recBtn.disabled = busy;
     const keyTag = primaryKeyLabel("recognizeBox");
-    recBtn.textContent = busy
-      ? "⏳ 识别中…"
-      : (hasAns ? `↻ 重认此框 (${keyTag})` : `✨ API识别 (${keyTag})`);
+    recBtn.innerHTML = busy
+      ? `${uiIcon("loader", "ui-ico-xs ui-ico-spin")}<span>识别中…</span>`
+      : (hasAns
+          ? `${uiIcon("refresh", "ui-ico-xs")}<span>重认此框 (${escHtml(keyTag)})</span>`
+          : `${uiIcon("sparkles", "ui-ico-xs")}<span>API识别 (${escHtml(keyTag)})</span>`);
     recBtn.title = "直接裁切当前框并调用配置的视觉大模型 API 进行识别";
     recBtn.onclick = () => recognizeBoxIndices([idx]);
     bar.appendChild(recBtn);
@@ -568,7 +629,7 @@ function renderEditBoxActionBar() {
   const delBtn = document.createElement("button");
   delBtn.className = "btn-danger";
   delBtn.disabled = busy;
-  delBtn.textContent = bound ? "🗑 删框并消卡" : "🗑 删框";
+  delBtn.innerHTML = `${uiIcon("trash", "ui-ico-xs")}<span>${bound ? "删框并消卡" : "删框"}</span>`;
   delBtn.title = "删除该框并同步移除其对应答案卡片（Ctrl+Z 可撤销）";
   delBtn.onclick = () => deleteBoxAt(idx);
   bar.appendChild(delBtn);
@@ -603,6 +664,8 @@ function renderOverlays() {
   const rect = host.getBoundingClientRect();
   const fillRows = [];
   const pgGrade = getPageGrading(p);
+  const focusId = getActiveFocusItemId();
+  overlayLayer.classList.toggle("has-focus", Boolean(focusId));
 
   // 阅卷模式下，在每个 M1 选择题大框外沿渲染汇总统计标签（单选对错/多选对漏错/区得分）
   if (pgGrade && pgGrade.has_schema && Array.isArray(pgGrade.choice_zones)) {
@@ -662,7 +725,7 @@ function renderOverlays() {
                 const res = await api("/api/review/set-choice", { page_id: p.id, item_id: it.id, answer: nv, reviewer: REVIEWER || "审阅员" });
                 if (res.feedback) state.feedback = res.feedback;
                 await hotReloadResults(false);
-                toast(`✓ 第 ${it.number || "?"} 题已改为 ${nv}`, 1500);
+                toast(`第 ${it.number || "?"} 题已改为 ${nv}`, 1500);
                 return;
               } catch (err) { toast(err.message, 2500); }
             }
@@ -688,13 +751,18 @@ function renderOverlays() {
       );
       let gCls = "";
       if (cg && cg.status) gCls = " grade-" + cg.status;
-      chip.className = "overlay-chip overlay-choice" + gCls + (low && !gCls ? " low-conf" : "") + (edited ? " edited" : "");
+      chip.dataset.itemId = it.id;
+      chip.className = "overlay-chip overlay-choice"
+        + gCls
+        + (low && !gCls ? " low-conf" : "")
+        + (edited ? " edited" : "")
+        + (focusId && focusId === it.id ? " active" : "");
       const ans = getChoiceDisplayAnswer(it);
       const conf = state.showConf ? (" " + choiceConfText(it)) : "";
       const scTag = cg ? (cg.status === "correct" ? ` +${fmtScoreNum(cg.earned)}` : (cg.status === "partial" ? ` +${fmtScoreNum(cg.earned)}` : ` 0`)) : "";
       chip.textContent = `${it.number || "?"}:${ans}${scTag}${conf}`;
-      const h = Math.max(11, Math.min(19, Math.floor(bh)));
-      const fs = Math.max(9, Math.min(12, Math.round(h * 0.72)));
+      const h = Math.max(15, Math.min(24, Math.floor(bh * 1.05)));
+      const fs = Math.max(11.5, Math.min(15, Math.round(h * 0.72)));
       chip.style.height = h + "px";
       chip.style.fontSize = fs + "px";
       chip.style.left = Math.round(sx1) + "px";
@@ -702,6 +770,8 @@ function renderOverlays() {
       const ruleTip = isChoiceRuleInferred(it) ? " · 题号由几何连续性规则推算补全（非OCR）" : "";
       const stdTip = cg ? ` · 标准答案 ${cg.standard}（得分 ${fmtScoreNum(cg.earned)}/${fmtScoreNum(cg.possible)}）` : "";
       chip.title = `第 ${it.number || "?"} 题：${ans}${stdTip}${ruleTip}（单击原地改选项）`;
+      chip.onmouseenter = () => setHoverCanvasItem(it.id);
+      chip.onmouseleave = () => scheduleHoverClear();
       chip.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       chip.onclick = (e) => {
         e.stopPropagation();
@@ -731,7 +801,7 @@ function renderOverlays() {
             try {
               const res = await api("/api/review/set-text", { page_id: p.id, item_id: it.id, text: inp.value.trim(), reviewer: REVIEWER || "审阅员" });
               if (res.feedback) state.feedback = res.feedback;
-              toast("✓ 姓名学号已更新", 1400);
+              toast("姓名学号已更新", 1400);
             } catch (err) { toast(err.message, 2500); }
           }
           draw();
@@ -748,11 +818,16 @@ function renderOverlays() {
       }
       const chip = document.createElement("div");
       const edited = Boolean(state.itemEdits[it.id] || ((state.feedback.items || {})[it.id] || {}).correction);
-      chip.className = "overlay-chip overlay-identity" + (edited ? " edited" : "");
+      chip.dataset.itemId = it.id;
+      chip.className = "overlay-chip overlay-identity"
+        + (edited ? " edited" : "")
+        + (focusId && focusId === it.id ? " active" : "");
       chip.textContent = getIdentityCompactText(it);
       chip.style.left = Math.round(Math.max(4, sx1)) + "px";
-      chip.style.top = Math.round(Math.max(4, sy1 - 22)) + "px";
+      chip.style.top = Math.round(Math.max(4, sy1 - 26)) + "px";
       chip.title = "单击原地修改姓名/学号";
+      chip.onmouseenter = () => setHoverCanvasItem(it.id);
+      chip.onmouseleave = () => scheduleHoverClear();
       chip.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       chip.onclick = (e) => {
         e.stopPropagation();
@@ -768,10 +843,9 @@ function renderOverlays() {
   });
 
   if (fillRows.length) {
-    // 悬停模式 & 右侧总览栏模式共用卷面右上角紧凑题号徽章（零遮挡手写、零蜘蛛网连线）
-    const isHoverMode = state.fillDisplayMode === "hover";
-    const lockedId = isHoverMode ? getLockedFillItemId() : null;
-    const activeId = isHoverMode ? (lockedId || state.hoverItemId) : (state.hoverItemId || state.selectedItemId);
+    // 无论右侧总览栏是否开启，卷面右上角题号徽章均支持悬停弹出气泡 + 点击固定编辑
+    const lockedId = getLockedFillItemId();
+    const popId = getFloatingPopoverItemId();
     let popRow = null;
     fillRows.forEach(row => {
       const { it } = row;
@@ -779,9 +853,9 @@ function renderOverlays() {
       const isPending = !edited && !it.transcription && (it.status === "等待视觉转录" || it.status === "等待豆包");
       const isFailed = !edited && !it.transcription && (it.status === "调用失败" || it.status === "结构异常" || Boolean(it.error));
       const hasBlank = !edited && hasUnansweredBlank(it);
-      const isActive = Boolean(activeId && it.id === activeId);
+      const isActive = Boolean(focusId && it.id === focusId);
       const isPinned = Boolean(lockedId && it.id === lockedId);
-      if (isHoverMode && isActive && !state.editingPopItemId) popRow = row;
+      if (popId && it.id === popId) popRow = row;
 
       const qno = (it.transcription && it.transcription.question_number) || it.number || "?";
       const tag = document.createElement("div");
@@ -790,8 +864,12 @@ function renderOverlays() {
         + (edited ? " edited" : (isFailed ? " failed" : (isPending ? " pending" : "")))
         + (isActive ? " active" : "")
         + (isPinned ? " pinned" : "");
-      const prefix = isPinned ? "📌 " : (edited ? "✓ " : (isFailed ? "⚠ " : (isPending ? "⏳ " : "")));
-      tag.textContent = `${prefix}${qno}`;
+      const icoHtml = isPinned
+        ? uiIcon("pin", "ui-ico-xs")
+        : (edited ? uiIcon("check", "ui-ico-xs")
+        : (isFailed ? uiIcon("alert", "ui-ico-xs")
+        : (isPending ? uiIcon("loader", "ui-ico-xs ui-ico-spin") : "")));
+      tag.innerHTML = `${icoHtml}<span>${escHtml(qno)}</span>`;
       if (hasBlank) {
         const dot = document.createElement("span");
         dot.className = "mini-dot";
@@ -800,31 +878,15 @@ function renderOverlays() {
       }
       tag.style.left = "0px";
       tag.style.top = "-9999px";
-      tag.title = isHoverMode
-        ? `第 ${qno} 题（悬停预览，点击固定改字）`
-        : `第 ${qno} 题（点击在右侧总览栏定位并高亮）`;
+      tag.title = `第 ${qno} 题（悬停预览，点击固定改字）`;
       tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
-      if (isHoverMode) {
-        tag.onmouseenter = () => setHoverFillItem(it.id);
-        tag.onmouseleave = () => scheduleHoverClear();
-        tag.onclick = (e) => { e.stopPropagation(); pinFillItem(it.id); };
-      } else {
-        tag.onmouseenter = () => {
-          if (state.hoverItemId !== it.id) { state.hoverItemId = it.id; syncOverviewHighlightOnly(false); }
-        };
-        tag.onmouseleave = () => {
-          if (state.hoverItemId === it.id) { state.hoverItemId = null; syncOverviewHighlightOnly(false); }
-        };
-        tag.onclick = (e) => {
-          e.stopPropagation();
-          state.selectedItemId = it.id;
-          syncOverviewHighlightOnly(true);
-        };
-      }
+      tag.onmouseenter = () => setHoverCanvasItem(it.id);
+      tag.onmouseleave = () => scheduleHoverClear();
+      tag.onclick = (e) => { e.stopPropagation(); pinFillItem(it.id); };
       overlayLayer.appendChild(tag);
       // 嵌在题框右上角内侧（紧贴框内右边缘，彻底避免压到上一题答案或遮挡左侧手写开头）
-      const tw = tag.offsetWidth || 24;
-      const th = tag.offsetHeight || 16;
+      const tw = tag.offsetWidth || 28;
+      const th = tag.offsetHeight || 18;
       const insideLeft = Math.max(Math.round(row.sx1 + 2), Math.round(row.sx2 - tw - 3));
       const insideTop = (row.sy2 - row.sy1 >= th + 4)
         ? Math.round(row.sy1 + 2)
@@ -832,7 +894,7 @@ function renderOverlays() {
       tag.style.left = Math.max(4, Math.min(rect.width - tw - 4, insideLeft)) + "px";
       tag.style.top = Math.max(4, insideTop) + "px";
     });
-    if (isHoverMode && popRow) {
+    if (popRow) {
       renderFillHoverPopover(popRow, rect);
     }
   }
@@ -845,16 +907,17 @@ function openInlineEditor(it) {
   if (!it) return;
   state.selectedItemId = it.id;
   state.hoverItemId = it.id;
+  state.hoverSource = "canvas";
   state.editingPopItemId = null;
   if (it.kind === "choice" || it.kind === "identity") {
     state.inlineBlankEdit = null;
     state.inlineChipEdit = { itemId: it.id, kind: it.kind };
   } else if (it.kind === "fill") {
-    if (state.fillDisplayMode === "hover") state.pinnedItemId = it.id;
+    state.pinnedItemId = it.id;
     state.inlineChipEdit = null;
     const slots = getOrderedFillSlotsJS(it);
     if (slots.length) {
-      state.inlineBlankEdit = { itemId: it.id, sub: slots[0].sub, blank: slots[0].blank };
+      state.inlineBlankEdit = { itemId: it.id, sub: slots[0].sub, blank: slots[0].blank, source: "pop" };
     }
     refreshOverviewPanel();
   }
@@ -885,14 +948,14 @@ function renderInlinePop(it) {
     pop.innerHTML = `
       <div class="inline-pop-head">
         <span>修改第 ${escHtml(it.number || "?")} 题答案</span>
-        <button id="popClose" style="padding:2px 7px;font-size:11px;">✕</button>
+        <button id="popClose" style="padding:3px 6px;font-size:11px;">${uiIcon("x", "ui-ico-xs")}</button>
       </div>
       ${ruleBanner}
       <input id="popInput" placeholder="输入选项如 A / BD" style="font-weight:700;text-transform:uppercase;">
       <div class="inline-pop-foot">
         <span>${escHtml(choiceConfText(it) || "回车保存")}</span>
         <div style="display:flex;gap:6px;">
-          ${showTrust ? `<button id="popTrust" style="padding:3px 9px;background:#15803d;color:#fff;border-color:#15803d;font-weight:600;">✓ 信任无误</button>` : ""}
+          ${showTrust ? `<button id="popTrust" style="padding:3px 9px;background:#15803d;color:#fff;border-color:#15803d;font-weight:600;">${uiIcon("check", "ui-ico-xs")}<span>信任无误</span></button>` : ""}
           <button class="btn-primary" id="popSave" style="padding:3px 10px;">确定</button>
         </div>
       </div>
@@ -935,13 +998,13 @@ function renderInlinePop(it) {
     pop.innerHTML = `
       <div class="inline-pop-head">
         <span>修改 ${escHtml(title)} 识别文字</span>
-        <button id="popClose" style="padding:2px 7px;font-size:11px;">✕</button>
+        <button id="popClose" style="padding:3px 6px;font-size:11px;">${uiIcon("x", "ui-ico-xs")}</button>
       </div>
       <textarea id="popTa" rows="4"></textarea>
       <div class="inline-pop-foot">
         <span>Ctrl+Enter 确定 · Esc 取消</span>
         <div style="display:flex;gap:6px;">
-          ${showTrust ? `<button id="popTrust" style="padding:3px 9px;background:#15803d;color:#fff;border-color:#15803d;font-weight:600;">✓ 信任无误</button>` : ""}
+          ${showTrust ? `<button id="popTrust" style="padding:3px 9px;background:#15803d;color:#fff;border-color:#15803d;font-weight:600;">${uiIcon("check", "ui-ico-xs")}<span>信任无误</span></button>` : ""}
           <button class="btn-primary" id="popSave" style="padding:3px 10px;">确定</button>
         </div>
       </div>

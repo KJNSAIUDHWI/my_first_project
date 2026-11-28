@@ -90,6 +90,7 @@ async function openPage(idx, skipDirtyWarn = false, skipLockWarn = false) {
   state.selectedItemId = null;
   state.pinnedItemId = null;
   state.hoverItemId = null;
+  state.hoverSource = null;
   state.hoverInPopover = false;
   state.selectedBoxIdx = -1;
   state.editingPopItemId = null;
@@ -130,11 +131,11 @@ function updateTopbar() {
   $("topPageTitle").textContent = p ? `${state.pageIdx + 1}/${state.pages.length} · ${p.name}` : "无试卷";
   $("leftSummary").textContent = `${state.pages.filter(isPageDone).length}/${state.pages.length}`;
   $("btnPrev").disabled = state.pageIdx <= 0;
-  $("btnPrev").textContent = `← 上一张 (${primaryKeyLabel("prevPage")})`;
-  $("btnSubmitNext").textContent = state.pageIdx < state.pages.length - 1
-    ? `✓ 确认并下一张 (${primaryKeyLabel("nextSubmit")})`
-    : `✓ 确认并保存 (${primaryKeyLabel("nextSubmit")})`;
-  $("btnModeEdit").textContent = `✎ 调框 (${primaryKeyLabel("toggleMode")})`;
+  $("btnPrev").innerHTML = `${uiIcon("arrowLeft")}<span>上一张 (${escHtml(primaryKeyLabel("prevPage"))})</span>`;
+  $("btnSubmitNext").innerHTML = state.pageIdx < state.pages.length - 1
+    ? `${uiIcon("check")}<span>确认并下一张 (${escHtml(primaryKeyLabel("nextSubmit"))})</span>`
+    : `${uiIcon("check")}<span>确认并保存 (${escHtml(primaryKeyLabel("nextSubmit"))})</span>`;
+  $("btnModeEdit").innerHTML = `${uiIcon("crop")}<span>调框 (${escHtml(primaryKeyLabel("toggleMode"))})</span>`;
   $("btnFit").textContent = `适配 (${primaryKeyLabel("fitCanvas")})`;
 
   $("btnModeView").className = "mode-btn" + (state.mode === "view" ? " active" : "");
@@ -142,7 +143,7 @@ function updateTopbar() {
   const msPill = $("modeSwitchPill");
   if (msPill) msPill.dataset.mode = state.mode;
   const pgGrade = getPageGrading(p);
-  $("btnModeView").textContent = (pgGrade && state.workMode === "grading") ? "👁 看分数" : "👁 看答案";
+  $("btnModeView").innerHTML = `${uiIcon("eye")}<span>${(pgGrade && state.workMode === "grading") ? "看分数" : "看答案"}</span>`;
 
   const wp = $("revWorkPill");
   if (wp) {
@@ -172,13 +173,13 @@ function updateTopbar() {
       umBtn.classList.add("show");
       if (state.workMode === "grading") {
         umBtn.classList.add("subtle");
-        umBtn.textContent = state.showUnmatchedFills
-          ? `👁 显示中(${pageUmCnt}无题号) · 隐藏`
-          : `已隐藏 ${pageUmCnt} 无题号框`;
+        umBtn.innerHTML = state.showUnmatchedFills
+          ? `${uiIcon("eye", "ui-ico-sm")}<span>显示中(${pageUmCnt}无题号) · 隐藏</span>`
+          : `${uiIcon("eyeOff", "ui-ico-sm")}<span>已隐藏 ${pageUmCnt} 无题号框</span>`;
         umBtn.title = "改卷模式下默认隐藏未匹配到大题题号的填空框；点击可临时切换显隐";
       } else {
         umBtn.classList.remove("subtle");
-        umBtn.textContent = `🧹 清理无题号框 (页${pageUmCnt}/批${batchUmCnt})`;
+        umBtn.innerHTML = `${uiIcon("eraser", "ui-ico-sm")}<span>清理无题号框 (页${pageUmCnt}/批${batchUmCnt})</span>`;
         umBtn.title = "迭代模式：一键去除未匹配到大题题号的 M3 填空框（支持当前页或整批，清理前自动备份）";
       }
     } else {
@@ -188,15 +189,15 @@ function updateTopbar() {
 
   const fillBtn = $("btnFillDisplayMode");
   if (fillBtn) {
-    fillBtn.textContent = state.fillDisplayMode === "hover" ? "💬 悬停" : "📋 侧栏总览";
-    fillBtn.classList.toggle("btn-ai-soft", state.fillDisplayMode === "margin");
+    const overviewOpen = state.fillDisplayMode === "margin";
+    fillBtn.innerHTML = `${uiIcon("panelRight")}<span>侧栏总览</span>`;
+    fillBtn.classList.toggle("btn-ai-soft", overviewOpen);
+    fillBtn.setAttribute("aria-pressed", overviewOpen ? "true" : "false");
     fillBtn.style.display = state.mode === "view" ? "" : "none";
   }
   $("canvasHint").textContent = state.mode === "edit"
     ? `左键长按拖画新框 · 单击选中后缩放/移动 · 右键删框 · ${primaryKeyLabel("recognizeBox")} 识别选中框 · Ctrl+Z 撤销`
-    : (state.fillDisplayMode === "hover"
-        ? `滑过预览 · 点题框📌固定 · 单击胶囊改字 · 双击单空重识 · Alt透视 · ${primaryKeyLabel("toggleMode")} 调框`
-        : `右侧总览栏 · 点题头定位原卷 · 单击胶囊改字 · 双击单空重识 · ${primaryKeyLabel("toggleMode")} 调框`);
+    : `滑过框预览 · 点框固定改字 · 单击胶囊编辑 · 双击单空重识 · Alt 透视 · ${primaryKeyLabel("toggleMode")} 调框`;
   updateWorkloadBar();
   updateLowConfButton();
   updateLiveRunBanner();
@@ -268,10 +269,10 @@ function updateLowConfButton() {
   if (targets.length > 0) {
     const cur = state.lowConfCursor >= 0 ? ((state.lowConfCursor % targets.length) + 1) : 0;
     btn.style.display = "";
-    btn.textContent = cur > 0 ? `⚠ 低置 ${cur}/${targets.length} (${keyTag})` : `⚠ 低置 (${targets.length}) (${keyTag})`;
+    btn.innerHTML = `${uiIcon("alert", "ui-ico-sm")}<span>${cur > 0 ? `低置 ${cur}/${targets.length}` : `低置 (${targets.length})`} (${escHtml(keyTag)})</span>`;
   } else if (findNextLowConfPageIdx() >= 0) {
     btn.style.display = "";
-    btn.textContent = `⚠ 下页低置 (${keyTag})`;
+    btn.innerHTML = `${uiIcon("alert", "ui-ico-sm")}<span>下页低置 (${escHtml(keyTag)})</span>`;
   } else {
     btn.style.display = "none";
   }
@@ -390,9 +391,11 @@ function renderLeftList() {
     row.onclick = () => openPage(idx);
 
     const shortName = p.name.length > 15 ? p.name.slice(-13) : p.name;
-    let badgeHtml = done ? `<span class="badge badge-done">✓ 已审</span>` : `<span class="badge badge-todo">待审</span>`;
-    if (lockedOther) badgeHtml = `<span class="badge badge-lock" title="${escHtml(lk.user)} 正在审阅此页">🔒 ${escHtml(lk.user)}</span>`;
-    else if (lockedMine && idx === state.pageIdx && !done) badgeHtml = `<span class="badge" style="background:#dbeafe;color:#1d4ed8;">✎ 审阅中</span>`;
+    let badgeHtml = done
+      ? `<span class="badge badge-done">${uiIcon("check", "ui-ico-xs")}<span>已审</span></span>`
+      : `<span class="badge badge-todo">待审</span>`;
+    if (lockedOther) badgeHtml = `<span class="badge badge-lock" title="${escHtml(lk.user)} 正在审阅此页">${uiIcon("lock", "ui-ico-xs")}<span>${escHtml(lk.user)}</span></span>`;
+    else if (lockedMine && idx === state.pageIdx && !done) badgeHtml = `<span class="badge" style="background:#dbeafe;color:#1d4ed8;">${uiIcon("pen", "ui-ico-xs")}<span>审阅中</span></span>`;
 
     const subParts = [itemsCnt > 0 ? `${itemsCnt}题` : "无答题区"];
     if (done && doneRec && doneRec.reviewer) subParts.push(`${doneRec.reviewer}审`);
@@ -408,7 +411,7 @@ function renderLeftList() {
       const subEl = row.querySelector(".page-row-sub");
       const pill = document.createElement("span");
       pill.className = "lowconf-pill-btn";
-      pill.textContent = `⚠ ${lowCnt}低置`;
+      pill.innerHTML = `${uiIcon("alert", "ui-ico-xs")}<span>${lowCnt}低置</span>`;
       pill.title = "点击直接定位并放大到该页第 1 个低置信度框";
       pill.onclick = (e) => {
         e.stopPropagation();

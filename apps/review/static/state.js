@@ -130,6 +130,7 @@ const state = {
   itemEdits: {},
   editingPopItemId: null,
   hoverItemId: null,
+  hoverSource: null, // "canvas" | "overview" | null
   hoverInPopover: false,
   resultsMtime: 0,
   lowConfCursor: -1,
@@ -280,11 +281,11 @@ function updateSubboxHudUI() {
   if (st && txt) {
     const labels = st.targets.map(s => (s.sub === "无小题号" ? "" : `(${s.sub})`) + fmtBlankIdx(s.blank)).join("、");
     if (st.busy) {
-      txt.textContent = `⏳ 正在高精度局部重识别 第 ${st.qno || "?"} 题 ${labels} ...`;
+      txt.innerHTML = `${uiIcon("loader", "ui-ico-sm ui-ico-spin")} 正在高精度局部重识别 第 ${escHtml(st.qno || "?")} 题 ${escHtml(labels)} ...`;
     } else if (st.targets.length === 1) {
-      txt.textContent = `🎯 单空聚焦重识别：第 ${st.qno || "?"} 题 ${labels} — 在亮起大框内拖出该横线手写区即自动填入`;
+      txt.innerHTML = `${uiIcon("crosshair", "ui-ico-sm")} 单空聚焦重识别：第 ${escHtml(st.qno || "?")} 题 ${escHtml(labels)} — 在亮起大框内拖出该横线手写区即自动填入`;
     } else {
-      txt.textContent = `🎯 联合重识别 (${st.targets.length} 空)：第 ${st.qno || "?"} 题 ${labels} — 框选时请将对应印刷小题号一并包入`;
+      txt.innerHTML = `${uiIcon("crosshair", "ui-ico-sm")} 联合重识别 (${st.targets.length} 空)：第 ${escHtml(st.qno || "?")} 题 ${escHtml(labels)} — 框选时请将对应印刷小题号一并包入`;
     }
   }
   updateMultiBlankBarUI();
@@ -340,7 +341,7 @@ async function submitSubboxReOcr(box) {
       state.flashSlots[`${st.itemId}|${t.sub}:${t.blank}`] = nowTs;
     });
     const preview = Object.values(res.values || {}).map(v => v || "[空白]").join(" / ");
-    toast(`✓ 局部重识别已回填：${preview}（${res.seconds || 0}s）`, 2800);
+    toast(`局部重识别已回填：${preview}（${res.seconds || 0}s）`, 2800);
     state.subboxTarget = null;
     updateSubboxHudUI();
     updateTopbar();
@@ -411,6 +412,7 @@ async function commitInlineBlankEdit(it, sub, blank, nextVal, moveDir = 0) {
   const valStr = String(nextVal == null ? "" : nextVal).trim();
   const prevMap = getEffectiveFillAnswersJS(it) || {};
   const prevVal = String((prevMap[subS] && prevMap[subS][bkS]) || "").trim();
+  const prevSrc = (state.inlineBlankEdit && state.inlineBlankEdit.source) || "pop";
   state.inlineBlankEdit = null;
   if (valStr !== prevVal) {
     try {
@@ -425,7 +427,7 @@ async function commitInlineBlankEdit(it, sub, blank, nextVal, moveDir = 0) {
       if (res.feedback) state.feedback = res.feedback;
       if (res.grading) state.grading = res.grading;
       state.flashSlots[`${it.id}|${subS}:${bkS}`] = Date.now() + 1400;
-      toast(`✓ 已保存 (${subS === "无小题号" ? "" : subS + "·"}${fmtBlankIdx(bkS)})`, 1400);
+      toast(`已保存 (${subS === "无小题号" ? "" : subS + "·"}${fmtBlankIdx(bkS)})`, 1400);
     } catch (err) {
       toast("保存失败：" + err.message, 3000);
     }
@@ -435,7 +437,7 @@ async function commitInlineBlankEdit(it, sub, blank, nextVal, moveDir = 0) {
     const curI = slots.findIndex(s => s.sub === subS && s.blank === bkS);
     const nxtI = curI + moveDir;
     if (curI >= 0 && nxtI >= 0 && nxtI < slots.length) {
-      state.inlineBlankEdit = { itemId: it.id, sub: slots[nxtI].sub, blank: slots[nxtI].blank };
+      state.inlineBlankEdit = { itemId: it.id, sub: slots[nxtI].sub, blank: slots[nxtI].blank, source: prevSrc };
     }
   }
   updateTopbar();
@@ -459,7 +461,7 @@ async function cycleBlankJudge(it, slotKey, curStatus) {
     });
     if (res.feedback) state.feedback = res.feedback;
     if (res.grading) state.grading = res.grading;
-    const lbl = { correct: "判对 ✓", partial: "判半分 ½", wrong: "判错 ✗", auto: "恢复自动判分" }[nextStatus];
+    const lbl = { correct: "已判对", partial: "已判半分", wrong: "已判错", auto: "已恢复自动判分" }[nextStatus];
     toast(lbl, 1400);
     updateTopbar();
     refreshOverviewPanel();
@@ -663,13 +665,13 @@ function updateLiveRunBanner() {
 
   if (st.includes("识别失败")) {
     banner.className = "live-run-banner show err";
-    txt.textContent = `⚠ ${st}（共 ${pagesN} 页，其中 ${stats.page_failures || 0} 页失败）。请返回工作台查看中文错误诊断与修复建议。`;
+    txt.innerHTML = `${uiIcon("alert", "ui-ico-sm")} ${escHtml(st)}（共 ${pagesN} 页，其中 ${stats.page_failures || 0} 页失败）。请返回工作台查看中文错误诊断与修复建议。`;
   } else if (isResultInProgress(res)) {
     banner.className = "live-run-banner show";
-    txt.textContent = `⚡ 后台自动识别与实时合并进行中（当前已检出 ${pagesN} 页，已出转录 ${transN} 处）… 新出答案会自动刷新，建议等本页答案完整后再点「确认」。`;
+    txt.innerHTML = `${uiIcon("zap", "ui-ico-sm")} 后台自动识别与实时合并进行中（当前已检出 ${pagesN} 页，已出转录 ${transN} 处）… 新出答案会自动刷新，建议等本页答案完整后再点「确认」。`;
   } else if (st.includes("待补跑")) {
     banner.className = "live-run-banner show";
-    txt.textContent = `⚠ 当前批次状态：${st}（可返回工作台点击「补跑失败图块」仅重试失败项，不重复扣费）。`;
+    txt.innerHTML = `${uiIcon("alert", "ui-ico-sm")} 当前批次状态：${escHtml(st)}（可返回工作台点击「补跑失败图块」仅重试失败项，不重复扣费）。`;
   } else {
     banner.className = "live-run-banner";
   }

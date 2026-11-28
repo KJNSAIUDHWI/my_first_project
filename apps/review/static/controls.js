@@ -61,14 +61,14 @@ const TOUR_STEPS = [
   {
     selector: "#canvasHost",
     title: "核对原卷与修改答案",
-    desc: "填空题默认<b>鼠标滑到题框上预览</b>，<b>点一下题框即可 📌 固定气泡</b>再从容改字（顶栏也可一键切「📋 侧栏总览」按题号整齐核对）；单击胶囊改字、双击单空重识，按住 <b>Alt</b> 透视原图。",
+    desc: "滑过任意题框自动压暗周边并高亮显示当前框与答案气泡，<b>点击题框可固定气泡</b>再从容改字；顶栏「侧栏总览」可按需展开或收起右侧全页清单；单击胶囊改字、双击单空重识，按住 <b>Alt</b> 透视原图。",
     onEnter: () => { if (state.mode !== "view") setMode("view"); },
   },
   {
     selector: "#btnLowConf",
     fallbackSelector: "#topPageTitle",
     title: "一键定位低置信度 (L)",
-    desc: "<b>「低置」即低置信度</b>，表示模型对题号、涂卡或标框的识别把握较低。点这里（或按 <b>L</b>）会自动放大跳到对应框并标明原因；核对无误点绿色的 <b>✓ 信任无误</b> 即可消掉橙色提醒。",
+    desc: "<b>「低置」即低置信度</b>，表示模型对题号、涂卡或标框的识别把握较低。点这里（或按 <b>L</b>）会自动放大跳到对应框并标明原因；核对无误点绿色的 <b>信任无误</b> 即可消掉橙色提醒。",
     tryLabel: "试着定位一题",
     onTry: () => { jumpNextLowConf(); },
   },
@@ -83,7 +83,7 @@ const TOUR_STEPS = [
     selector: "#btnMoreMenu",
     fallbackSelector: "#topPageTitle",
     title: "显示选项与自定义快捷键",
-    desc: "点「⚙ 更多」可开关置信度显示、隐藏答案叠加、自定义所有主/副快捷键或再次打开本教程。",
+    desc: "点「更多」可开关置信度显示、隐藏答案叠加、自定义所有主/副快捷键或再次打开本教程。",
     onEnter: () => { if (state.mode !== "view") setMode("view"); },
     tryLabel: "打开键位设置",
     onTry: () => { $("btnKeybinds").click(); },
@@ -160,7 +160,7 @@ function showTourStep(idx) {
     tryRow.style.display = "none";
   }
   $("tourPrev").disabled = tourIdx === 0;
-  $("tourNext").textContent = tourIdx === TOUR_STEPS.length - 1 ? "✓ 完成引导" : "下一步 →";
+  $("tourNext").textContent = tourIdx === TOUR_STEPS.length - 1 ? "完成引导" : "下一步";
   setTimeout(positionTour, 30);
 }
 
@@ -211,6 +211,7 @@ $("btnFillDisplayMode").onclick = () => {
   localStorage.setItem("reviewFillDisplayMode", state.fillDisplayMode);
   state.pinnedItemId = null;
   state.hoverItemId = null;
+  state.hoverSource = null;
   state.hoverInPopover = false;
   if (state.fillDisplayMode === "margin") {
     const leftBar = $("sidebarLeft");
@@ -222,9 +223,9 @@ $("btnFillDisplayMode").onclick = () => {
   renderRightPanel();
   syncRightSidebarVisibility(true);
   draw();
-  toast(state.fillDisplayMode === "hover"
-    ? "已切换为「悬停看答案」（滑过预览，点击题框 📌 固定改字）"
-    : "已切换为「右侧答案总览」（按题号升序排列，点击题头定位原卷）", 2200);
+  toast(state.fillDisplayMode === "margin"
+    ? "已展开右侧答案总览栏（卷面悬停与点框固定同样可用）"
+    : "已收起右侧答案总览栏", 2000);
 };
 $("btnRefreshNow").onclick = () => hotReloadResults(true);
 
@@ -293,6 +294,7 @@ window.addEventListener("keydown", (ev) => {
       state.pinnedItemId = null;
       state.selectedItemId = null;
       state.hoverItemId = null;
+      state.hoverSource = null;
       state.hoverInPopover = false;
       state.focusedLowConf = null;
       refreshOverviewPanel();

@@ -81,6 +81,7 @@ host.addEventListener("mousedown", (ev) => {
       state.selectedItemId = null;
       state.pinnedItemId = null;
       state.hoverItemId = null;
+      state.hoverSource = null;
       state.hoverInPopover = false;
       state.focusedLowConf = null;
       state.inlineBlankEdit = null;
@@ -165,36 +166,42 @@ window.addEventListener("mousemove", (ev) => {
         return;
       }
       const overRightDock = ev.target && ev.target.closest && ev.target.closest("#sidebarRight");
-      if (overRightDock) return;
+      if (overRightDock) {
+        if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+          scheduleHoverClear();
+        }
+        return;
+      }
 
       if (state.showOverlay && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
         const p = currentPage();
-        const hitFill = getPageItems(p).find(it => {
-          if (it.kind !== "fill" || !shouldShowFillInView(it) || !it.box || it.box.length !== 4) return false;
-          const [x1, y1, x2, y2] = it.box;
-          return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
-        });
-        if (state.fillDisplayMode === "hover") {
-          host.style.cursor = hitFill ? "pointer" : "grab";
-          // 一旦点击固定或正在编辑，鼠标滑过其他题框绝不切题、不销毁气泡
-          if (!getLockedFillItemId()) {
-            if (hitFill) {
-              setHoverFillItem(hitFill.id);
-            } else if (state.hoverItemId && !state.hoverInPopover) {
-              scheduleHoverClear();
-            }
-          }
-        } else {
-          // 右侧停靠总览栏模式：悬停原卷题框时双向高亮右侧对应题卡
-          const nextId = hitFill ? hitFill.id : null;
-          host.style.cursor = hitFill ? "pointer" : "grab";
-          if (state.hoverItemId !== nextId) {
-            state.hoverItemId = nextId;
-            syncOverviewHighlightOnly(false);
+        const hitCandidates = getPageItems(p)
+          .filter(it => {
+            if (it.kind === "fill" && !shouldShowFillInView(it)) return false;
+            if (!it.box || it.box.length !== 4) return false;
+            const [x1, y1, x2, y2] = it.box;
+            return ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2;
+          })
+          .sort((a, b) => {
+            const areaA = Math.max(0, (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]));
+            const areaB = Math.max(0, (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]));
+            return areaA - areaB;
+          });
+        const hitItem = hitCandidates[0] || null;
+        host.style.cursor = hitItem ? "pointer" : "grab";
+        // 无论右侧总览栏是否开启，鼠标滑过任意题框均触发聚光压暗 + 半透明高亮蒙版 + 填空气泡预览
+        if (!getLockedFillItemId()) {
+          if (hitItem) {
+            setHoverCanvasItem(hitItem.id);
+          } else if (state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+            scheduleHoverClear();
           }
         }
       } else {
         host.style.cursor = "grab";
+        if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+          scheduleHoverClear();
+        }
       }
     }
     return;
@@ -290,14 +297,8 @@ window.addEventListener("mouseup", () => {
   if (d.type === "view_pending") {
     if (d.hitItem) {
       if (d.hitItem.kind === "fill") {
-        if (state.fillDisplayMode === "hover") {
-          // 点击大题框立即 📌 固定气泡，鼠标移过去改字绝不溜走
-          pinFillItem(d.hitItem.id);
-        } else {
-          // 侧栏总览模式：选中并平滑滚到右侧对应题卡
-          state.selectedItemId = d.hitItem.id;
-          syncOverviewHighlightOnly(true);
-        }
+        // 无论右侧总览栏是否开启，点击大题框均立即固定气泡并联动高亮右侧对应题卡
+        pinFillItem(d.hitItem.id);
       } else {
         openInlineEditor(d.hitItem);
       }
@@ -375,13 +376,18 @@ window.addEventListener("mouseup", () => {
       updateWorkloadBar();
       renderRightPanel();
       if (canVlm) {
-        toast(`已画新框：点「✨ API识别」或按 ${primaryKeyLabel("recognizeBox")} 即可直接调用大模型识别`, 2600);
+        toast(`已画新框：点「API识别」或按 ${primaryKeyLabel("recognizeBox")} 即可直接调用大模型识别`, 2600);
       }
     }
     draw();
   }
 });
 
+host.addEventListener("mouseleave", () => {
+  if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
+    scheduleHoverClear();
+  }
+});
 host.addEventListener("dblclick", () => { if (!state.subboxTarget) { fitCanvas(); draw(); } });
 host.addEventListener("contextmenu", (ev) => ev.preventDefault());
 
@@ -474,6 +480,7 @@ function setMode(m) {
   if (m === "edit") {
     state.pinnedItemId = null;
     state.hoverItemId = null;
+    state.hoverSource = null;
     state.hoverInPopover = false;
   }
   updateTopbar();

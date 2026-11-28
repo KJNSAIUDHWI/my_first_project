@@ -148,7 +148,21 @@ function drawCanvasOnly() {
 
   const p = currentPage();
   const inv = 1 / Math.max(0.15, state.scale);
+  const pgGrade = (state.mode === "view" && p) ? getPageGrading(p) : null;
+  const lockedId = (state.mode === "view") ? getLockedFillItemId() : null;
+  const focusId = (state.mode === "view" && !state.subboxTarget)
+    ? (lockedId || state.hoverItemId || state.selectedItemId)
+    : null;
+  const focusItem = (focusId && p)
+    ? getPageItems(p).find(it =>
+        it.id === focusId
+        && (it.kind !== "fill" || shouldShowFillInView(it))
+        && it.box && it.box.length === 4
+      ) || null
+    : null;
 
+  ctx.save();
+  if (focusItem) ctx.globalAlpha = 0.32;
   visibleBoxIndices().forEach(idx => {
     const b = state.workingBoxes[idx];
     const meta = BOX_META[b.cls] || { color: "#2563eb", name: String(b.cls) };
@@ -186,7 +200,7 @@ function drawCanvasOnly() {
       ctx.font = `600 ${Math.max(10, 11.5 * inv)}px sans-serif`;
       const confVal = typeof b.confidence === "number" ? b.confidence : (typeof b.conf === "number" ? b.conf : null);
       const confSuffix = state.showConf ? (confVal !== null ? ` ${Math.round(confVal * 100)}%` : " 人工") : "";
-      const recogSuffix = isRecogBusy ? " · ⏳识别中" : (isVlmRecogCls(b.cls) && b._needsRecog ? " · 待识别" : "");
+      const recogSuffix = isRecogBusy ? " · 识别中" : (isVlmRecogCls(b.cls) && b._needsRecog ? " · 待识别" : "");
       const tag = meta.name + confSuffix + recogSuffix;
       const tw = ctx.measureText(tag).width + 8 * inv;
       const th = 16 * inv;
@@ -200,31 +214,34 @@ function drawCanvasOnly() {
       ctx.fillText(tag, x1 + 4 * inv, Math.max(12 * inv, y1 - 3.5 * inv));
     }
   });
+  ctx.restore();
 
   if (state.mode === "view" && p) {
-    const pgGrade = getPageGrading(p);
     // 阅卷模式下绘制选择题大框（M1 cls=1）淡绿边界
     if (pgGrade && pgGrade.has_schema && Array.isArray(pgGrade.choice_zones)) {
+      ctx.save();
+      if (focusItem) ctx.globalAlpha = 0.34;
       pgGrade.choice_zones.forEach(cz => {
         if (!cz.box || cz.box.length !== 4) return;
         const [zx1, zy1, zx2, zy2] = cz.box;
-        ctx.save();
         ctx.lineWidth = 2.0 * inv;
         ctx.strokeStyle = "rgba(22, 163, 74, 0.72)";
         ctx.setLineDash([6 * inv, 4 * inv]);
         ctx.strokeRect(zx1, zy1, zx2 - zx1, zy2 - zy1);
-        ctx.restore();
       });
+      ctx.restore();
     }
+    // 非焦点项（聚光时整体降亮，避免喧宾夺主）
+    ctx.save();
+    if (focusItem) ctx.globalAlpha = 0.34;
     getPageItems(p).forEach(it => {
       if (it.kind === "fill" && !shouldShowFillInView(it)) return;
+      if (focusItem && it.id === focusItem.id) return;
       const [x1, y1, x2, y2] = it.box || [0, 0, 0, 0];
-      const isPinned = it.id === state.pinnedItemId;
-      const isSel = isPinned || it.id === state.selectedItemId || it.id === state.hoverItemId;
       if (it.kind === "choice") {
         const cg = pgGrade && pgGrade.items ? pgGrade.items[it.id] : null;
         const low = isLowConfChoice(it);
-        ctx.lineWidth = (isSel ? 2.6 : (cg ? 2.0 : 1.4)) * inv;
+        ctx.lineWidth = (cg ? 2.0 : 1.4) * inv;
         if (cg && cg.status === "correct") {
           ctx.fillStyle = "rgba(22, 163, 74, 0.12)";
           ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
@@ -238,17 +255,56 @@ function drawCanvasOnly() {
           ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
           ctx.strokeStyle = "#dc2626";
         } else {
-          ctx.strokeStyle = isSel ? "#2563eb" : (low ? "#d97706" : "#15803d");
+          ctx.strokeStyle = low ? "#d97706" : "#15803d";
         }
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-      } else if (isSel) {
-        ctx.fillStyle = isPinned ? "rgba(37, 99, 235, 0.11)" : "rgba(37, 99, 235, 0.07)";
-        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.lineWidth = (isPinned ? 3.0 : 2.4) * inv;
-        ctx.strokeStyle = isPinned ? "#1d4ed8" : "#2563eb";
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
       }
     });
+    ctx.restore();
+
+    // 悬停/固定聚光效果：压暗卷面其余区域亮度 + 为当前选中框叠加清晰半透明蒙版与亮边
+    if (focusItem) {
+      const [fx1, fy1, fx2, fy2] = focusItem.box;
+      ctx.save();
+      ctx.fillStyle = "rgba(15, 23, 42, 0.22)";
+      ctx.beginPath();
+      ctx.rect(0, 0, state.img.width, state.img.height);
+      ctx.rect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+      ctx.fill("evenodd");
+      ctx.restore();
+
+      const isPinned = focusItem.id === lockedId;
+      const isEdited = Boolean(state.itemEdits[focusItem.id] || ((state.feedback.items || {})[focusItem.id] || {}).correction);
+      let fillTint = isPinned ? "rgba(37, 99, 235, 0.19)" : "rgba(37, 99, 235, 0.14)";
+      let strokeClr = isPinned ? "#1d4ed8" : "#2563eb";
+      let glowClr = "rgba(37, 99, 235, 0.38)";
+      if (focusItem.kind === "choice") {
+        const cg = pgGrade && pgGrade.items ? pgGrade.items[focusItem.id] : null;
+        if (cg && cg.status === "correct") {
+          fillTint = "rgba(22, 163, 74, 0.22)"; strokeClr = "#16a34a"; glowClr = "rgba(22, 163, 74, 0.38)";
+        } else if (cg && cg.status === "partial") {
+          fillTint = "rgba(234, 88, 12, 0.22)"; strokeClr = "#ea580c"; glowClr = "rgba(234, 88, 12, 0.38)";
+        } else if (cg && cg.status === "wrong") {
+          fillTint = "rgba(220, 38, 38, 0.22)"; strokeClr = "#dc2626"; glowClr = "rgba(220, 38, 38, 0.38)";
+        } else {
+          fillTint = "rgba(37, 99, 235, 0.18)"; strokeClr = "#2563eb"; glowClr = "rgba(37, 99, 235, 0.38)";
+        }
+      } else if (isEdited) {
+        fillTint = isPinned ? "rgba(22, 163, 74, 0.18)" : "rgba(22, 163, 74, 0.14)";
+        strokeClr = "#15803d";
+        glowClr = "rgba(22, 163, 74, 0.34)";
+      }
+
+      ctx.save();
+      ctx.fillStyle = fillTint;
+      ctx.fillRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+      ctx.shadowColor = glowClr;
+      ctx.shadowBlur = 12 * inv;
+      ctx.lineWidth = (isPinned ? 3.2 : 2.6) * inv;
+      ctx.strokeStyle = strokeClr;
+      ctx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+      ctx.restore();
+    }
   }
 
   // 局部真子集小框聚焦重识别：压暗父大框外区域 + 亮起父大框引导边 + 绘制真子集小框
@@ -486,9 +542,9 @@ async function recognizeBoxIndices(indices) {
     }
     const secTag = res.elapsed_seconds ? `耗时 ${res.elapsed_seconds}s` : "";
     if (okCnt === 1 && !failCnt) {
-      toast(`✓ 已识别 ${firstQno}（${secTag}${costTag}），切回「看答案」即可查看`, 3200);
+      toast(`已识别 ${firstQno}（${secTag}${costTag}），切回「看答案」即可查看`, 3200);
     } else if (okCnt > 0) {
-      toast(`✓ 已识别 ${okCnt} 个框${failCnt ? `，${failCnt} 个失败` : ""}（${secTag}${costTag}）`, 3400);
+      toast(`已识别 ${okCnt} 个框${failCnt ? `，${failCnt} 个失败` : ""}（${secTag}${costTag}）`, 3400);
     } else {
       toast(`识别失败：${res.error || "大模型未返回有效结果"}`, 4000);
     }
