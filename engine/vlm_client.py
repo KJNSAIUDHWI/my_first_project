@@ -1,6 +1,7 @@
 """识别拼图、严格 JSON 校验与多运营商 OpenAI 兼容视觉大模型调用；不写人工标签。"""
 import base64
 import hashlib
+import io
 import json
 import os
 import re
@@ -516,28 +517,40 @@ def parse_record(record, grid):
 
 
 class SquarePacker:
-    """在线shelf排版：边检测边完成拼图；仅超大单块缩小，不为塞更多题缩字。"""
-    def __init__(self, out, size=1500, prefix='g', max_items: int | None = None):
+    """在线shelf排版：边检测边完成拼图；仅超大单块缩小，不为塞更多题缩字。支持内存暂存模式（不写 grids/*.png）。"""
+    def __init__(self, out, size=1500, prefix='g', max_items: int | None = None, in_memory: bool = False):
         self.out, self.size = Path(out), size
         self.prefix = prefix
         self.max_items = max(1, int(max_items)) if max_items is not None else None
+        self.in_memory = bool(in_memory)
+        self._mem_buffers: dict[str, bytes] = {}
         self.index = 0
         try:
             self.font = ImageFont.truetype('C:/Windows/Fonts/arial.ttf', 24)
         except OSError:
             self.font = ImageFont.load_default()
+        self.canvas = None
         self._reset()
 
     def _reset(self):
+        if getattr(self, 'canvas', None) is not None:
+            try:
+                self.canvas.close()
+            except Exception:
+                pass
         self.canvas = Image.new('RGB', (self.size, self.size), 'white')
         self.items = []
         self.free = [(12, 12, self.size-24, self.size-24)]
 
+    def pop_buffer(self, grid_id: str) -> bytes | None:
+        """取出并立即从打包器移除内存拼图字节流，防止内存累积。"""
+        return self._mem_buffers.pop(str(grid_id or ''), None)
+
     def add(self, item, image):
-        image = image.convert('RGB')
+        converted = image.convert('RGB') if image.mode != 'RGB' else image
         max_w, max_h = self.size - 24, self.size - 60
-        scale = min(1., max_w / image.width, max_h / image.height)
-        resized = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS) if scale < 1 else image
+        scale = min(1., max_w / converted.width, max_h / converted.height)
+        resized = converted.resize((max(1, round(converted.width * scale)), max(1, round(converted.height * scale))), Image.Resampling.LANCZOS) if scale < 1 else converted
         w, h = resized.size
         finished = None
         if self.max_items is not None and len(self.items) >= self.max_items:
@@ -557,20 +570,47 @@ class SquarePacker:
         ImageDraw.Draw(self.canvas).text((x, y), 'ID ' + item['id'], fill='black', font=self.font)
         self.canvas.paste(resized, (x, y + 32))
         self.items.append({**item, 'grid_box': [x, y + 32, x + w, y + 32 + h],
-                           'scale': scale, 'original_size': list(image.size)})
+                           'scale': scale, 'original_size': list(converted.size)})
+        if resized is not converted:
+            try:
+                resized.close()
+            except Exception:
+                pass
+        if converted is not image:
+            try:
+                converted.close()
+            except Exception:
+                pass
         return finished
 
     def finish(self):
         if not self.items:
             return None
         name = f'{self.prefix}{self.index:03d}'
-        path = self.out / 'grids' / (name + '.png')
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.canvas.save(path)
-        result = {'id': name, 'image': path.relative_to(self.out).as_posix(), 'size': [self.size, self.size],
-                  'sha256': digest(path.read_bytes()), 'items': self.items,
-                  'occupied_fraction': sum((i['grid_box'][2]-i['grid_box'][0])*(i['grid_box'][3]-i['grid_box'][1]) for i in self.items) / self.size**2}
-        save_json(path.with_suffix('.json'), result)
+        occ = sum((i['grid_box'][2]-i['grid_box'][0])*(i['grid_box'][3]-i['grid_box'][1]) for i in self.items) / self.size**2
+        if self.in_memory:
+            buf = io.BytesIO()
+            self.canvas.save(buf, format='PNG', compress_level=3)
+            raw_bytes = buf.getvalue()
+            buf.close()
+            self._mem_buffers[name] = raw_bytes
+            result = {
+                'id': name,
+                'image': '',
+                'in_memory': True,
+                'size': [self.size, self.size],
+                'sha256': digest(raw_bytes),
+                'items': self.items,
+                'occupied_fraction': occ,
+            }
+        else:
+            path = self.out / 'grids' / (name + '.png')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.canvas.save(path)
+            result = {'id': name, 'image': path.relative_to(self.out).as_posix(), 'size': [self.size, self.size],
+                      'sha256': digest(path.read_bytes()), 'items': self.items,
+                      'occupied_fraction': occ}
+            save_json(path.with_suffix('.json'), result)
         self.index += 1
         self._reset()
         return result
@@ -597,13 +637,17 @@ class VlmClient:
         self.serial = threading.Semaphore(1)
         self.throttled = threading.Event()
 
-    def call(self, grid, refresh=False, run_id: str | None = None):
+    def call(self, grid, refresh=False, run_id: str | None = None, schema: dict | None = None, image_bytes: bytes | None = None):
         from engine.run_log import now_iso
-        content = PROMPT + '\n本次图块清单（只标明来源，不含参考答案）：\n' + json.dumps(
+        from engine.exam_schema import build_dynamic_prompt_hint
+        dynamic_hint = build_dynamic_prompt_hint(grid.get('items') or [], schema) if schema else ''
+        content = PROMPT + dynamic_hint + '\n本次图块清单（只标明来源，不含参考答案）：\n' + json.dumps(
             [{'id': i['id'], 'kind': i['kind']} for i in grid['items']], ensure_ascii=False)
+        raw_img = image_bytes if image_bytes is not None else (self.out / grid['image']).read_bytes()
         image_url_obj = {
-            'url': 'data:image/png;base64,' + base64.b64encode((self.out/grid['image']).read_bytes()).decode(),
+            'url': 'data:image/png;base64,' + base64.b64encode(raw_img).decode(),
         }
+        del raw_img
         if self.is_doubao:
             image_url_obj['detail'] = 'high'
         request = {
@@ -727,6 +771,115 @@ class VlmClient:
         record['seconds'] = round(time.monotonic() - start, 3)
         save_json(path, record)
         return record
+
+    def transcribe_subbox(
+        self,
+        image: Image.Image,
+        *,
+        question_number: str = '',
+        targets: list[dict],
+        timeout: float = 90.0,
+    ) -> dict:
+        """对大框内真子集小框执行精准局部重识别（支持单空与几何连续多空，绝不传入标准答案）。"""
+        from engine.exam_schema import build_subbox_prompt
+
+        if not targets:
+            raise ValueError('至少需要指定 1 个目标空位')
+        if not self.key and self.transport is None:
+            raise ValueError('未配置视觉大模型 API Key（请先在工作台配置 VLM_API_KEY 或 ARK_API_KEY）')
+
+        prompt = build_subbox_prompt(question_number, targets)
+        im_rgb = image.convert('RGB')
+        # 局部小图若过小则适度放大以利于视觉模型读清小数点与符号
+        if min(im_rgb.width, im_rgb.height) < 28:
+            scale = max(2.0, 28.0 / max(1, min(im_rgb.width, im_rgb.height)))
+            im_rgb = im_rgb.resize((max(28, int(im_rgb.width * scale)), max(28, int(im_rgb.height * scale))), Image.Resampling.BICUBIC)
+        buf = io.BytesIO()
+        im_rgb.save(buf, format='PNG', compress_level=3)
+        b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+        buf.close()
+
+        img_obj = {'url': 'data:image/png;base64,' + b64}
+        if self.is_doubao:
+            img_obj['detail'] = 'high'
+        request = {
+            'model': self.model,
+            'stream': False,
+            'response_format': {'type': 'json_object'},
+            'messages': [{'role': 'user', 'content': [
+                {'type': 'text', 'text': prompt},
+                {'type': 'image_url', 'image_url': img_obj},
+            ]}],
+        }
+        if self.is_doubao:
+            request['thinking'] = {'type': 'disabled'}
+            request['max_completion_tokens'] = 2048
+        else:
+            request['max_tokens'] = 2048
+
+        t0 = time.monotonic()
+        if self.transport is not None:
+            resp = self.transport(request)
+        else:
+            body = json.dumps(request, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(
+                self.endpoint,
+                body,
+                {
+                    'Authorization': 'Bearer ' + self.key,
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'AutoGradeWorkbench/2.0',
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                resp = json.loads(r.read().decode('utf-8', errors='replace'))
+
+        raw_text = str((((resp.get('choices') or [{}])[0].get('message') or {}).get('content')) or '').strip()
+        cleaned = _strip_json_fences(raw_text)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # 容错：单反斜杠 LaTeX 转义补救
+            repaired = re.sub(r'(?<!\\)\\(?![\\/"bfnrtu])', r'\\\\', cleaned)
+            data = json.loads(repaired)
+        if not isinstance(data, dict):
+            raise ValueError('局部重识别返回的不是 JSON 对象')
+
+        values: dict[str, str] = {}
+        if len(targets) == 1:
+            t = targets[0]
+            slot_key = f"{t.get('sub') or '无小题号'}:{t.get('blank') or '1'}"
+            if 'text' in data:
+                val = data.get('text')
+            elif isinstance(data.get('values'), dict) and slot_key in data['values']:
+                val = data['values'][slot_key]
+            elif isinstance(data.get('values'), dict) and data['values']:
+                val = next(iter(data['values'].values()))
+            else:
+                val = next((v for v in data.values() if isinstance(v, str)), '')
+            values[slot_key] = str(val if val is not None else '').strip()
+        else:
+            raw_vals = data.get('values') if isinstance(data.get('values'), dict) else data
+            for t in targets:
+                sub = str(t.get('sub') or '无小题号')
+                blank = str(t.get('blank') or '1')
+                slot_key = f'{sub}:{blank}'
+                if slot_key in raw_vals:
+                    v = raw_vals[slot_key]
+                elif isinstance(raw_vals.get(sub), dict) and blank in raw_vals[sub]:
+                    v = raw_vals[sub][blank]
+                else:
+                    raise ValueError(f'局部联合识别缺少目标空位键：{slot_key}')
+                values[slot_key] = str(v if v is not None else '').strip()
+
+        return {
+            'ok': True,
+            'values': values,
+            'raw_text': raw_text,
+            'model': resp.get('model') or self.model,
+            'provider': self.provider,
+            'seconds': round(time.monotonic() - t0, 3),
+        }
 
 
 # 保留旧类名别名以兼容历史调用与单测

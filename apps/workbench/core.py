@@ -572,10 +572,77 @@ def _load_diag_module(root: Path = ROOT):
     return diag_mod
 
 
+def batch_root_dir(batch: dict) -> Path:
+    """稳健获取批次根目录（兼容 batch_dir / recognize_dir / images_dir）。"""
+    if isinstance(batch, dict):
+        if batch.get("batch_dir"):
+            return Path(batch["batch_dir"]).resolve()
+        if batch.get("recognize_dir"):
+            return Path(batch["recognize_dir"]).resolve().parent
+        if batch.get("images_dir"):
+            return Path(batch["images_dir"]).resolve().parent
+    return DEFAULT_BATCHES_ROOT.resolve()
+
+
+def get_work_mode(batches_root: Path = DEFAULT_BATCHES_ROOT) -> str:
+    cfg = load_config(batches_root)
+    mode = str(cfg.get("work_mode") or "grading").strip().lower()
+    return mode if mode in ("grading", "iteration") else "grading"
+
+
+def resolve_training_db_dir(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_ROOT) -> Path:
+    cfg = load_config(batches_root)
+    raw = str(cfg.get("training_db_dir") or "").strip()
+    if raw:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = (root / p).resolve()
+        return p
+    return (root / "data").resolve()
+
+
+def get_training_db_status(root: Path = ROOT, batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict:
+    """返回本地训练数据库位置、各子库样本数量与当前回流开关状态。"""
+    cfg = load_config(batches_root)
+    mode = get_work_mode(batches_root)
+    db_dir = resolve_training_db_dir(root, batches_root)
+    default_dir = (root / "data").resolve()
+    enabled = bool(cfg.get("training_db_enabled", True))
+
+    counts: dict[str, int] = {"m1": 0, "m2": 0, "m3": 0, "choice": 0}
+    for task in ("m1", "m2", "m3"):
+        img_dir = db_dir / task / "images"
+        if img_dir.is_dir():
+            try:
+                counts[task] = sum(1 for f in img_dir.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTS)
+            except OSError:
+                counts[task] = 0
+    choice_csv = db_dir / "choice" / "labels.csv"
+    if choice_csv.is_file():
+        try:
+            with choice_csv.open("r", encoding="utf-8", errors="ignore") as fh:
+                counts["choice"] = max(0, sum(1 for _ in fh) - 1)
+        except OSError:
+            counts["choice"] = 0
+
+    return {
+        "work_mode": mode,
+        "training_db_dir": str(db_dir),
+        "default_dir": str(default_dir),
+        "is_default": db_dir == default_dir,
+        "exists": db_dir.is_dir(),
+        "enabled": enabled,
+        "allow_sync_data": bool(mode == "iteration" and enabled),
+        "counts": counts,
+        "total_samples": sum(counts.values()),
+    }
+
+
 def get_infer_settings(batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict:
-    """读取推理设备与并发配置（默认 auto 优先 GPU，其余 0 表示自动）。"""
+    """读取推理设备、并发、内存暂存 Crop 与工作模式配置（默认 auto 优先 GPU）。"""
     cfg = load_config(batches_root)
     device = str(cfg.get("infer_device") or "auto").strip() or "auto"
+    mode = get_work_mode(batches_root)
     try:
         yolo_batch = max(0, min(16, int(cfg.get("yolo_batch", 0) or 0)))
     except (TypeError, ValueError):
@@ -588,11 +655,17 @@ def get_infer_settings(batches_root: Path = DEFAULT_BATCHES_ROOT) -> dict:
         api_concurrency = max(1, min(12, int(cfg.get("api_concurrency", 4) or 4)))
     except (TypeError, ValueError):
         api_concurrency = 4
+    if "memory_crops" in cfg:
+        mem_crops = bool(cfg.get("memory_crops"))
+    else:
+        mem_crops = mode == "grading"
     return {
         "infer_device": device,
         "yolo_batch": yolo_batch,
         "cpu_workers": cpu_workers,
         "api_concurrency": api_concurrency,
+        "work_mode": mode,
+        "memory_crops": mem_crops,
         "last_benchmark": cfg.get("last_benchmark") or None,
     }
 

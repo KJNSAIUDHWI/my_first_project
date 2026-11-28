@@ -310,6 +310,356 @@ class ReviewStore:
                     'reviewer': reviewer,
                 }
 
+    @staticmethod
+    def _ordered_fill_slots(item: dict, fb_rec: dict | None = None) -> list[tuple[str, str]]:
+        from engine.exam_schema import get_effective_fill_answers, _sub_sort_key
+        eff = get_effective_fill_answers(item, fb_rec)
+        slots: list[tuple[str, str]] = []
+        for sub in sorted(eff.keys(), key=_sub_sort_key):
+            blanks = eff[sub]
+            if not isinstance(blanks, dict) or blanks.get('舍弃') == '舍弃':
+                continue
+            for bk in sorted(blanks.keys(), key=lambda x: (int(x) if str(x).isdigit() else 999, str(x))):
+                slots.append((str(sub), str(bk)))
+        return slots
+
+    def set_item_blank(
+        self,
+        *,
+        page_id: str,
+        item_id: str,
+        sub: str = '无小题号',
+        blank: str = '1',
+        text: str = '',
+        reviewer: str = '审阅员',
+        expected_page_rev: int | None = None,
+    ) -> dict:
+        """原地单空结构化订正：只改目标 (sub, blank) 并同步更新 answers_override 与 correction，不破坏其他空位胶囊。"""
+        from engine.exam_schema import get_effective_fill_answers, format_answers_as_text
+        with self.page_lock(page_id):
+            if expected_page_rev is not None and int(expected_page_rev) != self.page_rev(page_id):
+                raise ValueError(f'页面 {page_id} 已被其他操作更新（期望 rev={expected_page_rev}，当前 rev={self.page_rev(page_id)}）')
+            with self.lock:
+                results = _read_json_safe(self.folder / 'results.json')
+                page = next((p for p in (results.get('pages') or []) if p.get('id') == page_id), None)
+                if not page:
+                    raise ValueError(f'目标试卷页不存在：{page_id}')
+                item = next((it for it in (page.get('items') or []) if it.get('id') == item_id), None)
+                if not item:
+                    raise ValueError(f'页面 {page_id} 中不存在题块：{item_id}')
+                sub_k = str(sub or '无小题号').strip() or '无小题号'
+                blank_k = str(blank or '1').strip() or '1'
+                state = self.read()
+                prev = dict(state['items'].get(item_id) or {}) if isinstance(state['items'].get(item_id), dict) else {}
+                ov = {str(k): dict(v) for k, v in (prev.get('answers_override') or {}).items() if isinstance(v, dict)}
+                ov.setdefault(sub_k, {})[blank_k] = str(text or '').strip()[:4000]
+                prev['answers_override'] = ov
+                eff = get_effective_fill_answers(item, prev)
+                now_iso = datetime.now().isoformat(timespec='seconds')
+                state['revision'] += 1
+                rec = {
+                    **prev,
+                    'label': '已订正',
+                    'answers_override': ov,
+                    'correction': format_answers_as_text(eff),
+                    'updated': now_iso,
+                    'revision': state['revision'],
+                    'reviewer': str(reviewer or '审阅员')[:32],
+                }
+                state['items'][item_id] = rec
+                save_json(self.path, state)
+                with (self.folder / 'feedback_history.jsonl').open('a', encoding='utf-8') as fh:
+                    fh.write(json.dumps({'id': item_id, 'action': 'set_blank', 'sub': sub_k, 'blank': blank_k, **rec}, ensure_ascii=False) + '\n')
+                new_rev = self.bump_page_rev(page_id)
+                return {
+                    'ok': True,
+                    'page_id': page_id,
+                    'item_id': item_id,
+                    'sub': sub_k,
+                    'blank': blank_k,
+                    'text': ov[sub_k][blank_k],
+                    'page_rev': new_rev,
+                    'record': rec,
+                    'feedback': state,
+                }
+
+    def judge_item_slot(
+        self,
+        *,
+        page_id: str,
+        item_id: str,
+        slot: str = 'choice',
+        status: str = 'correct',
+        score: float | None = None,
+        reviewer: str = '审阅员',
+    ) -> dict:
+        """人工翻判单道选择题或填空单空（correct / partial / wrong / auto 恢复自动判分）。"""
+        with self.page_lock(page_id):
+            with self.lock:
+                results = _read_json_safe(self.folder / 'results.json')
+                page = next((p for p in (results.get('pages') or []) if p.get('id') == page_id), None)
+                if not page:
+                    raise ValueError(f'目标试卷页不存在：{page_id}')
+                item = next((it for it in (page.get('items') or []) if it.get('id') == item_id), None)
+                if not item:
+                    raise ValueError(f'页面 {page_id} 中不存在题块：{item_id}')
+                slot_k = str(slot or 'choice').strip()[:64] or 'choice'
+                st = str(status or 'auto').strip().lower()
+                if st not in ('correct', 'partial', 'wrong', 'auto'):
+                    raise ValueError(f'无效判分状态：{st}')
+                state = self.read()
+                prev = dict(state['items'].get(item_id) or {}) if isinstance(state['items'].get(item_id), dict) else {}
+                mj = dict(prev.get('manual_judges') or {}) if isinstance(prev.get('manual_judges'), dict) else {}
+                if st == 'auto':
+                    mj.pop(slot_k, None)
+                else:
+                    entry = {'status': st}
+                    if score is not None:
+                        entry['score'] = round(max(0.0, float(score)), 2)
+                    mj[slot_k] = entry
+                now_iso = datetime.now().isoformat(timespec='seconds')
+                state['revision'] += 1
+                rec = {
+                    **prev,
+                    'label': prev.get('label') or '已确认',
+                    'manual_judges': mj,
+                    'updated': now_iso,
+                    'revision': state['revision'],
+                    'reviewer': str(reviewer or '审阅员')[:32],
+                }
+                state['items'][item_id] = rec
+                save_json(self.path, state)
+                new_rev = self.bump_page_rev(page_id)
+                return {
+                    'ok': True,
+                    'page_id': page_id,
+                    'item_id': item_id,
+                    'slot': slot_k,
+                    'status': st,
+                    'page_rev': new_rev,
+                    'record': rec,
+                    'feedback': state,
+                }
+
+    def re_ocr_subbox(
+        self,
+        *,
+        page_id: str,
+        item_id: str,
+        subbox: list,
+        targets: list[dict],
+        reviewer: str = '审阅员',
+        client_factory=None,
+    ) -> dict:
+        """大框内真子集小框精准局部重识别（支持单空与几何连续多空，绝不改动原 YOLO 大框，绝不传标准答案）。"""
+        from engine.exam_schema import get_effective_fill_answers, format_answers_as_text
+        if not isinstance(subbox, (list, tuple)) or len(subbox) != 4:
+            raise ValueError('请提供合法的局部小框坐标 [x1, y1, x2, y2]')
+        if not isinstance(targets, list) or not targets:
+            raise ValueError('至少需要锁定 1 个目标空位')
+        clean_targets = [
+            {'sub': str(t.get('sub') or '无小题号').strip() or '无小题号', 'blank': str(t.get('blank') or '1').strip() or '1'}
+            for t in targets if isinstance(t, dict)
+        ]
+        if not clean_targets:
+            raise ValueError('目标空位格式无效')
+
+        with self.page_lock(page_id):
+            with self.lock:
+                results = _read_json_safe(self.folder / 'results.json')
+                page = next((p for p in (results.get('pages') or []) if p.get('id') == page_id), None)
+                if not page:
+                    raise ValueError(f'目标试卷页不存在：{page_id}')
+                item = next((it for it in (page.get('items') or []) if it.get('id') == item_id), None)
+                if not item:
+                    raise ValueError(f'页面 {page_id} 中不存在题块：{item_id}')
+                pbox = item.get('box')
+                if not isinstance(pbox, list) or len(pbox) != 4:
+                    raise ValueError('父大框坐标缺失')
+                img_path = self.folder / (page.get('image') or '')
+                if not img_path.is_file():
+                    raise ValueError('页面原图缺失')
+
+                # 强制约束真子集：裁切在父大框范围内
+                px1, py1, px2, py2 = [float(v) for v in pbox]
+                sx1, sy1, sx2, sy2 = [float(v) for v in subbox]
+                if sx1 > sx2:
+                    sx1, sx2 = sx2, sx1
+                if sy1 > sy2:
+                    sy1, sy2 = sy2, sy1
+                cx1 = max(px1, min(px2, sx1))
+                cy1 = max(py1, min(py2, sy1))
+                cx2 = max(px1, min(px2, sx2))
+                cy2 = max(py1, min(py2, sy2))
+                if (cx2 - cx1) < 8 or (cy2 - cy1) < 8:
+                    raise ValueError('所画小框必须在父大框内部且面积不能过小（至少 8×8 像素）')
+
+                # 多空联合识别：校验空位在父大框内的顺序连续性
+                fb_now = self.read()
+                prev_rec = (fb_now.get('items') or {}).get(item_id) or {}
+                ordered_slots = self._ordered_fill_slots(item, prev_rec)
+                if len(clean_targets) > 1 and ordered_slots:
+                    idxs = []
+                    for t in clean_targets:
+                        pair = (t['sub'], t['blank'])
+                        if pair in ordered_slots:
+                            idxs.append(ordered_slots.index(pair))
+                    if len(idxs) == len(clean_targets):
+                        idxs_sorted = sorted(set(idxs))
+                        if len(idxs_sorted) != len(clean_targets) or (idxs_sorted[-1] - idxs_sorted[0] + 1) != len(idxs_sorted):
+                            raise ValueError('多空联合重识别必须选择同一大框内几何连续的空位')
+                        # 按卷面顺序排列 targets，确保与从上到下/从左到右一致
+                        clean_targets = [{'sub': ordered_slots[k][0], 'blank': ordered_slots[k][1]} for k in idxs_sorted]
+
+                qno = str(((item.get('transcription') or {}).get('question_number') if isinstance(item.get('transcription'), dict) else '') or item.get('number') or '').strip()
+                with Image.open(img_path) as full_im:
+                    rgb_im = full_im.convert('RGB')
+                    w, h = rgb_im.size
+                    crop_rect = (
+                        max(0, int(round(cx1))),
+                        max(0, int(round(cy1))),
+                        min(w, int(round(cx2))),
+                        min(h, int(round(cy2))),
+                    )
+                    if crop_rect[2] <= crop_rect[0] or crop_rect[3] <= crop_rect[1]:
+                        raise ValueError('局部裁切区域无效')
+                    sub_im = rgb_im.crop(crop_rect)
+
+            # 释放 store.lock 执行网络 VLM 调用，避免阻塞其他页读写（仍持有 page_lock 防止同页竞争）
+            try:
+                client = client_factory(self.folder) if client_factory else VlmClient(self.folder)
+                res = client.transcribe_subbox(sub_im, question_number=qno, targets=clean_targets)
+            finally:
+                try:
+                    sub_im.close()
+                except Exception:
+                    pass
+
+            values = res.get('values') or {}
+            with self.lock:
+                results = _read_json_safe(self.folder / 'results.json')
+                page = next((p for p in (results.get('pages') or []) if p.get('id') == page_id), None)
+                item = next((it for it in ((page or {}).get('items') or []) if it.get('id') == item_id), None)
+                state = self.read()
+                prev = dict(state['items'].get(item_id) or {}) if isinstance(state['items'].get(item_id), dict) else {}
+                ov = {str(k): dict(v) for k, v in (prev.get('answers_override') or {}).items() if isinstance(v, dict)}
+                for t in clean_targets:
+                    sk, bk = t['sub'], t['blank']
+                    slot_key = f'{sk}:{bk}'
+                    if slot_key in values:
+                        ov.setdefault(sk, {})[bk] = str(values[slot_key] or '').strip()[:4000]
+                prev['answers_override'] = ov
+                eff = get_effective_fill_answers(item or {}, prev)
+                now_iso = datetime.now().isoformat(timespec='seconds')
+                state['revision'] += 1
+                rec = {
+                    **prev,
+                    'label': '已订正',
+                    'answers_override': ov,
+                    'correction': format_answers_as_text(eff),
+                    'updated': now_iso,
+                    'revision': state['revision'],
+                    'reviewer': str(reviewer or '审阅员')[:32],
+                }
+                state['items'][item_id] = rec
+                save_json(self.path, state)
+                with (self.folder / 'feedback_history.jsonl').open('a', encoding='utf-8') as fh:
+                    fh.write(json.dumps({
+                        'id': item_id,
+                        'action': 're_ocr_subbox',
+                        'targets': clean_targets,
+                        'clamped_box': [round(cx1, 1), round(cy1, 1), round(cx2, 1), round(cy2, 1)],
+                        'values': values,
+                        **rec,
+                    }, ensure_ascii=False) + '\n')
+                new_rev = self.bump_page_rev(page_id)
+                return {
+                    'ok': True,
+                    'page_id': page_id,
+                    'item_id': item_id,
+                    'targets': clean_targets,
+                    'values': values,
+                    'clamped_box': [round(cx1, 1), round(cy1, 1), round(cx2, 1), round(cy2, 1)],
+                    'model': res.get('model') or '',
+                    'seconds': res.get('seconds') or 0.0,
+                    'page_rev': new_rev,
+                    'record': rec,
+                    'feedback': state,
+                }
+
+    def purge_unmatched_fills(self, *, scope: str = 'page', page_id: str = '', reviewer: str = '审阅员') -> dict:
+        """一键清理未匹配到大题题号的 M3 填空框（支持单页或整批，清理前自动留备份）。"""
+        with self.lock:
+            results_path = self.folder / 'results.json'
+            results = _read_json_safe(results_path)
+            pages = results.get('pages') or []
+            target_pages = pages if scope == 'batch' else [p for p in pages if p.get('id') == page_id]
+            if not target_pages:
+                raise ValueError(f'目标页面不存在：{page_id}')
+
+            # 自动保留一次备份以便极端情况恢复
+            bak_path = self.folder / 'results.before_purge.json'
+            try:
+                if results_path.is_file():
+                    shutil.copy2(results_path, bak_path)
+            except OSError:
+                pass
+
+            removed_ids: list[str] = []
+            affected_pages: list[str] = []
+            for p in target_pages:
+                pid = str(p.get('id') or '')
+                items = list(p.get('items') or [])
+                boxes = list(p.get('boxes') or [])
+                drop_items = [
+                    it for it in items
+                    if it.get('kind') == 'fill' and (
+                        '大题未配到题号框' in (it.get('issues') or [])
+                        or (it.get('number') in (None, '') and not ((it.get('transcription') or {}).get('question_number') or '').strip().isdigit())
+                    )
+                ]
+                if not drop_items:
+                    continue
+                drop_id_set = {it['id'] for it in drop_items if it.get('id')}
+                drop_boxes = [it.get('box') for it in drop_items if isinstance(it.get('box'), list) and len(it['box']) == 4]
+                new_items = [it for it in items if it.get('id') not in drop_id_set]
+                new_boxes = []
+                for b in boxes:
+                    if b.get('item_id') in drop_id_set:
+                        continue
+                    if int(b.get('cls', -1)) == 5 and isinstance(b.get('box'), list) and len(b['box']) == 4:
+                        if any(self._box_iou(b['box'], db) >= 0.85 for db in drop_boxes):
+                            continue
+                    new_boxes.append(b)
+                p['items'] = new_items
+                p['boxes'] = new_boxes
+                removed_ids.extend(sorted(drop_id_set))
+                affected_pages.append(pid)
+                self.bump_page_rev(pid)
+                pfile = self.folder / 'pages' / (pid + '.json')
+                if pfile.is_file():
+                    try:
+                        pf = _read_json_safe(pfile, retries=4, delay=0.03)
+                        pf['items'] = new_items
+                        pf['boxes'] = new_boxes
+                        save_json(pfile, pf)
+                    except Exception:
+                        pass
+
+            if removed_ids:
+                self._recompute_results_stats(results)
+                save_json(results_path, results)
+            mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
+            return {
+                'ok': True,
+                'scope': scope,
+                'removed_count': len(removed_ids),
+                'removed_item_ids': removed_ids,
+                'affected_pages': affected_pages,
+                'results_mtime': mtime,
+                'reviewer': reviewer,
+            }
+
     def read(self):
         if not self.path.exists():
             return {'run': self.identity, 'revision': 0, 'items': {}}
@@ -565,16 +915,18 @@ class ReviewStore:
             now_iso = datetime.now().isoformat(timespec='seconds')
             history_rows = []
 
-            # 2. 保存每题的文字/选项订正（只存用户改过的，不强迫逐题打卡）
+            # 2. 保存每题的文字/选项订正（只存用户改过的，保留结构化 answers_override 与 manual_judges）
             for item_id, patch in item_edits.items():
                 if item_id not in item_map or not isinstance(patch, dict):
                     continue
-                correction = str(patch.get('correction', '') or '')[:20000]
-                label = str(patch.get('label') or '已订正').strip()
+                prev_item_rec = dict(state['items'].get(item_id) or {}) if isinstance(state['items'].get(item_id), dict) else {}
+                correction = str(patch.get('correction', prev_item_rec.get('correction', '')) or '')[:20000]
+                label = str(patch.get('label') or prev_item_rec.get('label') or '已订正').strip()
                 if label not in LABELS + ('',):
                     label = '已订正'
                 state['revision'] += 1
                 rec = {
+                    **prev_item_rec,
                     'label': label,
                     'correction': correction,
                     'updated': now_iso,
@@ -582,6 +934,10 @@ class ReviewStore:
                 }
                 if 'answer' in patch and patch['answer'] is not None:
                     rec['answer'] = str(patch['answer']).strip()[:32]
+                if isinstance(patch.get('answers_override'), dict):
+                    rec['answers_override'] = patch['answers_override']
+                if isinstance(patch.get('manual_judges'), dict):
+                    rec['manual_judges'] = patch['manual_judges']
                 if patch.get('trusted'):
                     rec['trusted'] = True
                 if reviewer:
@@ -958,15 +1314,23 @@ class ReviewStore:
         }
 
 
-def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_data=True, client_factory=None, hub_port=8888):
+def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_data=True, client_factory=None, hub_port=8888, work_mode='grading'):
     store = ReviewStore(folder)
     claims = ClaimManager(ttl_seconds=lock_ttl)
     bus = ReviewEventBus()
     ui_states: dict[str, dict] = {}
     ui_lock = threading.Lock()
     stop_event = threading.Event()
+    runtime_cfg = {'work_mode': work_mode if work_mode in ('grading', 'iteration') else 'grading'}
     token = secrets.token_urlsafe(24)
     template_path = Path(__file__).resolve().parent / 'index.html'
+
+    def _load_grading_snapshot(result_obj: dict | None = None, fb_obj: dict | None = None) -> tuple[dict | None, dict]:
+        from engine.exam_schema import load_batch_schema, grade_batch
+        sc = load_batch_schema(store.folder) or load_batch_schema(store.folder.parent)
+        res = result_obj if isinstance(result_obj, dict) else _read_json_safe(store.folder / 'results.json')
+        fb = fb_obj if isinstance(fb_obj, dict) else store.read()
+        return sc, grade_batch(res, fb, sc)
 
     def _is_loopback_cli(handler: BaseHTTPRequestHandler) -> bool:
         ip = str((handler.client_address or ('', 0))[0])
@@ -1140,15 +1504,39 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                     if live.is_file() and not result.get('benchmark'):
                         result['benchmark'] = _read_json_safe(live)
                     mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
+                    fb_now = store.read()
+                    sc_now, grading_now = _load_grading_snapshot(result, fb_now)
                     return self.reply({
                         'result': result,
-                        'feedback': store.read(),
+                        'feedback': fb_now,
                         'locks': claims.snapshot(),
                         'results_mtime': mtime,
                         'page_revs': store.page_revs_snapshot(),
+                        'work_mode': runtime_cfg['work_mode'],
+                        'schema': sc_now,
+                        'grading': grading_now,
                     })
                 except (OSError, ValueError) as exc:
                     return self.reply({'error': str(exc)}, 409)
+            if name in ('/api/grading', '/api/grading.csv'):
+                try:
+                    from engine.exam_schema import export_scores_csv
+                    res_now = _read_json_safe(store.folder / 'results.json')
+                    fb_now = store.read()
+                    sc_now, grading_now = _load_grading_snapshot(res_now, fb_now)
+                    if name == '/api/grading.csv':
+                        csv_bytes = export_scores_csv(res_now, fb_now, sc_now).encode('utf-8')
+                        fname = urllib.parse.quote(f'{store.folder.parent.name or "exam"}_成绩单.csv')
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'text/csv; charset=utf-8')
+                        self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{fname}")
+                        self.send_header('Content-Length', str(len(csv_bytes)))
+                        self.end_headers()
+                        self.wfile.write(csv_bytes)
+                        return
+                    return self.reply({'ok': True, 'work_mode': runtime_cfg['work_mode'], **grading_now})
+                except (OSError, ValueError) as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 409)
             if name == '/api/locks':
                 return self.reply({'ok': True, 'locks': claims.snapshot()})
             if name == '/api/live':
@@ -1156,8 +1544,10 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                     results_path = store.folder/'results.json'
                     mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
                     res_meta = {}
+                    res_loaded = None
                     try:
                         res = _read_json_safe(results_path, retries=3, delay=0.02)
+                        res_loaded = res
                         st = res.get('stats') or {}
                         pages_list = res.get('pages') or []
                         res_meta = {
@@ -1168,21 +1558,49 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                         }
                     except Exception:
                         pass
+                    fb_now = store.read()
+                    _, grading_now = _load_grading_snapshot(res_loaded, fb_now)
                     return self.reply({
                         'ok': True,
-                        'feedback': store.read(),
+                        'feedback': fb_now,
                         'locks': claims.snapshot(),
                         'results_mtime': mtime,
                         'page_revs': store.page_revs_snapshot(),
+                        'work_mode': runtime_cfg['work_mode'],
+                        'grading': grading_now,
                         **res_meta,
                     })
                 except (OSError, ValueError) as exc:
                     return self.reply({'ok': False, 'error': str(exc)}, 409)
             if name.startswith('/asset/'):
-                path = (store.folder/name.removeprefix('/asset/')).resolve()
-                if not path.is_relative_to(store.folder) or path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.svg', '.js', '.css', '.woff', '.woff2', '.ttf') or not path.is_file():
+                rel = name.removeprefix('/asset/')
+                path = (store.folder/rel).resolve()
+                if not path.is_relative_to(store.folder) or path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.svg', '.js', '.css', '.woff', '.woff2', '.ttf'):
                     return self.reply({'error': '文件不存在'}, 404)
-                return self.reply(path.read_bytes(), content_type=mimetypes.guess_type(str(path))[0] or 'application/octet-stream')
+                if path.is_file():
+                    return self.reply(path.read_bytes(), content_type=mimetypes.guess_type(str(path))[0] or 'application/octet-stream')
+                # 兼容内存暂存 Crop 模式：若 crops/<id>.png 未落盘，按需从原图内存裁切返回
+                if rel.startswith('crops/') and rel.endswith('.png'):
+                    try:
+                        item_id = Path(rel).stem
+                        res = _read_json_safe(store.folder / 'results.json')
+                        for pg in (res.get('pages') or []):
+                            it = next((x for x in (pg.get('items') or []) if x.get('id') == item_id), None)
+                            if it and it.get('box') and pg.get('image'):
+                                src_im_p = store.folder / pg['image']
+                                if src_im_p.is_file():
+                                    with Image.open(src_im_p) as full_im:
+                                        rgb = full_im.convert('RGB')
+                                        b = [max(0, int(it['box'][0])), max(0, int(it['box'][1])), min(rgb.width, int(it['box'][2])), min(rgb.height, int(it['box'][3]))]
+                                        if b[2] > b[0] and b[3] > b[1]:
+                                            crop_im = rgb.crop(b)
+                                            buf = io.BytesIO()
+                                            crop_im.save(buf, format='PNG')
+                                            crop_im.close()
+                                            return self.reply(buf.getvalue(), content_type='image/png')
+                    except Exception:
+                        pass
+                return self.reply({'error': '文件不存在'}, 404)
             self.reply({'error': '接口不存在'}, 404)
 
         def do_POST(self):
@@ -1296,6 +1714,115 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                 except ValueError as exc:
                     return self.reply({'ok': False, 'error': str(exc)}, 409)
 
+            if path == '/api/work-mode':
+                wm = str(value.get('work_mode') or 'grading').strip().lower()
+                if wm not in ('grading', 'iteration'):
+                    return self.reply({'ok': False, 'error': 'work_mode 仅支持 grading 或 iteration'}, 400)
+                runtime_cfg['work_mode'] = wm
+                bus.publish({'type': 'work_mode', 'work_mode': wm, 'message': f"已切换到{'改试卷模式' if wm == 'grading' else '模型迭代模式'}"})
+                return self.reply({'ok': True, 'work_mode': wm})
+
+            if path == '/api/review/set-blank':
+                try:
+                    out = store.set_item_blank(
+                        page_id=str(value.get('page_id') or '').strip(),
+                        item_id=str(value.get('item_id') or '').strip(),
+                        sub=str(value.get('sub') or '无小题号'),
+                        blank=str(value.get('blank') or '1'),
+                        text=str(value.get('text') or ''),
+                        reviewer=str(value.get('reviewer') or ('AI助手' if is_cli else '审阅员')),
+                        expected_page_rev=value.get('expected_page_rev'),
+                    )
+                    _, grading_now = _load_grading_snapshot(None, out.get('feedback'))
+                    out['grading'] = grading_now
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'set_blank',
+                        'page_id': out['page_id'],
+                        'item_id': out['item_id'],
+                        'sub': out['sub'],
+                        'blank': out['blank'],
+                        'page_rev': out['page_rev'],
+                        'message': f"已更新 {out['item_id']} ({out['sub']})第{out['blank']}空",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 409)
+
+            if path == '/api/review/judge-blank':
+                try:
+                    out = store.judge_item_slot(
+                        page_id=str(value.get('page_id') or '').strip(),
+                        item_id=str(value.get('item_id') or '').strip(),
+                        slot=str(value.get('slot') or 'choice'),
+                        status=str(value.get('status') or 'auto'),
+                        score=value.get('score'),
+                        reviewer=str(value.get('reviewer') or ('AI助手' if is_cli else '审阅员')),
+                    )
+                    _, grading_now = _load_grading_snapshot(None, out.get('feedback'))
+                    out['grading'] = grading_now
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'judge_blank',
+                        'page_id': out['page_id'],
+                        'item_id': out['item_id'],
+                        'page_rev': out['page_rev'],
+                        'message': f"已改判 {out['item_id']} ({out['slot']}) -> {out['status']}",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 400)
+
+            if path == '/api/review/re-ocr-subbox':
+                try:
+                    out = store.re_ocr_subbox(
+                        page_id=str(value.get('page_id') or '').strip(),
+                        item_id=str(value.get('item_id') or '').strip(),
+                        subbox=value.get('box') or [],
+                        targets=value.get('targets') or [],
+                        reviewer=str(value.get('reviewer') or ('AI助手' if is_cli else '审阅员')),
+                        client_factory=client_factory,
+                    )
+                    _, grading_now = _load_grading_snapshot(None, out.get('feedback'))
+                    out['grading'] = grading_now
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 're_ocr_subbox',
+                        'page_id': out['page_id'],
+                        'item_id': out['item_id'],
+                        'values': out['values'],
+                        'page_rev': out['page_rev'],
+                        'message': f"局部真子集小框重识别完成：{len(out['values'])} 空已直接回填",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 400)
+                except Exception as exc:
+                    return self.reply({'ok': False, 'error': f'局部重识别失败：{exc}'}, 502)
+
+            if path == '/api/review/purge-unmatched-fills':
+                try:
+                    out = store.purge_unmatched_fills(
+                        scope=str(value.get('scope') or 'page'),
+                        page_id=str(value.get('page_id') or '').strip(),
+                        reviewer=str(value.get('reviewer') or ('AI助手' if is_cli else '审阅员')),
+                    )
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'purge_unmatched_fills',
+                        'removed_count': out['removed_count'],
+                        'affected_pages': out['affected_pages'],
+                        'results_mtime': out['results_mtime'],
+                        'message': f"已一键清理 {out['removed_count']} 个未匹配大题号填空框",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 400)
+
             if path == '/api/review/delete-box':
                 try:
                     out = store.delete_item_or_box(
@@ -1335,8 +1862,9 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
             if path == '/api/submit-page':
                 try:
                     pid = str(value.get('page_id') or '').strip()
+                    eff_sync = bool(allow_sync_data and runtime_cfg['work_mode'] == 'iteration')
                     with store.page_lock(pid):
-                        out = store.submit_page(value, allow_sync_data=allow_sync_data)
+                        out = store.submit_page(value, allow_sync_data=eff_sync)
                         new_rev = store.bump_page_rev(pid)
                     client_id = str(value.get('client_id') or '').strip()
                     if client_id and pid:
@@ -1420,13 +1948,14 @@ if __name__ == '__main__':
     parser.add_argument('--dir', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8903)
     parser.add_argument('--hub-port', type=int, default=8888, help='主控工作台端口（用于 8904 内 AI 帮手同源代理）')
+    parser.add_argument('--work-mode', default='grading', choices=['grading', 'iteration'], help='工作模式：grading（改试卷模式）/ iteration（模型迭代模式）')
     parser.add_argument('--host', default=None, help='监听地址，默认 127.0.0.1；多人局域网协作传 --lan 或 --host 0.0.0.0')
     parser.add_argument('--lan', action='store_true', help='开启局域网监听（等价于 --host 0.0.0.0）')
     parser.add_argument('--lock-ttl', type=int, default=300, help='多人协作单页锁定超时秒数，默认 300 秒')
     args = parser.parse_args()
     prepare_math_assets(args.dir, async_download=True)
     host = resolve_host(args.host, args.lan)
-    server = make_server(args.dir, args.port, host=host, lock_ttl=args.lock_ttl, hub_port=args.hub_port)
+    server = make_server(args.dir, args.port, host=host, lock_ttl=args.lock_ttl, hub_port=args.hub_port, work_mode=args.work_mode)
     print('识别验收服务已启动', flush=True)
     print_access_urls(host, server.server_port, label='识别验收')
     server.serve_forever()

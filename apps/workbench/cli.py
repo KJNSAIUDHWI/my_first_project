@@ -654,6 +654,12 @@ def cmd_config(args, t0: float) -> int:
             patch["ai_default_screenshot"] = str(args.ai_screenshot).lower() in ("1", "true", "yes", "on")
         if getattr(args, "custom_agent_cmd", None) is not None:
             patch["agent_custom_cmd"] = args.custom_agent_cmd
+        if getattr(args, "work_mode", None) is not None:
+            patch["work_mode"] = args.work_mode
+        if getattr(args, "memory_crops", None) is not None:
+            patch["memory_crops"] = str(args.memory_crops).lower() in ("1", "true", "yes", "on")
+        if getattr(args, "training_db_dir", None) is not None:
+            patch["training_db_dir"] = args.training_db_dir
         ap_list = getattr(args, "agent_path", None) or []
         if ap_list:
             ap_map: dict[str, str] = {}
@@ -1006,6 +1012,75 @@ def cmd_review(args, t0: float) -> int:
         ok_all = bool(ok and res.get("ok"))
         return _emit_output(args, command="review.re-ocr", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已重新识别 {iid} 并落盘推送前台"])
 
+    if action == "set-blank":
+        payload = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "sub": str(getattr(args, "sub", "无小题号") or "无小题号"),
+            "blank": str(getattr(args, "blank", "1") or "1"),
+            "text": str(getattr(args, "text", "") or ""),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        ok, _, res = _review_request(review_url, "POST", "/api/review/set-blank", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.set-blank", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已更新单空 {payload['item_id']} ({payload['sub']})第{payload['blank']}空"])
+
+    if action == "re-ocr-subbox":
+        raw_box = str(getattr(args, "box", "") or "").strip()
+        try:
+            box_vals = [float(x.strip()) for x in raw_box.split(",") if x.strip()]
+            if len(box_vals) != 4:
+                raise ValueError
+        except ValueError:
+            return _emit_output(args, command="review.re-ocr-subbox", ok=False, exit_code=2, data={}, error="请提供 --box x1,y1,x2,y2", t0=t0)
+        raw_targets = getattr(args, "target_slot", None) or []
+        targets = []
+        for ts in raw_targets:
+            if ":" in ts:
+                s_k, b_k = ts.split(":", 1)
+                targets.append({"sub": s_k.strip() or "无小题号", "blank": b_k.strip() or "1"})
+        if not targets:
+            targets = [{"sub": str(getattr(args, "sub", "无小题号") or "无小题号"), "blank": str(getattr(args, "blank", "1") or "1")}]
+        payload = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "box": box_vals,
+            "targets": targets,
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        ok, _, res = _review_request(review_url, "POST", "/api/review/re-ocr-subbox", payload, timeout=max(60.0, args.timeout))
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.re-ocr-subbox", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"局部真子集小框重识别完成：{json.dumps(res.get('values') or {}, ensure_ascii=False)}"])
+
+    if action == "purge-unmatched":
+        payload = {
+            "scope": str(getattr(args, "scope", "page") or "page"),
+            "page_id": str(getattr(args, "page", "") or ""),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        ok, _, res = _review_request(review_url, "POST", "/api/review/purge-unmatched-fills", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.purge-unmatched", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已清理 {res.get('removed_count', 0)} 个未匹配大题号填空框"])
+
+    if action == "judge-blank":
+        payload = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "slot": str(getattr(args, "slot", "choice") or "choice"),
+            "status": str(getattr(args, "judge", "correct") or "correct"),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        if getattr(args, "score", None) is not None:
+            payload["score"] = float(args.score)
+        ok, _, res = _review_request(review_url, "POST", "/api/review/judge-blank", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.judge-blank", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已手动改判 {payload['item_id']}/{payload['slot']} -> {payload['status']}"])
+
+    if action == "grading":
+        ok, _, res = _review_request(review_url, "GET", "/api/grading", timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.grading", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"批改统计：共 {res.get('page_count', 0)} 页，均分 {res.get('average_score', 0)}"])
+
     if action == "nav":
         payload = {
             "source": "ai",
@@ -1020,6 +1095,106 @@ def cmd_review(args, t0: float) -> int:
         return _emit_output(args, command="review.nav", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已推送跳转指令到 8904：{payload['page_id']} {payload['item_id']}"])
 
     return _emit_output(args, command="review", ok=False, exit_code=2, data={}, error=f"不支持的 review 操作：{action}", t0=t0)
+
+
+def cmd_schema(args, t0: float) -> int:
+    from engine.exam_schema import load_batch_schema, save_batch_schema, summarize_schema, extract_answer_source, parse_schema_via_vlm, grade_batch, export_scores_csv
+    hub = _hub_url(args)
+    action = str(getattr(args, "action", "get") or "get").lower()
+    bid = str(getattr(args, "batch", "") or "").strip()
+    batch = (
+        next((b for b in core.list_batches(core.DEFAULT_BATCHES_ROOT) if b["batch_id"] == bid), None)
+        if bid else core.get_active_batch(core.DEFAULT_BATCHES_ROOT)
+    )
+    if not batch:
+        return _emit_output(args, command=f"schema.{action}", ok=False, exit_code=2, data={}, error="当前没有可用批次，请先导入批次或指定 --batch", t0=t0)
+    bdir = core.batch_root_dir(batch)
+
+    if action == "get":
+        sc = load_batch_schema(bdir)
+        summ = summarize_schema(sc)
+        lines = [f"批次 {batch['batch_id']} 标准答案：{'已配置' if summ['configured'] else '未配置（通用模式）'} | 选择 {summ['choice_count']} 题 | 填空 {summ['fill_question_count']} 大题({summ['fill_blank_count']}空) | 满分 {summ['total_possible_score']} | 多选漏选比例 {summ['multi_choice_partial_ratio']}"]
+        return _emit_output(args, command="schema.get", ok=True, exit_code=0, data={"batch_id": batch["batch_id"], "schema": sc, "summary": summ}, t0=t0, text_lines=lines)
+
+    if action == "set":
+        fpath = str(getattr(args, "file", "") or "").strip()
+        partial_ratio = getattr(args, "partial_ratio", None)
+        payload: dict[str, Any] = {"batch_id": batch["batch_id"], "source": "cli"}
+        if fpath:
+            p = Path(fpath)
+            if not p.is_file():
+                return _emit_output(args, command="schema.set", ok=False, exit_code=2, data={}, error=f"找不到 schema JSON 文件：{fpath}", t0=t0)
+            payload["schema"] = json.loads(p.read_text(encoding="utf-8-sig"))
+        if partial_ratio is not None:
+            payload["multi_choice_partial_ratio"] = float(partial_ratio)
+        if "schema" not in payload and "multi_choice_partial_ratio" not in payload:
+            return _emit_output(args, command="schema.set", ok=False, exit_code=2, data={}, error="请提供 --file <schema.json> 或 --partial-ratio <0~1>", t0=t0)
+        if _hub_alive(hub):
+            ok_h, _, res = _hub_request(hub, "POST", "/api/schema", payload, timeout=min(15.0, args.timeout))
+            if ok_h and res.get("ok"):
+                s = res.get("summary") or {}
+                return _emit_output(args, command="schema.set", ok=True, exit_code=0, data={**res, "via_hub": True}, t0=t0, text_lines=[f"已保存并同步标准答案：选择 {s.get('choice_count', 0)} 题 / 填空 {s.get('fill_blank_count', 0)} 空 / 满分 {s.get('total_possible_score', 0)}"])
+        if "schema" in payload:
+            saved = save_batch_schema(bdir, payload["schema"])
+        else:
+            existing = load_batch_schema(bdir) or {}
+            sc_cfg = dict(existing.get("scoring") or {})
+            r = float(payload["multi_choice_partial_ratio"])
+            sc_cfg["multi_choice_partial_ratio"] = r
+            for c in (existing.get("choices") or {}).values():
+                if isinstance(c, dict) and c.get("type") == "multi":
+                    c["partial_score"] = round(float(c.get("score") or 6.0) * r, 2)
+            existing["scoring"] = sc_cfg
+            saved = save_batch_schema(bdir, existing)
+        s = summarize_schema(saved)
+        return _emit_output(args, command="schema.set", ok=True, exit_code=0, data={"batch_id": batch["batch_id"], "schema": saved, "summary": s, "via_hub": False}, t0=t0, text_lines=[f"已保存标准答案到 {bdir / 'exam_schema.json'}"])
+
+    if action == "parse-pdf":
+        fpath = str(getattr(args, "file", "") or "").strip()
+        if not fpath or not Path(fpath).is_file():
+            return _emit_output(args, command="schema.parse-pdf", ok=False, exit_code=2, data={}, error="请提供 --file <答案PDF或图片路径>", t0=t0)
+        manifest = extract_answer_source(Path(fpath), bdir / "answer_source")
+        if getattr(args, "vlm", False):
+            parsed_sc = parse_schema_via_vlm(manifest, root=ROOT, subject=str(batch.get("subject") or ""), title=batch["batch_id"])
+            saved = save_batch_schema(bdir, parsed_sc)
+            s = summarize_schema(saved)
+            return _emit_output(args, command="schema.parse-pdf", ok=True, exit_code=0, data={"batch_id": batch["batch_id"], "manifest": manifest, "schema": saved, "summary": s}, t0=t0, text_lines=[f"VLM 解析完成：选择 {s['choice_count']} 题 / 填空 {s['fill_blank_count']} 空"])
+        return _emit_output(args, command="schema.parse-pdf", ok=True, exit_code=0, data={"batch_id": batch["batch_id"], "manifest": manifest}, t0=t0, text_lines=[f"已提取答案源文件（{manifest['page_count']} 页）：{', '.join(manifest.get('rendered_images') or [])}"])
+
+    if action in ("grade", "export-csv"):
+        rec_dir = Path(batch["recognize_dir"])
+        res_p = rec_dir / "results.json"
+        if not res_p.is_file():
+            return _emit_output(args, command=f"schema.{action}", ok=False, exit_code=1, data={}, error="该批次尚未完成识别", t0=t0)
+        results = core.read_json(res_p, {}) or {}
+        fb = core.read_json(rec_dir / "feedback.json", {}) or {}
+        sc = load_batch_schema(bdir)
+        if action == "export-csv":
+            csv_txt = export_scores_csv(results, fb, sc)
+            out_p = Path(getattr(args, "out", "") or (bdir / f"{batch['batch_id']}_成绩单.csv")).resolve()
+            out_p.write_text(csv_txt, encoding="utf-8")
+            return _emit_output(args, command="schema.export-csv", ok=True, exit_code=0, data={"path": str(out_p)}, t0=t0, text_lines=[f"已导出成绩单：{out_p}"])
+        graded = grade_batch(results, fb, sc)
+        return _emit_output(args, command="schema.grade", ok=True, exit_code=0, data=graded, t0=t0, text_lines=[f"批次 {batch['batch_id']} 批改完成：{graded['page_count']} 页，均分 {graded['average_score']}（最高 {graded['max_score']} / 最低 {graded['min_score']}）"])
+
+    return _emit_output(args, command="schema", ok=False, exit_code=2, data={}, error=f"不支持的 schema 操作：{action}", t0=t0)
+
+
+def cmd_memory(args, t0: float) -> int:
+    from engine.memory_budget import run_memory_crop_preflight
+    bid = str(getattr(args, "batch", "") or "").strip()
+    batch = (
+        next((b for b in core.list_batches(core.DEFAULT_BATCHES_ROOT) if b["batch_id"] == bid), None)
+        if bid else core.get_active_batch(core.DEFAULT_BATCHES_ROOT)
+    )
+    if not batch:
+        return _emit_output(args, command="memory.preflight", ok=False, exit_code=2, data={}, error="当前没有可用批次", t0=t0)
+    img_dir = Path(batch["images_dir"])
+    imgs = sorted(p for p in img_dir.iterdir() if p.is_file() and p.suffix.lower() in core.IMAGE_EXTS) if img_dir.is_dir() else []
+    infer_cfg = core.get_infer_settings()
+    plan = run_memory_crop_preflight(imgs, requested_concurrency=infer_cfg["api_concurrency"], requested_yolo_batch=infer_cfg["yolo_batch"])
+    plan["batch_id"] = batch["batch_id"]
+    return _emit_output(args, command="memory.preflight", ok=True, exit_code=0, data=plan, t0=t0, text_lines=[plan["reason"]])
 
 
 def main():
@@ -1123,6 +1298,9 @@ def main():
     p_cfg.add_argument("--custom-agent-cmd", default=None)
     p_cfg.add_argument("--ai-mode", default=None, choices=["yolo", "guarded", "plan"])
     p_cfg.add_argument("--ai-screenshot", default=None)
+    p_cfg.add_argument("--work-mode", default=None, choices=["grading", "iteration"])
+    p_cfg.add_argument("--memory-crops", default=None)
+    p_cfg.add_argument("--training-db-dir", default=None)
     p_cfg.add_argument("--file", default="", help="import 时指定 JSON 配置包或 .env 文件")
     p_cfg.add_argument("--out", default="", help="export 时输出路径")
     p_cfg.add_argument("--include-secrets", action="store_true", help="export 时包含明文 API Key（用于迁移到另一台电脑）")
@@ -1165,9 +1343,17 @@ def main():
     p_ui.add_argument("--review-url", default="http://127.0.0.1:8904")
 
     p_rev = sub.add_parser("review", parents=[common], help="8904 审阅页同构数据操作（页级锁 + SSE 实时映射 GUI）")
-    p_rev.add_argument("action", nargs="?", default="status", choices=["status", "page", "set-text", "set-choice", "delete-box", "re-ocr", "confirm", "nav"])
+    p_rev.add_argument("action", nargs="?", default="status", choices=["status", "page", "set-text", "set-blank", "set-choice", "delete-box", "re-ocr", "re-ocr-subbox", "purge-unmatched", "judge-blank", "grading", "confirm", "nav"])
     p_rev.add_argument("--page", default="")
     p_rev.add_argument("--item", default="")
+    p_rev.add_argument("--sub", default="无小题号")
+    p_rev.add_argument("--blank", default="1")
+    p_rev.add_argument("--target-slot", action="append", default=[], help="多空联合重识别目标槽位，格式 sub:blank，可重复")
+    p_rev.add_argument("--box", default="", help="大框内真子集小框像素坐标 x1,y1,x2,y2")
+    p_rev.add_argument("--scope", default="page", choices=["page", "batch"])
+    p_rev.add_argument("--slot", default="choice", help="judge-blank 槽位（choice 或 sub:blank）")
+    p_rev.add_argument("--judge", default="correct", choices=["correct", "partial", "wrong", "auto"])
+    p_rev.add_argument("--score", type=float, default=None)
     p_rev.add_argument("--text", default="")
     p_rev.add_argument("--answer", default="")
     p_rev.add_argument("--label", default="已订正")
@@ -1175,6 +1361,18 @@ def main():
     p_rev.add_argument("--expected-rev", type=int, default=None)
     p_rev.add_argument("--reviewer", default="AI助手")
     p_rev.add_argument("--review-url", default="http://127.0.0.1:8904")
+
+    p_sc = sub.add_parser("schema", parents=[common], help="试卷标准答案/结构配置、PDF提取与成绩导出")
+    p_sc.add_argument("action", nargs="?", default="get", choices=["get", "set", "parse-pdf", "grade", "export-csv"])
+    p_sc.add_argument("--batch", default="")
+    p_sc.add_argument("--file", default="")
+    p_sc.add_argument("--out", default="")
+    p_sc.add_argument("--partial-ratio", type=float, default=None, help="多选题漏选给分比例（默认 0.5）")
+    p_sc.add_argument("--vlm", action="store_true", help="parse-pdf 时直接调用视觉大模型解析为 JSON")
+
+    p_mem = sub.add_parser("memory", parents=[common], help="改卷内存暂存 Crop 预检与并发预算评估")
+    p_mem.add_argument("action", nargs="?", default="preflight", choices=["preflight"])
+    p_mem.add_argument("--batch", default="")
 
     args = ap.parse_args()
     if args.cmd == "serve":
@@ -1202,6 +1400,8 @@ def main():
         "capture": cmd_capture,
         "ui": cmd_ui,
         "review": cmd_review,
+        "schema": cmd_schema,
+        "memory": cmd_memory,
     }[args.cmd](args, t0)
 
 

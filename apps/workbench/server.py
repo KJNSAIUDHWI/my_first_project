@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -24,11 +25,14 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import core  # noqa: E402
 import agent_providers  # noqa: E402
 import capture as capture_mod  # noqa: E402
 import train_bridge  # noqa: E402
+from engine import exam_schema as exam_schema_mod  # noqa: E402
 
 
 def _load_pricing_mod(root: Path = ROOT):
@@ -153,6 +157,7 @@ class WorkbenchState:
         self._ai_proc: subprocess.Popen | None = None
         self._stop_event = threading.Event()
         self.last_check: dict | None = None
+        self.last_memory_plan: dict | None = None
         self.ui_states: dict[str, dict] = {}
         self.ai_manager = agent_providers.AiSessionManager(
             self.root,
@@ -349,15 +354,17 @@ class WorkbenchState:
                 rec_dir = Path(active["recognize_dir"]).resolve()
                 if not (rec_dir / "results.json").is_file():
                     raise ValueError("当前批次尚未完成自动识别，请先点「开始自动识别」")
+                work_mode = core.get_work_mode(self.batches_root)
                 cmd = [
                     sys.executable,
                     str(self.root / "apps" / "review" / "server.py"),
                     "--dir", str(rec_dir),
                     "--port", str(port),
                     "--hub-port", str(self.port),
+                    "--work-mode", work_mode,
                     "--lan",
                 ]
-                extra = {**extra, "batch_id": active.get("batch_id", ""), "recognize_dir": str(rec_dir)}
+                extra = {**extra, "batch_id": active.get("batch_id", ""), "recognize_dir": str(rec_dir), "work_mode": work_mode}
             elif task_id == "annotate":
                 m = extra.get("m") or "m1"
                 if m not in ("m1", "m2", "m3"):
@@ -743,6 +750,11 @@ class WorkbenchState:
                 "--workers", str(infer_cfg["cpu_workers"]),
                 "--concurrency", str(infer_cfg["api_concurrency"]),
             ]
+            if infer_cfg.get("memory_crops"):
+                cmd.append("--memory-crops")
+            batch_schema = core.batch_root_dir(active) / "exam_schema.json"
+            if batch_schema.is_file():
+                cmd += ["--schema", str(batch_schema)]
             creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             last_sse_ts = 0.0
             last_error_diag = None
@@ -812,6 +824,20 @@ class WorkbenchState:
                                 "progress": parsed,
                                 "message": f"{stage} · 已检测 {p_done}/{p_tot} 页 · 拼图转录 {a_ok}/{a_tot}",
                             })
+                    elif isinstance(parsed, dict) and parsed.get("event") == "memory_preflight":
+                        plan = parsed.get("plan") or {}
+                        with self._lock:
+                            self.last_memory_plan = plan
+                            self.pipeline_job["memory_preflight"] = plan
+                            self.pipeline_job["logs"].append(f"[内存预检] {plan.get('reason') or ''}")
+                        self.bus.publish({
+                            "source": "gui",
+                            "step": "recognize",
+                            "status": "running",
+                            "batch_id": active["batch_id"],
+                            "memory_preflight": plan,
+                            "message": f"内存预检：{plan.get('reason') or ''}",
+                        })
                     elif isinstance(parsed, dict) and parsed.get("event") == "error":
                         diag = parsed.get("diagnostic") or {}
                         last_error_diag = diag
@@ -1760,6 +1786,66 @@ def make_handler(state: WorkbenchState):
                     self._send_json(500, {"ok": False, "error": str(exc)})
                 return
 
+            if path == "/api/training-db":
+                if not self._require_host():
+                    return
+                self._send_json(200, {"ok": True, **core.get_training_db_status(state.root, state.batches_root)})
+                return
+
+            if path == "/api/schema":
+                qs = urllib.parse.parse_qs(parsed.query)
+                bid = str((qs.get("batch_id") or [""])[0] or "").strip()
+                batch = (
+                    next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                    if bid else core.get_active_batch(state.batches_root)
+                )
+                if not batch:
+                    self._send_json(200, {"ok": True, "batch_id": "", "schema": None, "summary": {"configured": False}, "answer_source": None})
+                    return
+                bdir = core.batch_root_dir(batch)
+                sc = exam_schema_mod.load_batch_schema(bdir)
+                src_manifest = core.read_json(bdir / "answer_source" / "manifest.json", None)
+                self._send_json(200, {
+                    "ok": True,
+                    "batch_id": batch["batch_id"],
+                    "schema": sc,
+                    "summary": exam_schema_mod.summarize_schema(sc),
+                    "answer_source": src_manifest,
+                })
+                return
+
+            if path in ("/api/grades", "/api/grades.csv"):
+                qs = urllib.parse.parse_qs(parsed.query)
+                bid = str((qs.get("batch_id") or [""])[0] or "").strip()
+                batch = (
+                    next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                    if bid else core.get_active_batch(state.batches_root)
+                )
+                if not batch:
+                    self._send_json(404, {"ok": False, "error": "当前无活跃批次"})
+                    return
+                rec_dir = Path(batch["recognize_dir"])
+                res_path = rec_dir / "results.json"
+                if not res_path.is_file():
+                    self._send_json(404, {"ok": False, "error": "当前批次尚未完成识别"})
+                    return
+                results = core.read_json(res_path, {}) or {}
+                fb = core.read_json(rec_dir / "feedback.json", {}) or {}
+                sc = exam_schema_mod.load_batch_schema(core.batch_root_dir(batch))
+                if path == "/api/grades.csv":
+                    csv_bytes = exam_schema_mod.export_scores_csv(results, fb, sc).encode("utf-8")
+                    fname = urllib.parse.quote(f"{batch['batch_id']}_成绩单.csv")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{fname}")
+                    self.send_header("Content-Length", str(len(csv_bytes)))
+                    self.end_headers()
+                    self.wfile.write(csv_bytes)
+                    return
+                graded = exam_schema_mod.grade_batch(results, fb, sc)
+                self._send_json(200, {"ok": True, "batch_id": batch["batch_id"], **graded})
+                return
+
             if path == "/api/overview":
                 services = state.service_snapshot()
                 data = core.collect_tasks_and_leaderboard(
@@ -1773,12 +1859,17 @@ def make_handler(state: WorkbenchState):
                 active = data.get("active_batch")
                 rec_summary = state._read_run_stats(Path(active["recognize_dir"])) if active else None
                 diag_mod = core._load_diag_module(state.root)
+                active_schema = exam_schema_mod.load_batch_schema(core.batch_root_dir(active)) if active else None
                 data.update({
                     "is_host": self._is_host(),
                     "lan_ip": lan_ip,
                     "lan_url": lan_url,
                     "port": state.port,
                     "subjects": core.DEFAULT_SUBJECTS,
+                    "work_mode": core.get_work_mode(state.batches_root),
+                    "training_db": core.get_training_db_status(state.root, state.batches_root) if self._is_host() else None,
+                    "schema_summary": exam_schema_mod.summarize_schema(active_schema),
+                    "last_memory_plan": state.last_memory_plan if self._is_host() else None,
                     "pipeline_job": state.pipeline_job_snapshot(),
                     "recognition_summary": rec_summary,
                     "benchmark_job": state.benchmark_job_snapshot() if self._is_host() else None,
@@ -1825,6 +1916,90 @@ def make_handler(state: WorkbenchState):
         def do_POST(self):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
+
+            # 大文件上传通道：答案 PDF/图片直传（最高 40MB，支持二进制直传或 JSON base64 / 本机路径）
+            if path == "/api/schema/upload-source":
+                if not self._require_host():
+                    return
+                try:
+                    import base64
+                    from engine.exam_schema import extract_answer_source
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    ctype = (self.headers.get("Content-Type") or "").lower()
+                    length = int(self.headers.get("Content-Length") or 0)
+                    if length > 42_000_000:
+                        self._send_json(413, {"ok": False, "error": "答案文件超过 40MB 限制"})
+                        return
+                    bid = str((qs.get("batch_id") or [""])[0] or "").strip()
+                    raw_filename = str((qs.get("filename") or [""])[0] or "").strip()
+                    auto_ai = (qs.get("auto_ai") or ["0"])[0] in ("1", "true", "yes")
+                    src_file_path: Path | None = None
+                    raw_bytes: bytes | None = None
+                    if "application/json" in ctype:
+                        payload = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
+                        bid = str(payload.get("batch_id") or bid).strip()
+                        raw_filename = str(payload.get("filename") or raw_filename).strip()
+                        auto_ai = bool(payload.get("auto_ai", auto_ai))
+                        sp = str(payload.get("source_path") or "").strip()
+                        if sp:
+                            src_file_path = Path(sp)
+                        elif payload.get("data_b64"):
+                            raw_bytes = base64.b64decode(str(payload["data_b64"]))
+                    else:
+                        raw_bytes = self.rfile.read(length) if length > 0 else b""
+
+                    batch = (
+                        next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                        if bid else core.get_active_batch(state.batches_root)
+                    )
+                    if not batch:
+                        self._send_json(400, {"ok": False, "error": "请先选择或导入一个试卷批次"})
+                        return
+                    bdir = core.batch_root_dir(batch)
+                    out_src_dir = bdir / "answer_source"
+                    out_src_dir.mkdir(parents=True, exist_ok=True)
+                    if src_file_path is None:
+                        if not raw_bytes:
+                            self._send_json(400, {"ok": False, "error": "未收到答案文件内容"})
+                            return
+                        safe_name = Path(raw_filename or "answer.pdf").name
+                        if not Path(safe_name).suffix:
+                            safe_name += ".pdf"
+                        tmp_in = out_src_dir / ("upload_" + safe_name)
+                        tmp_in.write_bytes(raw_bytes)
+                        src_file_path = tmp_in
+                    manifest = extract_answer_source(src_file_path, out_src_dir)
+                    imgs = manifest.get("rendered_images") or []
+                    txt_file = manifest.get("extracted_text_file") or ""
+                    ai_prompt = (
+                        f"用户刚刚为批次「{batch['batch_id']}」上传了一份试卷标准答案文件：{manifest['source_name']}（共 {manifest['page_count']} 页）。\n"
+                        f"- 已提取的清晰答案页图片：{json.dumps(imgs, ensure_ascii=False)}\n"
+                        + (f"- 已提取的 PDF 文本文件：{txt_file}\n" if txt_file else "")
+                        + "请你仔细阅读上述答案文件（图片与文本），完整整理出所有选择题（单选/多选及分值，多选题默认漏选给一半即 partial_score=score*0.5）与填空/实验题（大题号、小题号、每小题空位数量、每空标准答案、分值、含图舍弃标志），"
+                        f"先将标准 exam_schema JSON 写入 `{out_src_dir / 'parsed_schema.json'}`，再立即执行同构 CLI 生效并推送界面：\n"
+                        f"`python -m apps.workbench schema set --batch \"{batch['batch_id']}\" --file \"{out_src_dir / 'parsed_schema.json'}\" --hub http://127.0.0.1:{state.port} --json`\n"
+                        "完成后用简明中文向用户汇报已解析的选择题数、填空题大题数与总分。"
+                    )
+                    ai_started = None
+                    if auto_ai:
+                        ai_started = state.start_ai_helper({
+                            "message": ai_prompt,
+                            "surface": "workbench",
+                            "mode": "yolo",
+                            "attach_screenshot": False,
+                        })
+                    state.bus.publish({"source": "gui", "step": "schema", "status": "done", "message": f"已提取答案源文件：{manifest['source_name']}（{manifest['page_count']} 页）"})
+                    self._send_json(200, {
+                        "ok": True,
+                        "batch_id": batch["batch_id"],
+                        "manifest": manifest,
+                        "ai_prompt": ai_prompt,
+                        "ai_started": ai_started,
+                    })
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": f"答案源文件提取失败：{exc}"})
+                return
+
             try:
                 body = self._read_json()
             except Exception as exc:
@@ -1926,17 +2101,201 @@ def make_handler(state: WorkbenchState):
                     patch["cpu_workers"] = max(0, min(16, int(body["cpu_workers"] or 0)))
                 if "api_concurrency" in body:
                     patch["api_concurrency"] = max(1, min(12, int(body["api_concurrency"] or 4)))
+                if "work_mode" in body:
+                    wm = str(body["work_mode"] or "grading").strip().lower()
+                    patch["work_mode"] = wm if wm in ("grading", "iteration") else "grading"
+                if "memory_crops" in body:
+                    patch["memory_crops"] = bool(body["memory_crops"])
+                if "training_db_dir" in body:
+                    patch["training_db_dir"] = str(body["training_db_dir"] or "").strip()
+                if "training_db_enabled" in body:
+                    patch["training_db_enabled"] = bool(body["training_db_enabled"])
                 if "last_benchmark" in body and isinstance(body["last_benchmark"], dict):
                     patch["last_benchmark"] = body["last_benchmark"]
                 cfg = core.save_config(patch, state.batches_root)
+                # 若切换了工作模式且 8904 正在运行，顺手热同步给 8904
+                if "work_mode" in patch:
+                    try:
+                        req_wm = urllib.request.Request(
+                            "http://127.0.0.1:8904/api/work-mode",
+                            data=json.dumps({"work_mode": patch["work_mode"]}).encode("utf-8"),
+                            headers={"Content-Type": "application/json", "X-AutoGrade-Internal": "cli"},
+                            method="POST",
+                        )
+                        urllib.request.urlopen(req_wm, timeout=1.0).close()
+                    except Exception:
+                        pass
                 state.last_check = core.check_environment(state.root, state.batches_root, deep=False)
-                state.bus.publish({"source": str(body.get("source") or "gui"), "step": "check", "status": "done", "message": "工作台配置已更新"})
+                state.bus.publish({
+                    "source": str(body.get("source") or "gui"),
+                    "step": "work_mode" if "work_mode" in patch else "check",
+                    "status": "done",
+                    "work_mode": core.get_work_mode(state.batches_root),
+                    "message": f"已切换到{'改试卷模式' if core.get_work_mode(state.batches_root) == 'grading' else '模型迭代模式'}" if "work_mode" in patch else "工作台配置已更新",
+                })
                 self._send_json(200, {
                     "ok": True,
                     "config": cfg,
+                    "work_mode": core.get_work_mode(state.batches_root),
+                    "training_db": core.get_training_db_status(state.root, state.batches_root),
                     "agents": agent_providers.detect_all_agents(cfg, deep=False),
                     "infer_settings": core.get_infer_settings(state.batches_root),
                 })
+                return
+
+            if path == "/api/training-db":
+                patch = {}
+                if "training_db_dir" in body:
+                    patch["training_db_dir"] = str(body["training_db_dir"] or "").strip()
+                if "training_db_enabled" in body:
+                    patch["training_db_enabled"] = bool(body["training_db_enabled"])
+                if patch:
+                    core.save_config(patch, state.batches_root)
+                st = core.get_training_db_status(state.root, state.batches_root)
+                if body.get("ensure_dirs"):
+                    base = Path(st["training_db_dir"])
+                    for sub_d in ("m1/images", "m1/labels", "m2/images", "m2/labels", "m3/images", "m3/labels", "choice"):
+                        (base / sub_d).mkdir(parents=True, exist_ok=True)
+                    st = core.get_training_db_status(state.root, state.batches_root)
+                self._send_json(200, {"ok": True, **st})
+                return
+
+            if path == "/api/training-db/open":
+                st = core.get_training_db_status(state.root, state.batches_root)
+                target = Path(st["training_db_dir"])
+                target.mkdir(parents=True, exist_ok=True)
+                try:
+                    if os.name == "nt":
+                        os.startfile(str(target))
+                    else:
+                        subprocess.Popen(["xdg-open", str(target)])
+                    self._send_json(200, {"ok": True, "path": str(target)})
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            if path == "/api/memory/preflight":
+                try:
+                    from engine.memory_budget import run_memory_crop_preflight
+                    bid = str(body.get("batch_id") or "").strip()
+                    batch = (
+                        next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                        if bid else core.get_active_batch(state.batches_root)
+                    )
+                    if not batch:
+                        self._send_json(400, {"ok": False, "error": "当前还没有导入试卷批次"})
+                        return
+                    img_dir = Path(batch["images_dir"])
+                    imgs = sorted(p for p in img_dir.iterdir() if p.is_file() and p.suffix.lower() in core.IMAGE_EXTS) if img_dir.is_dir() else []
+                    infer_cfg = core.get_infer_settings(state.batches_root)
+                    plan = run_memory_crop_preflight(
+                        imgs,
+                        grid_size=1500,
+                        requested_concurrency=int(body.get("concurrency") or infer_cfg.get("api_concurrency") or 4),
+                        requested_yolo_batch=int(body.get("yolo_batch") or infer_cfg.get("yolo_batch") or 0),
+                    )
+                    plan["batch_id"] = batch["batch_id"]
+                    state.last_memory_plan = plan
+                    self._send_json(200, plan)
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": f"内存预检失败：{exc}"})
+                return
+
+            if path == "/api/schema":
+                try:
+                    from engine.exam_schema import load_batch_schema, save_batch_schema, summarize_schema
+                    bid = str(body.get("batch_id") or "").strip()
+                    batch = (
+                        next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                        if bid else core.get_active_batch(state.batches_root)
+                    )
+                    if not batch:
+                        self._send_json(400, {"ok": False, "error": "请先选择或导入批次"})
+                        return
+                    bdir = core.batch_root_dir(batch)
+                    raw_schema = body.get("schema")
+                    if raw_schema is None and ("multi_choice_partial_ratio" in body or "scoring" in body):
+                        # 仅更新判分规则（如修改多选题漏选比例），保留现有题目答案
+                        existing = load_batch_schema(bdir) or {}
+                        sc_cfg = dict(existing.get("scoring") or {})
+                        if isinstance(body.get("scoring"), dict):
+                            sc_cfg.update(body["scoring"])
+                        if "multi_choice_partial_ratio" in body:
+                            ratio = float(body["multi_choice_partial_ratio"])
+                            sc_cfg["multi_choice_partial_ratio"] = ratio
+                            # 同步按新比例更新未手动指定的多选题漏选分
+                            for c in (existing.get("choices") or {}).values():
+                                if isinstance(c, dict) and c.get("type") == "multi":
+                                    c["partial_score"] = round(float(c.get("score") or sc_cfg.get("default_choice_multi_score") or 6.0) * ratio, 2)
+                        existing["scoring"] = sc_cfg
+                        raw_schema = existing
+                    if not isinstance(raw_schema, dict):
+                        self._send_json(400, {"ok": False, "error": "缺少有效的 schema JSON 对象"})
+                        return
+                    saved = save_batch_schema(bdir, raw_schema)
+                    summ = summarize_schema(saved)
+                    state.bus.publish({
+                        "source": str(body.get("source") or "gui"),
+                        "step": "schema",
+                        "status": "done",
+                        "batch_id": batch["batch_id"],
+                        "schema_summary": summ,
+                        "message": f"已保存试卷标准答案（选择 {summ['choice_count']} 题 / 填空 {summ['fill_question_count']} 大题 {summ['fill_blank_count']} 空 / 满分 {summ['total_possible_score']}）",
+                    })
+                    self._send_json(200, {"ok": True, "batch_id": batch["batch_id"], "schema": saved, "summary": summ})
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": f"保存试卷答案失败：{exc}"})
+                return
+
+            if path == "/api/schema/clear":
+                bid = str(body.get("batch_id") or "").strip()
+                batch = (
+                    next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                    if bid else core.get_active_batch(state.batches_root)
+                )
+                if batch:
+                    sp = core.batch_root_dir(batch) / "exam_schema.json"
+                    if sp.is_file():
+                        sp.unlink()
+                    state.bus.publish({"source": "gui", "step": "schema", "status": "done", "message": "已清除当前批次标准答案（恢复通用识别模式）"})
+                self._send_json(200, {"ok": True})
+                return
+
+            if path == "/api/schema/parse-vlm":
+                try:
+                    from engine.exam_schema import parse_schema_via_vlm, save_batch_schema, summarize_schema
+                    bid = str(body.get("batch_id") or "").strip()
+                    batch = (
+                        next((b for b in core.list_batches(state.batches_root) if b["batch_id"] == bid), None)
+                        if bid else core.get_active_batch(state.batches_root)
+                    )
+                    if not batch:
+                        self._send_json(400, {"ok": False, "error": "当前无活跃批次"})
+                        return
+                    bdir = core.batch_root_dir(batch)
+                    manifest = core.read_json(bdir / "answer_source" / "manifest.json", None)
+                    if not manifest:
+                        self._send_json(400, {"ok": False, "error": "请先上传答案 PDF 或图片文件"})
+                        return
+                    parsed_sc = parse_schema_via_vlm(
+                        manifest,
+                        root=state.root,
+                        subject=str(batch.get("subject") or ""),
+                        title=str(batch.get("batch_id") or ""),
+                    )
+                    saved = save_batch_schema(bdir, parsed_sc)
+                    summ = summarize_schema(saved)
+                    state.bus.publish({
+                        "source": "gui",
+                        "step": "schema",
+                        "status": "done",
+                        "batch_id": batch["batch_id"],
+                        "schema_summary": summ,
+                        "message": f"VLM 直连解析答案完成：选择 {summ['choice_count']} 题 / 填空 {summ['fill_blank_count']} 空",
+                    })
+                    self._send_json(200, {"ok": True, "batch_id": batch["batch_id"], "schema": saved, "summary": summ})
+                except Exception as exc:
+                    self._send_json(400, {"ok": False, "error": f"VLM 解析答案失败：{exc}"})
                 return
 
             if path == "/api/config/import":

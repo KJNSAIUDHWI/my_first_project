@@ -12,6 +12,7 @@ import os
 os.environ.setdefault('PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK', 'True')
 from pathlib import Path
 import sys
+import threading
 import time
 import warnings
 
@@ -242,17 +243,20 @@ class Recognizer:
         zone_local_boxes: dict[int, tuple[str, list[int], Image.Image, list[dict]]],
         zone_errors: dict[int, str],
         started_mono: float,
+        save_crops: bool = True,
     ) -> tuple[dict, list]:
-        """在已知 M1/M2/M3 检测框后执行 CPU 后处理（批量 OCR + 涂卡 CNN + 裁图落盘）。"""
+        """在已知 M1/M2/M3 检测框后执行 CPU 后处理（批量 OCR + 涂卡 CNN + 可选内存暂存裁图）。"""
         from engine.choice_reader import read_choice_zone, _crop, crop_option_row, _box_px
 
         pid = f'p{index:03d}'
         (out / 'images').mkdir(exist_ok=True)
-        (out / 'crops').mkdir(exist_ok=True)
+        if save_crops:
+            (out / 'crops').mkdir(exist_ok=True)
         image.save(out / 'images' / (pid + '.jpg'), quality=95)
         thumbnail = image.copy()
         thumbnail.thumbnail((280, 400))
         thumbnail.save(out / 'images' / (pid + '_thumb.jpg'))
+        thumbnail.close()
 
         page = {
             'id': pid,
@@ -288,23 +292,31 @@ class Recognizer:
 
         def add(kind, box, number=None, issues=None, extra=None):
             ident = pid + '_' + str(len(page['items'])).zfill(3)
-            im = crop(image, box)
             path = 'crops/' + ident + '.png'
-            im.save(out / path)
+            need_crop_im = save_crops or kind in ('fill', 'identity')
+            im = crop(image, box) if need_crop_im else None
+            if save_crops and im is not None:
+                im.save(out / path)
             item = {
                 'id': ident,
                 'page_id': pid,
                 'kind': kind,
                 'box': bounds(box, *image.size),
                 'crop': path,
+                'crop_in_memory': not save_crops,
                 'number': number,
                 'issues': list(issues or []),
                 'status': '等待视觉转录' if kind != 'choice' else '已识别',
                 **(extra or {}),
             }
             page['items'].append(item)
-            if kind in ('fill', 'identity'):
+            if kind in ('fill', 'identity') and im is not None:
                 tiles.append(({'id': ident, 'kind': kind, 'page_id': pid, 'number': number, 'crop': path}, im))
+            elif im is not None:
+                try:
+                    im.close()
+                except Exception:
+                    pass
             return item
 
         for zi, zone in enumerate(list(m1_boxes)):
@@ -359,11 +371,12 @@ class Recognizer:
                             max(rect[3], (nb[1] + nb[3] / 2) * local_image.height),
                         ]
                         item = add('choice', translated(union, x, y), row['no'], issues, {'answer': row['answer'], 'recognition': row})
-                        nc = (nb[0] * local_image.width, nb[1] * local_image.height, nb[2] * local_image.width, nb[3] * local_image.height)
-                        cin = crop_option_row(bgr, [], *_box_px(*ob, local_image.width, local_image.height), paired=nc)
-                        cp = 'crops/' + item['id'] + '_cnn.png'
-                        Image.fromarray(cv2.cvtColor(cin, cv2.COLOR_BGR2RGB)).save(out / cp)
-                        item['model_input'] = cp
+                        if save_crops:
+                            nc = (nb[0] * local_image.width, nb[1] * local_image.height, nb[2] * local_image.width, nb[3] * local_image.height)
+                            cin = crop_option_row(bgr, [], *_box_px(*ob, local_image.width, local_image.height), paired=nc)
+                            cp = 'crops/' + item['id'] + '_cnn.png'
+                            Image.fromarray(cv2.cvtColor(cin, cv2.COLOR_BGR2RGB)).save(out / cp)
+                            item['model_input'] = cp
                     for b in norm:
                         paired = paired_num if b[0] == 2 else paired_opt
                         if tuple(b[1:]) not in paired:
@@ -616,7 +629,44 @@ def run(args):
         requested_batch=getattr(args, 'yolo_batch', 0),
         requested_workers=getattr(args, 'workers', 0),
     )
-    run_settings = {**SETTINGS, 'device': eff_device, 'yolo_batch': yolo_batch, 'workers': workers}
+
+    # 加载可选试卷结构/答案（仅注入空位结构约束，绝不传标准答案）
+    from engine.exam_schema import load_batch_schema, summarize_schema
+    from engine.memory_budget import run_memory_crop_preflight
+
+    schema_arg = getattr(args, 'schema', None)
+    if schema_arg and Path(schema_arg).is_file():
+        exam_schema = load_batch_schema(Path(schema_arg).parent)
+    else:
+        exam_schema = load_batch_schema(out) or load_batch_schema(out.parent)
+    schema_summary = summarize_schema(exam_schema)
+
+    # 改卷模式内存暂存 Crop：启动前默认跑一遍自动内存压测与分配评估
+    requested_mem = bool(getattr(args, 'memory_crops', False))
+    memory_plan: dict | None = None
+    use_memory_crops = False
+    max_inflight_grids = max(4, int(args.concurrency) * 2)
+    if requested_mem:
+        memory_plan = run_memory_crop_preflight(
+            sources,
+            grid_size=1500,
+            requested_concurrency=args.concurrency,
+            requested_yolo_batch=yolo_batch,
+        )
+        use_memory_crops = bool(memory_plan.get('use_memory_crops'))
+        max_inflight_grids = int(memory_plan.get('max_inflight_grids') or max_inflight_grids)
+        if use_memory_crops and memory_plan.get('recommended_yolo_batch'):
+            yolo_batch = min(yolo_batch, int(memory_plan['recommended_yolo_batch']))
+        _emit_event({'event': 'memory_preflight', 'plan': memory_plan})
+
+    run_settings = {
+        **SETTINGS,
+        'device': eff_device,
+        'yolo_batch': yolo_batch,
+        'workers': workers,
+        'memory_crops': use_memory_crops,
+        'has_schema': bool(schema_summary.get('configured')),
+    }
 
     working = args.working_images or not args.input
     model_info = {t: {'path': str(current(t)), 'sha256': digest(current(t).read_bytes())} for t in ('orient', 'm1', 'm2', 'm3', 'choice')}
@@ -680,8 +730,16 @@ def run(args):
             'detect_only': bool(args.detect_only),
         },
     )
-    run_log.emit('run.start', f'启动自动识别，共 {len(sources)} 页（设备 {eff_device}）')
-    packers = {'fill': SquarePacker(out), 'identity': SquarePacker(out, prefix='i')}
+    run_log.emit(
+        'run.start',
+        f'启动自动识别，共 {len(sources)} 页（设备 {eff_device}，{"内存暂存Crop" if use_memory_crops else "磁盘缓存"}，{"已载入试卷结构约束" if schema_summary.get("configured") else "无试卷答案·通用模式"}）',
+        detail={'memory_plan': memory_plan, 'schema_summary': schema_summary},
+    )
+    packers = {
+        'fill': SquarePacker(out, in_memory=use_memory_crops),
+        'identity': SquarePacker(out, prefix='i', in_memory=use_memory_crops),
+    }
+    inflight_grid_sem = threading.Semaphore(max(2, max_inflight_grids)) if use_memory_crops else None
     recognizer: Recognizer | None = None
 
     pages: list[dict] = []
@@ -953,19 +1011,41 @@ def run(args):
         ThreadPoolExecutor(max_workers=args.concurrency) as api_pool,
         ThreadPoolExecutor(max_workers=workers) as cpu_pool,
     ):
-        def submit_grid(grid):
+        def _run_grid_call(grid_obj: dict, raw_bytes: bytes | None):
+            try:
+                return client.call(grid_obj, False, run_log.run_id, schema=exam_schema, image_bytes=raw_bytes)
+            finally:
+                raw_bytes = None
+                if inflight_grid_sem is not None:
+                    inflight_grid_sem.release()
+
+        def submit_grid(grid, packer_ref=None):
             if grid:
                 grid['run_id'] = run_log.run_id
                 grids.append(grid)
                 grid_by_id[grid['id']] = grid
+                raw_bytes = packer_ref.pop_buffer(grid['id']) if (packer_ref is not None and grid.get('in_memory')) else None
                 if not args.detect_only:
-                    futures[api_pool.submit(client.call, grid, False, run_log.run_id)] = grid['id']
+                    if inflight_grid_sem is not None:
+                        inflight_grid_sem.acquire()
+                    futures[api_pool.submit(_run_grid_call, grid, raw_bytes)] = grid['id']
+                else:
+                    raw_bytes = None
 
         def commit_finished_page(page: dict, tiles: list):
             pages.append(page)
             accumulate_page_counts(page)
             for item, tile_im in tiles:
-                submit_grid(packers[item['kind']].add(item, tile_im))
+                pkr = packers[item['kind']]
+                try:
+                    finished_g = pkr.add(item, tile_im)
+                finally:
+                    try:
+                        tile_im.close()
+                    except Exception:
+                        pass
+                if finished_g:
+                    submit_grid(finished_g, pkr)
             merged = harvest_ready_api(block_wait=False)
             checkpoint('本地检测与拼图处理中', force=merged or len(pages) == total_pages)
             emit_progress(
@@ -1050,11 +1130,18 @@ def run(args):
                                 if k_copy in prev_it:
                                     it[k_copy] = prev_it[k_copy]
                             continue
-                        if (out / it['crop']).is_file():
+                        crop_path = out / it['crop'] if it.get('crop') else None
+                        if crop_path and crop_path.is_file():
                             tiles.append((
                                 {'id': it['id'], 'kind': it['kind'], 'page_id': page['id'], 'number': it['number'], 'crop': it['crop']},
-                                Image.open(out / it['crop']).convert('RGB'),
+                                Image.open(crop_path).convert('RGB'),
                             ))
+                        elif page.get('image') and (out / page['image']).is_file() and it.get('box'):
+                            with Image.open(out / page['image']) as page_im:
+                                tiles.append((
+                                    {'id': it['id'], 'kind': it['kind'], 'page_id': page['id'], 'number': it['number'], 'crop': it.get('crop') or ''},
+                                    crop(page_im.convert('RGB'), it['box']),
+                                ))
                 except Exception as exc:
                     diag = diagnose_exception(exc, default_module='缓存读取')
                     append_error_log(out, diag['module'], exc, diag, context={'page': f'p{i:03d}'})
@@ -1256,6 +1343,7 @@ def run(args):
                         zone_local_by_idx.get(idx_p, {}),
                         zone_err_by_idx.get(idx_p, {}),
                         batch_start,
+                        not use_memory_crops,
                     )
                     pending_post_futs.append((idx_p, src_p, fut_post))
 
@@ -1264,7 +1352,7 @@ def run(args):
 
         # 收尾未满拼图并提交剩余 API 请求
         for packer in packers.values():
-            submit_grid(packer.finish())
+            submit_grid(packer.finish(), packer)
         checkpoint('大模型拼图转录与实时合并中', force=True)
 
         if args.detect_only:
@@ -1281,34 +1369,65 @@ def run(args):
 
         # 结构异常与 JSON 解析失败单轮有界单题自动补修（绝不重跑已成功题块或网络/鉴权失败）
         if not args.detect_only:
-            repair_packer = SquarePacker(out, prefix='r', max_items=1)
+            repair_packer = SquarePacker(out, prefix='r', max_items=1, in_memory=use_memory_crops)
             repair_grids = []
             repaired_tile_ids: set[str] = set()
             for page in pages:
-                for item in page['items']:
-                    if item['kind'] not in ('fill', 'identity'):
-                        continue
-                    is_struct = item['status'] == '结构异常'
-                    is_json_fail = (
-                        item['status'] == '调用失败'
-                        and is_json_or_struct_error(' '.join(str(x) for x in (item.get('issues') or [])))
-                    )
-                    if is_struct or is_json_fail:
-                        crop_p = out / item['crop']
-                        if not crop_p.is_file():
+                page_img_cache = None
+                try:
+                    for item in page['items']:
+                        if item['kind'] not in ('fill', 'identity'):
                             continue
-                        repaired_tile_ids.add(str(item['id']))
-                        tile = {k: item[k] for k in ('id', 'kind', 'page_id', 'number', 'crop')}
-                        finished = repair_packer.add(tile, Image.open(crop_p).convert('RGB'))
-                        if finished:
-                            repair_grids.append(finished)
+                        is_struct = item['status'] == '结构异常'
+                        is_json_fail = (
+                            item['status'] == '调用失败'
+                            and is_json_or_struct_error(' '.join(str(x) for x in (item.get('issues') or [])))
+                        )
+                        if is_struct or is_json_fail:
+                            crop_p = out / item['crop'] if item.get('crop') else None
+                            tile_im = None
+                            if crop_p and crop_p.is_file():
+                                tile_im = Image.open(crop_p).convert('RGB')
+                            elif page.get('image') and (out / page['image']).is_file() and item.get('box'):
+                                if page_img_cache is None:
+                                    page_img_cache = Image.open(out / page['image']).convert('RGB')
+                                tile_im = crop(page_img_cache, item['box'])
+                            if tile_im is None:
+                                continue
+                            repaired_tile_ids.add(str(item['id']))
+                            tile = {k: item[k] for k in ('id', 'kind', 'page_id', 'number', 'crop')}
+                            try:
+                                finished = repair_packer.add(tile, tile_im)
+                            finally:
+                                try:
+                                    tile_im.close()
+                                except Exception:
+                                    pass
+                            if finished:
+                                repair_grids.append(finished)
+                finally:
+                    if page_img_cache is not None:
+                        try:
+                            page_img_cache.close()
+                        except Exception:
+                            pass
             finished = repair_packer.finish()
             if finished:
                 repair_grids.append(finished)
             if repair_grids:
                 emit_progress('结构异常自动补修', f'检测到 {len(repaired_tile_ids)} 个结构/解析异常题块，正在按单题模式自动补修（{len(repair_grids)} 图）...')
                 run_log.emit('repair.start', f'自动单题补修启动：{len(repaired_tile_ids)} 题 / {len(repair_grids)} 图')
-                repair_jobs = {api_pool.submit(client.call, g, True, run_log.run_id): g['id'] for g in repair_grids}
+                repair_jobs = {
+                    api_pool.submit(
+                        client.call,
+                        g,
+                        True,
+                        run_log.run_id,
+                        exam_schema,
+                        repair_packer.pop_buffer(g['id']) if g.get('in_memory') else None,
+                    ): g['id']
+                    for g in repair_grids
+                }
                 repair_responses = {}
                 for fut in as_completed(repair_jobs):
                     gid = repair_jobs[fut]
@@ -1412,9 +1531,15 @@ def run(args):
         'provider': client.provider,
         'provider_label': client.provider_label,
         'settings': run_settings,
+        'memory_crops_plan': memory_plan,
+        'schema_summary': schema_summary,
         'stats': stats,
         'status': final_status,
-        'note': '只识别，不评分。未标注的空白区域也可能有漏检，请结合整页原图核对。工作图保留原转正像素；正反面不归并。',
+        'note': (
+            '已结合试卷结构先验识别；可在审阅工作台查看自动判分与导出成绩。'
+            if schema_summary.get('configured')
+            else '未配置试卷标准答案与结构（通用模式，空位划分准确率可能略低且不自动判分）。'
+        ),
     }
     save_json(out / 'results.json', result)
     run_log.finish(
@@ -1444,6 +1569,8 @@ def main():
     parser.add_argument('--yolo-batch', type=int, default=0, help='YOLO 批大小（0=自动按硬件选择）')
     parser.add_argument('--workers', type=int, default=0, help='CPU 读图/纠偏/后处理线程数（0=自动）')
     parser.add_argument('--concurrency', type=int, default=4, choices=range(1, 13))
+    parser.add_argument('--memory-crops', action='store_true', help='内存暂存 Crop 与拼图（启动前自动内存评估，API 返回即释放）')
+    parser.add_argument('--schema', type=Path, default=None, help='可选试卷结构与标准答案 exam_schema.json 路径')
     args = parser.parse_args()
     try:
         run(args)
