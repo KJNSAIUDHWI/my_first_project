@@ -1324,6 +1324,35 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
     runtime_cfg = {'work_mode': work_mode if work_mode in ('grading', 'iteration') else 'grading'}
     token = secrets.token_urlsafe(24)
     template_path = Path(__file__).resolve().parent / 'index.html'
+    static_dir = (Path(__file__).resolve().parent / 'static').resolve()
+    shared_dir = (Path(__file__).resolve().parent.parent / 'shared').resolve()
+    _STATIC_MIME = {
+        '.js': 'application/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.json': 'application/json; charset=utf-8',
+        '.woff': 'font/woff',
+        '.woff2': 'font/woff2',
+        '.ttf': 'font/ttf',
+    }
+
+    def _serve_static_file(handler: BaseHTTPRequestHandler, base_dir: Path, rel: str):
+        clean_rel = (rel or '').lstrip('/').replace('\\', '/')
+        if not clean_rel or '..' in Path(clean_rel).parts:
+            return handler.reply({'error': '文件不存在'}, 404)
+        try:
+            target = (base_dir / clean_rel).resolve()
+        except OSError:
+            return handler.reply({'error': '文件不存在'}, 404)
+        if not target.is_relative_to(base_dir):
+            return handler.reply({'error': '禁止访问'}, 403)
+        ctype = _STATIC_MIME.get(target.suffix.lower())
+        if not ctype or not target.is_file():
+            return handler.reply({'error': '文件不存在'}, 404)
+        return handler.reply(target.read_bytes(), content_type=ctype)
 
     def _load_grading_snapshot(result_obj: dict | None = None, fb_obj: dict | None = None) -> tuple[dict | None, dict]:
         from engine.exam_schema import load_batch_schema, grade_batch
@@ -1399,6 +1428,10 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
             if name == '/':
                 template = template_path.read_text(encoding='utf-8')
                 return self.reply(template.replace('__TOKEN__', token).encode(), content_type='text/html; charset=utf-8')
+            if name.startswith('/static/'):
+                return _serve_static_file(self, static_dir, name.removeprefix('/static/'))
+            if name.startswith('/shared/'):
+                return _serve_static_file(self, shared_dir, name.removeprefix('/shared/'))
             if name == '/api/events':
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
