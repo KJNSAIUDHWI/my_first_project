@@ -471,18 +471,26 @@ def capture_headless_ui(
     som: bool = False,
     wait_ms: int = 1200,
     out_path: Path | None = None,
+    extra_query: dict[str, str] | None = None,
+    full_page: bool = False,
 ) -> dict[str, Any]:
-    """用本机 Edge/Chrome 无头模式离屏渲染目标界面（同步前台 ui_state，不抢焦点），可选裁切与元素清单导出。"""
+    """用本机 Edge/Chrome 无头模式离屏渲染目标界面（同步前台 ui_state，不抢焦点），可选裁切、只读视图覆盖与元素清单导出。"""
     browser = find_headless_browser()
     if not browser:
         return {"ok": False, "error": "未检测到本机 Edge 或 Chrome 浏览器，无法执行无头网页离屏渲染"}
 
-    # 拼接镜像查询参数（让网页在加载时自动还原前台同款 Tab/页码/选中框/缩放状态）
+    # 拼接镜像查询参数（让网页在加载时自动还原前台同款 Tab/页码/选中框/缩放状态，或按只读预览参数切视图）
     parsed = urllib.parse.urlparse(url)
     qs = urllib.parse.parse_qs(parsed.query)
     qs["mirror"] = ["1"]
     if mirror_client:
         qs["mirror_client"] = [mirror_client]
+    if isinstance(extra_query, dict):
+        for k, v in extra_query.items():
+            ks = str(k or "").strip()
+            vs = str(v or "").strip()
+            if ks and vs:
+                qs[ks] = [vs]
     final_url = urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(qs, doseq=True)))
 
     cap_dir = _captures_dir(batches_root)
@@ -588,6 +596,19 @@ def capture_headless_ui(
         shot_params: dict[str, Any] = {"format": "png", "fromSurface": True}
         if clip:
             shot_params["clip"] = clip
+        elif full_page:
+            try:
+                lm = cdp.call("Page.getLayoutMetrics", timeout=5.0)
+                cs = lm.get("cssContentSize") or lm.get("contentSize") or {}
+                full_h = int(min(4200, max(int(height), float(cs.get("height") or height) + 24)))
+                if full_h > int(height):
+                    cdp.call("Emulation.setDeviceMetricsOverride", {
+                        "width": int(width), "height": full_h, "deviceScaleFactor": 1, "mobile": False,
+                    })
+                    time.sleep(0.18)
+                shot_params["captureBeyondViewport"] = True
+            except Exception:
+                shot_params["captureBeyondViewport"] = True
         shot = cdp.call("Page.captureScreenshot", shot_params, timeout=15.0)
         b64 = shot.get("data") or ""
         if not b64:

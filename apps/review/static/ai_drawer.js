@@ -58,15 +58,27 @@ async function applyReviewMirrorStateIfNeeded() {
     const qs = REV_MIRROR_CLIENT ? `?client_id=${encodeURIComponent(REV_MIRROR_CLIENT)}` : "";
     const res = await api("/api/ui-state" + qs);
     const st = (res && res.active) || {};
-    if (st.fill_display_mode) state.fillDisplayMode = st.fill_display_mode;
+    const qPage = REV_URL_PARAMS.get("page") || "";
+    const qWorkMode = REV_URL_PARAMS.get("work_mode") || "";
+    const qOverview = REV_URL_PARAMS.get("overview") || "";
+    const qItem = REV_URL_PARAMS.get("item") || "";
+    if (qWorkMode && typeof applyWorkModeUI === "function") applyWorkModeUI(qWorkMode, false);
+    if (qOverview === "1" || qOverview === "0") {
+      state.fillDisplayMode = qOverview === "1" ? "sidebar" : "margin";
+      if (typeof syncRightSidebarVisibility === "function") syncRightSidebarVisibility(true);
+    } else if (st.fill_display_mode) {
+      state.fillDisplayMode = st.fill_display_mode;
+    }
     if (typeof st.show_overlay === "boolean") state.showOverlay = st.show_overlay;
     if (typeof st.show_conf === "boolean") state.showConf = st.show_conf;
-    if (st.page_id) {
-      const idx = state.pages.findIndex(p => p.id === st.page_id);
+    const targetPid = qPage || st.page_id || "";
+    if (targetPid) {
+      const idx = state.pages.findIndex(p => p.id === targetPid);
       if (idx >= 0 && idx !== state.pageIdx) await _origOpenPage(idx, true, true);
     }
     if (st.mode && st.mode !== state.mode) _origSetMode(st.mode);
-    if (st.selected_item_id) state.selectedItemId = st.selected_item_id;
+    const targetItem = qItem || st.selected_item_id || "";
+    if (targetItem) state.selectedItemId = targetItem;
     draw();
   } catch {}
   window.__MIRROR_APPLIED__ = true;

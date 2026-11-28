@@ -79,8 +79,9 @@ async function openPage(idx, skipDirtyWarn = false, skipLockWarn = false) {
       return;
     }
   }
+  const isMirror = (typeof REV_IS_MIRROR !== "undefined" && REV_IS_MIRROR) || new URLSearchParams(window.location.search).get("mirror") === "1";
   const prev = currentPage();
-  if (prev && prev.id && prev.id !== targetPage.id) {
+  if (!isMirror && prev && prev.id && prev.id !== targetPage.id) {
     api("/api/release", { client_id: CLIENT_ID, page_id: prev.id }).catch(() => {});
   }
 
@@ -111,9 +112,11 @@ async function openPage(idx, skipDirtyWarn = false, skipLockWarn = false) {
   state.focusedLowConf = null;
   updateSubboxHudUI();
 
-  api("/api/acquire", { page_id: p.id, client_id: CLIENT_ID, user: REVIEWER || "成员", force: true })
-    .then(r => { if (r.locks) state.locks = r.locks; renderLeftList(); })
-    .catch(() => {});
+  if (!isMirror) {
+    api("/api/acquire", { page_id: p.id, client_id: CLIENT_ID, user: REVIEWER || "成员", force: true })
+      .then(r => { if (r.locks) state.locks = r.locks; renderLeftList(); })
+      .catch(() => {});
+  }
 
   updateTopbar();
   renderLeftList();

@@ -80,9 +80,18 @@ window.addEventListener('unhandledrejection', e => {
 
 let _uiStateTimer = null;
 function collectWbUiState() {
+  let openDlg = '';
+  if ($('aiDrawer') && !$('aiDrawer').classList.contains('hidden')) openDlg = 'ai';
+  else if ($('vlmDialog')?.open) openDlg = 'vlm';
+  else if ($('lanDialog')?.open) openDlg = 'lan';
+  else if ($('schemaRuleDialog')?.open) openDlg = 'schema';
+  else if ($('memPreflightDialog')?.open) openDlg = 'mem';
+  else if ($('guideDialog')?.open) openDlg = 'guide';
   return {
     client_id: CLIENT_ID,
     view: CURRENT_VIEW,
+    work_mode: typeof WORK_MODE === 'string' ? WORK_MODE : 'grading',
+    dialog: openDlg,
     batch_id: OVERVIEW?.active_batch?.batch_id || '',
     scroll_y: Math.round(window.scrollY || 0),
     arch_collapsed: ARCH_COLLAPSED,
@@ -102,16 +111,53 @@ async function applyMirrorUiStateIfNeeded() {
     const qs = MIRROR_CLIENT_ID ? `?client_id=${encodeURIComponent(MIRROR_CLIENT_ID)}` : '';
     const res = await api('/api/ui-state' + qs);
     const st = res?.active || {};
-    if (st.view && ['check', 'ingest', 'overview', 'train'].includes(st.view)) {
-      setView(st.view);
-      if (st.view === 'check' && !CHECK) renderCheck(await api('/api/check'));
-      if (st.view === 'train') await refreshTrainOverview();
+    const qMode = URL_PARAMS.get('work_mode') || '';
+    const qView = URL_PARAMS.get('view') || '';
+    const qDlg = URL_PARAMS.get('dialog') || '';
+    const qExpandArch = URL_PARAMS.get('expand_arch') === '1';
+
+    const targetMode = (qMode === 'grading' || qMode === 'iteration')
+      ? qMode
+      : ((st.work_mode === 'grading' || st.work_mode === 'iteration') ? st.work_mode : '');
+    if (targetMode && typeof applyWorkModeUI === 'function') {
+      applyWorkModeUI(targetMode, false);
     }
-    if (typeof st.arch_collapsed === 'boolean') {
+
+    const targetView = ['check', 'ingest', 'overview', 'train'].includes(qView)
+      ? qView
+      : (['check', 'ingest', 'overview', 'train'].includes(st.view) ? st.view : '');
+    if (targetView) {
+      setView(targetView);
+      if (targetView === 'check' && !CHECK) renderCheck(await api('/api/check'));
+      if (targetView === 'train') await refreshTrainOverview();
+    }
+
+    if (qExpandArch) {
+      ARCH_COLLAPSED = false;
+      ARCH_USER_EXPANDED = true;
+      applyArchCollapseUI();
+    } else if (typeof st.arch_collapsed === 'boolean') {
       ARCH_COLLAPSED = st.arch_collapsed;
       applyArchCollapseUI();
     }
-    if (st.scroll_y) window.scrollTo(0, Number(st.scroll_y) || 0);
+
+    const targetDlg = qDlg || st.dialog || '';
+    if (targetDlg === 'ai' && typeof openAiHelperDialog === 'function') {
+      openAiHelperDialog(true);
+    } else if (targetDlg === 'vlm' && typeof openVlmDialog === 'function') {
+      await openVlmDialog();
+    } else if (targetDlg === 'lan') {
+      $('lanDialog')?.showModal();
+    } else if (targetDlg === 'schema') {
+      $('schemaRuleDialog')?.showModal();
+    } else if (targetDlg === 'mem') {
+      $('memPreflightDialog')?.showModal();
+    } else if (targetDlg === 'guide') {
+      if (typeof focusAnatomy === 'function') focusAnatomy('review');
+      $('guideDialog')?.showModal();
+    }
+
+    if (!qView && st.scroll_y) window.scrollTo(0, Number(st.scroll_y) || 0);
   } catch (_) {}
   window.__MIRROR_APPLIED__ = true;
 }

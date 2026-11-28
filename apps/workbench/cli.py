@@ -303,7 +303,7 @@ def cmd_capabilities(args, t0: float) -> int:
             {"name": "config", "safety": "mutating", "args": ["get|set|set-vlm|import|export", "--json"], "desc": "查看/修改工作台配置与 VLM 密钥，或整包导入导出配置"},
             {"name": "weights", "safety": "mutating", "args": ["unpack --password <pwd>", "--json"], "desc": "解压加密模型权重包"},
             {"name": "agents", "safety": "read_only", "args": ["list|test", "--deep", "--probe-version", "--json"], "desc": "探测或测试本机可用 CLI Agent（ZCode/OpenCode/CodeBuddy/豆包/Antigravity）"},
-            {"name": "capture", "safety": "read_only", "args": ["--target workbench|review", "--mode auto|ui|canvas", "--page", "--item", "--selector", "--crop", "--with-elements", "--som", "--json"], "desc": "后台离屏无遮挡截图并导出交互元素清单"},
+            {"name": "capture", "safety": "read_only", "args": ["--target workbench|review", "--mode auto|ui|canvas", "--page", "--item", "--view", "--work-mode", "--dialog", "--expand-arch", "--full-page", "--selector", "--crop", "--with-elements", "--som", "--json"], "desc": "后台离屏无遮挡截图并导出交互元素清单（支持只读视图/模式/弹窗覆盖）"},
             {"name": "ui", "safety": "mutating", "args": ["state|focus|navigate|click", "--target workbench|review", "--selector", "--page", "--item", "--view", "--json"], "desc": "查询前台 UI 焦点或向浏览器投送高亮焦点/跳转指令"},
             {"name": "review", "safety": "mutating", "args": ["status|page|set-text|set-choice|delete-box|re-ocr|confirm|nav", "--review-url", "--json"], "desc": "8904 审阅页同构 CRUD 操作（页级锁防竞争冒险并实时推给前端）"},
         ],
@@ -858,6 +858,15 @@ def cmd_capture(args, t0: float) -> int:
         "som": bool(getattr(args, "som", False)),
         "mirror_client": str(getattr(args, "client_id", "") or ""),
         "review_port": int(urllib.parse.urlparse(str(getattr(args, "review_url", "http://127.0.0.1:8904"))).port or 8904),
+        "view": str(getattr(args, "view", "") or ""),
+        "work_mode": str(getattr(args, "work_mode", "") or ""),
+        "dialog": str(getattr(args, "dialog", "") or ""),
+        "expand_arch": "1" if getattr(args, "expand_arch", False) else "",
+        "overview": str(getattr(args, "overview", "") or ""),
+        "full_page": bool(getattr(args, "full_page", False)),
+        "width": int(getattr(args, "width", 1440) or 1440),
+        "height": int(getattr(args, "height", 900) or 900),
+        "wait_ms": int(getattr(args, "wait_ms", 1200) or 1200),
     }
     out_p = Path(args.out).resolve() if getattr(args, "out", None) else None
 
@@ -880,6 +889,11 @@ def cmd_capture(args, t0: float) -> int:
             return _emit_output(args, command="capture", ok=False, exit_code=1, data=res, error=str(res.get("error") or "截图失败"), t0=t0)
     else:
         url = str(getattr(args, "review_url", "http://127.0.0.1:8904")) if target == "review" else hub
+        extra_q = {k: payload[k] for k in ("view", "work_mode", "dialog", "expand_arch", "overview") if payload.get(k)}
+        if payload["page_id"]:
+            extra_q["page"] = payload["page_id"]
+        if payload["item_id"]:
+            extra_q["item"] = payload["item_id"]
         res = capture_mod.capture_headless_ui(
             url,
             core.DEFAULT_BATCHES_ROOT,
@@ -887,9 +901,14 @@ def cmd_capture(args, t0: float) -> int:
             mirror_client=payload["mirror_client"],
             selector=payload["selector"],
             crop=payload["crop"],
+            width=payload["width"],
+            height=payload["height"],
             with_elements=payload["with_elements"],
             som=payload["som"],
+            wait_ms=payload["wait_ms"],
             out_path=out_p,
+            extra_query=extra_q,
+            full_page=payload["full_page"],
         )
     ok = bool(res.get("ok"))
     lines = [f"截图完成：{res.get('path')}（{res.get('width')}x{res.get('height')}，元素 {res.get('elements_count', 0)} 个）"] if ok else [str(res.get("error") or "截图失败")]
@@ -1326,6 +1345,15 @@ def main():
     p_cap.add_argument("--som", action="store_true", help="在离屏图上叠加可交互元素数字标号")
     p_cap.add_argument("--with-elements", action="store_true", default=True, help="附带导出可交互元素清单（默认开启）")
     p_cap.add_argument("--no-elements", action="store_true")
+    p_cap.add_argument("--view", default="", choices=["", "check", "ingest", "overview", "train"], help="仅在离屏预览中切换工作台视图（不改前台）")
+    p_cap.add_argument("--work-mode", default="", choices=["", "grading", "iteration"], help="仅在离屏预览中切换改试卷/模型迭代皮肤（不写配置）")
+    p_cap.add_argument("--dialog", default="", choices=["", "ai", "vlm", "lan", "schema", "mem", "guide"], help="仅在离屏预览中展开指定弹窗/抽屉")
+    p_cap.add_argument("--expand-arch", action="store_true", help="离屏预览工作台总览时展开 7 节点数据流向图")
+    p_cap.add_argument("--overview", default="", choices=["", "0", "1"], help="离屏预览 8904 时控制右侧整页总览栏开关")
+    p_cap.add_argument("--full-page", action="store_true", help="按内容总高度自动扩展视口截完整长图")
+    p_cap.add_argument("--width", type=int, default=1440)
+    p_cap.add_argument("--height", type=int, default=900)
+    p_cap.add_argument("--wait-ms", type=int, default=1200)
     p_cap.add_argument("--client-id", default="")
     p_cap.add_argument("--review-url", default="http://127.0.0.1:8904")
     p_cap.add_argument("--out", default=None)

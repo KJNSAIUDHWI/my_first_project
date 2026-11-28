@@ -1312,6 +1312,17 @@ class WorkbenchState:
         mirror_client = str(payload.get("mirror_client") or "").strip()
         width = int(payload.get("width") or 1440)
         height = int(payload.get("height") or 900)
+        wait_ms = int(payload.get("wait_ms") or 1200)
+        full_page = bool(payload.get("full_page", False))
+        extra_query: dict[str, str] = {}
+        for qk in ("view", "work_mode", "dialog", "expand_arch", "overview"):
+            qv = str(payload.get(qk) or "").strip()
+            if qv:
+                extra_query[qk] = qv
+        if page_id:
+            extra_query["page"] = page_id
+        if item_id:
+            extra_query["item"] = item_id
 
         if target == "review":
             # 自动模式：若指定了 item_id / page_id 且未指定 CSS selector，默认优先走高清原图合成（快且字迹超清晰）
@@ -1341,6 +1352,9 @@ class WorkbenchState:
                 height=height,
                 with_elements=with_elements,
                 som=som,
+                wait_ms=wait_ms,
+                extra_query=extra_query,
+                full_page=full_page,
             )
             if not res.get("ok"):
                 # 兜底退回高清原图合成
@@ -1371,6 +1385,9 @@ class WorkbenchState:
             height=height,
             with_elements=with_elements,
             som=som,
+            wait_ms=wait_ms,
+            extra_query=extra_query,
+            full_page=full_page,
         )
 
     def start_ai_helper(self, payload: dict) -> dict:
