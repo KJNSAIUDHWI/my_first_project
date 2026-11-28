@@ -9,6 +9,11 @@ async function hotReloadResults(showToast = false) {
     if (data.locks) state.locks = data.locks;
     if (data.work_mode) state.workMode = data.work_mode;
     if (data.grading) state.grading = data.grading;
+    if (data.row_layouts && typeof data.row_layouts === "object") {
+      state.rowLayouts = data.row_layouts;
+    } else if (data.result && data.result.row_layouts && typeof data.result.row_layouts === "object") {
+      state.rowLayouts = data.result.row_layouts;
+    }
     state.pages = (data.result && data.result.pages) || [];
     if (prevId) {
       const idx = state.pages.findIndex(p => p.id === prevId);
@@ -39,6 +44,9 @@ async function loadAll() {
   state.workMode = data.work_mode === "iteration" ? "iteration" : "grading";
   state.showUnmatchedFills = state.workMode === "iteration";
   state.grading = data.grading || null;
+  state.rowLayouts = (data.row_layouts && typeof data.row_layouts === "object")
+    ? data.row_layouts
+    : ((data.result && data.result.row_layouts && typeof data.result.row_layouts === "object") ? data.result.row_layouts : {});
   state.pages = (data.result && data.result.pages) || [];
   updateLiveRunBanner();
 

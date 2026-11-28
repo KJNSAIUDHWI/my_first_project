@@ -148,6 +148,7 @@ const state = {
   // 改试卷/迭代双模式 + 自动判分 + 原地单空编辑 + 局部真子集小框重识别
   workMode: "grading",
   grading: null,
+  rowLayouts: {},
   showUnmatchedFills: false,
   inlineBlankEdit: null, // { itemId, sub, blank }
   inlineChipEdit: null,  // { itemId, kind }

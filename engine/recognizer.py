@@ -1519,6 +1519,11 @@ def run(args):
         final_status = '待人工验收'
 
     finished_at = now_iso()
+    try:
+        from engine.row_layout import build_batch_row_layouts
+        row_layouts = build_batch_row_layouts({'pages': pages}, out, allow_cv_fallback=True, use_cache=False)
+    except Exception:
+        row_layouts = {}
     result = {
         'run_id': run_log.run_id,
         'started_at': run_log.started_at,
@@ -1526,6 +1531,7 @@ def run(args):
         'runtime': collect_runtime_versions(),
         'pages': pages,
         'grids': grids,
+        'row_layouts': row_layouts,
         'model': client.model,
         'returned_model': returned_models[0] if len(returned_models) == 1 else (returned_models or None),
         'provider': client.provider,

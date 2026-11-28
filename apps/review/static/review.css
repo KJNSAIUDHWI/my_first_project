@@ -304,9 +304,9 @@
     cursor: pointer; user-select: none;
   }
   .margin-qno {
-    display: inline-flex; align-items: center; font-weight: 700; font-size: 13px;
+    display: inline-flex; align-items: center; font-weight: 700; font-size: 12.5px;
     color: var(--text); background: #f1f5f3; border: 1px solid var(--line); border-radius: 6px;
-    padding: 2px 8px; vertical-align: baseline; line-height: 1.35;
+    padding: 1px 7px; vertical-align: baseline; line-height: 1.35;
   }
   .ov-card.hovered .margin-qno,
   .ov-card.active .margin-qno,
@@ -315,19 +315,23 @@
   }
   .margin-ans {
     font-size: 15.5px; font-weight: 500; color: #0f172a;
-    word-break: break-word; line-height: 1.55;
-    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 9px;
+    word-break: break-word; line-height: 1.45;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  }
+  .margin-ans .ans-row {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start;
+    gap: 4px 7px; width: 100%;
   }
   .margin-ans .sub-seg {
-    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px;
   }
   .margin-ans .sub-lbl {
-    font-size: 13.5px; font-weight: 700; color: #475569; margin-right: 1px;
+    font-size: 13px; font-weight: 700; color: #475569; margin-right: 1px;
   }
   .margin-ans .blank-pill {
-    display: inline-flex; align-items: center; gap: 5px;
-    background: #f5f7f6; border: 1px solid #dce3df; border-radius: 8px;
-    padding: 4px 11px; font-size: 15.5px; line-height: 1.45; color: #0f172a; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #f5f7f6; border: 1px solid #dce3df; border-radius: 7px;
+    padding: 2px 8px; font-size: 15.5px; line-height: 1.4; color: #0f172a; font-weight: 600;
     cursor: pointer; transition: border-color .12s, background-color .12s;
   }
   .margin-ans .blank-pill .katex { font-size: 1.06em; }
@@ -442,14 +446,14 @@
   }
   .fill-hover-pop {
     position: absolute; z-index: 48; pointer-events: auto;
-    min-width: 280px; max-width: min(560px, 88vw);
+    min-width: 0; width: max-content; max-width: min(580px, 88vw);
     background: #ffffff;
     border: 1.5px solid var(--accent-bright);
-    border-radius: 12px;
-    padding: 11px 14px;
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+    border-radius: 10px;
+    padding: 6px 9px;
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
     color: #0f172a;
-    font-size: 15px; line-height: 1.55;
+    font-size: 15px; line-height: 1.45;
     cursor: default;
     transition: left 0.18s cubic-bezier(0.22, 1, 0.36, 1), top 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.14s ease, border-color 0.14s ease;
   }
@@ -477,10 +481,10 @@
     box-shadow: 0 14px 34px rgba(21, 128, 61, 0.2), 0 0 0 3px rgba(22, 163, 74, 0.18);
   }
   .fill-hover-pop-head {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px dashed var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px dashed var(--line);
   }
-  .fill-hover-pop-hint { font-size: 12px; color: #64748b; font-weight: 500; }
+  .fill-hover-pop-hint { font-size: 11.5px; color: #64748b; font-weight: 500; white-space: nowrap; }
   .pop-pin-badge {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: 11.5px; font-weight: 700; color: var(--accent-strong);
@@ -650,10 +654,10 @@
     border-radius: 99px; padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
   }
   .ov-filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .ov-list { display: flex; flex-direction: column; gap: 9px; }
+  .ov-list { display: flex; flex-direction: column; gap: 7px; }
   .ov-card {
     background: #fff; border: 1px solid var(--line);
-    border-radius: 10px; padding: 10px 12px;
+    border-radius: 9px; padding: 7px 9px;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
     transition: opacity 0.1s ease, border-color 0.1s ease, background-color 0.1s ease;
   }
@@ -672,8 +676,8 @@
     box-shadow: 0 6px 18px var(--accent-shadow), 0 0 0 2px var(--accent-ring);
   }
   .ov-card-head {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px dashed var(--line);
     cursor: pointer; user-select: none;
   }
   .ov-card-head:hover .ov-locate-btn { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--accent-border); }

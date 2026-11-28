@@ -71,6 +71,31 @@ function compareSubKey(a, b) {
   return String(a).localeCompare(String(b), "zh-CN");
 }
 
+function normalizeRowLayoutJS(raw) {
+  if (!Array.isArray(raw) || !raw.length || raw.length > 20) return null;
+  const out = [];
+  for (let i = 0; i < raw.length; i++) {
+    const n = Number(raw[i]);
+    if (!Number.isInteger(n) || n < 1 || n > 30) return null;
+    out.push(n);
+  }
+  return out;
+}
+function getItemRowLayoutJS(it, totalUnits) {
+  if (!it || totalUnits <= 0) return null;
+  const rawQno = String((it.transcription && it.transcription.question_number) || it.number || "").trim();
+  const qMatch = rawQno.match(/\d+/);
+  const qKey = qMatch ? qMatch[0] : rawQno;
+  const tpl = (qKey && state.rowLayouts) ? normalizeRowLayoutJS(state.rowLayouts[qKey]) : null;
+  const own = it.transcription ? normalizeRowLayoutJS(it.transcription.rows) : null;
+  const sumOf = (arr) => arr.reduce((a, b) => a + b, 0);
+  if (tpl && sumOf(tpl) === totalUnits) return tpl;
+  if (own && sumOf(own) === totalUnits) return own;
+  if (tpl && tpl.length > 1) return tpl;
+  if (own && own.length > 1) return own;
+  return null;
+}
+
 let _pillClickTimer = null;
 function renderFillMarginInto(el, it, containerSource = "pop") {
   el.innerHTML = "";
@@ -82,160 +107,203 @@ function renderFillMarginInto(el, it, containerSource = "pop") {
 
   if (effAns && typeof effAns === "object" && Object.keys(effAns).length > 0) {
     const entries = Object.entries(effAns).sort((a, b) => compareSubKey(a[0], b[0]));
+    const units = [];
     entries.forEach(([sub, blanks]) => {
-      const seg = document.createElement("span");
-      seg.className = "sub-seg";
-      if (sub !== "无小题号") {
-        const lbl = document.createElement("span");
-        lbl.className = "sub-lbl";
-        lbl.textContent = `(${sub})`;
-        seg.appendChild(lbl);
-      }
       if (blanks && typeof blanks === "object") {
         if (blanks["舍弃"] === "舍弃") {
-          const pill = document.createElement("span");
-          pill.className = "blank-pill discarded";
-          pill.textContent = "含图舍弃";
-          seg.appendChild(pill);
+          units.push({ kind: "discarded", sub });
         } else {
           Object.entries(blanks)
             .sort((a, b) => (Number(a[0]) || 999) - (Number(b[0]) || 999) || String(a[0]).localeCompare(String(b[0])))
-            .forEach(([k, v]) => {
-              const rawStr = String(v == null ? "" : v).trim();
-              const isBlank = rawStr.length === 0;
-              const slotKey = `${sub}:${k}`;
-              const bg = blankGrades[slotKey] || null;
-              const isEditingThis = Boolean(
-                state.inlineBlankEdit &&
-                state.inlineBlankEdit.itemId === it.id &&
-                String(state.inlineBlankEdit.sub) === String(sub) &&
-                String(state.inlineBlankEdit.blank) === String(k) &&
-                (!state.inlineBlankEdit.source || state.inlineBlankEdit.source === containerSource)
-              );
-              const isMulti = isBlankMultiSelected(it.id, sub, k);
-              const isFlash = Boolean((state.flashSlots[`${it.id}|${slotKey}`] || 0) > nowTs);
-
-              const pill = document.createElement("span");
-              let cls = "blank-pill" + (isBlank ? " unanswered" : "");
-              if (bg && bg.status && ["correct", "wrong", "partial", "pending"].includes(bg.status)) {
-                cls += " grade-" + bg.status;
-              }
-              if (isMulti) cls += " multi-sel";
-              if (isFlash) cls += " flash-ok";
-              pill.className = cls;
-              pill.dataset.itemId = it.id;
-              pill.dataset.sub = String(sub);
-              pill.dataset.blank = String(k);
-
-              const idx = document.createElement("span");
-              idx.className = "blank-idx";
-              idx.textContent = fmtBlankIdx(k);
-              pill.appendChild(idx);
-
-              if (isEditingThis) {
-                const inp = document.createElement("input");
-                inp.type = "text";
-                inp.className = "blank-inline-input";
-                inp.value = rawStr;
-                inp.placeholder = "输入答案（回车保存 / Tab下一空）";
-                inp.onmousedown = (e) => e.stopPropagation();
-                inp.onclick = (e) => e.stopPropagation();
-                inp.ondblclick = (e) => e.stopPropagation();
-                let settled = false;
-                const finish = (commit, moveDir = 0) => {
-                  if (settled) return;
-                  settled = true;
-                  if (commit) {
-                    commitInlineBlankEdit(it, sub, k, inp.value, moveDir);
-                  } else {
-                    state.inlineBlankEdit = null;
-                    if (containerSource === "overview" && !state.pinnedItemId && state.selectedItemId === it.id) {
-                      state.selectedItemId = null;
-                    }
-                    refreshOverviewPanel();
-                    draw();
-                  }
-                };
-                inp.onkeydown = (e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") { e.preventDefault(); finish(true, 0); }
-                  else if (e.key === "Tab") { e.preventDefault(); finish(true, e.shiftKey ? -1 : 1); }
-                  else if (e.key === "Escape") { e.preventDefault(); finish(false, 0); }
-                };
-                inp.onblur = () => finish(true, 0);
-                pill.appendChild(inp);
-                setTimeout(() => { try { inp.focus(); inp.select(); } catch {} }, 0);
-              } else {
-                const val = document.createElement("span");
-                if (isBlank) {
-                  val.textContent = "未作答";
-                } else {
-                  appendLatexText(val, rawStr);
-                }
-                pill.appendChild(val);
-
-                if (bg && bg.status && ["correct", "wrong", "partial", "pending"].includes(bg.status)) {
-                  const jb = document.createElement("button");
-                  jb.type = "button";
-                  jb.className = "blank-judge-btn " + bg.status;
-                  jb.textContent = bg.status === "correct"
-                    ? `对 +${fmtScoreNum(bg.earned)}`
-                    : (bg.status === "partial" ? `半 +${fmtScoreNum(bg.earned)}`
-                    : (bg.status === "pending" ? "待核" : "错"));
-                  jb.title = (bg.standard ? `参考答案：${bg.standard} · ` : "") + "点击切换人工判分（对/半/错/自动）";
-                  jb.onmousedown = (e) => e.stopPropagation();
-                  jb.onclick = (e) => { e.stopPropagation(); clearTimeout(_pillClickTimer); cycleBlankJudge(it, slotKey, bg.status); };
-                  jb.ondblclick = (e) => e.stopPropagation();
-                  pill.appendChild(jb);
-                }
-
-                const stdTip = (bg && bg.standard) ? `参考答案：${bg.standard}\n` : "";
-                pill.title = `${stdTip}单击：原地改字 · 双击：聚焦大框拉小框精准重识别 · Shift/Ctrl+点：连续多空联合重识别`;
-                pill.onmousedown = (e) => {
-                  if (e.button === 0 && !spaceDown) {
-                    e.stopPropagation();
-                    // 鼠标刚按下即静默锁定当前题，不重绘 DOM，避免点击/双击期间气泡溜走
-                    if (containerSource === "pop") state.pinnedItemId = it.id;
-                    state.selectedItemId = it.id;
-                  }
-                };
-                pill.onclick = (e) => {
-                  e.stopPropagation();
-                  if (containerSource === "pop") state.pinnedItemId = it.id;
-                  state.selectedItemId = it.id;
-                  if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                    clearTimeout(_pillClickTimer);
-                    toggleMultiBlankSelection(it, sub, k, Boolean(e.shiftKey));
-                    return;
-                  }
-                  clearTimeout(_pillClickTimer);
-                  _pillClickTimer = setTimeout(() => {
-                    state.selectedItemId = it.id;
-                    if (containerSource === "pop") state.pinnedItemId = it.id;
-                    else if (containerSource === "overview") state.pinnedItemId = null;
-                    state.inlineChipEdit = null;
-                    state.inlineBlankEdit = { itemId: it.id, sub: String(sub), blank: String(k), source: containerSource };
-                    refreshOverviewPanel();
-                    draw();
-                  }, 185);
-                };
-                pill.ondblclick = (e) => {
-                  e.stopPropagation();
-                  clearTimeout(_pillClickTimer);
-                  enterSubboxReOcr(it, [{ sub: String(sub), blank: String(k) }]);
-                };
-              }
-              seg.appendChild(pill);
-            });
+            .forEach(([k, v]) => units.push({ kind: "blank", sub, k, v }));
         }
       } else {
-        const rawStr = String(blanks == null ? "" : blanks).trim();
+        units.push({ kind: "raw", sub, v: blanks });
+      }
+    });
+
+    const rowSpec = getItemRowLayoutJS(it, units.length);
+    const rowsArr = [];
+    if (rowSpec && rowSpec.length > 1) {
+      let cursor = 0;
+      for (let ri = 0; ri < rowSpec.length && cursor < units.length; ri++) {
+        const take = Math.min(rowSpec[ri], units.length - cursor);
+        if (take > 0) rowsArr.push(units.slice(cursor, cursor + take));
+        cursor += take;
+      }
+      if (cursor < units.length) {
+        if (rowsArr.length) rowsArr[rowsArr.length - 1].push(...units.slice(cursor));
+        else rowsArr.push(units.slice(cursor));
+      }
+    } else {
+      rowsArr.push(units);
+    }
+
+    const shownSubLbls = new Set();
+    const buildUnitNode = (u) => {
+      if (u.kind === "discarded") {
+        const pill = document.createElement("span");
+        pill.className = "blank-pill discarded";
+        pill.textContent = "含图舍弃";
+        return pill;
+      }
+      if (u.kind === "raw") {
+        const rawStr = String(u.v == null ? "" : u.v).trim();
         const pill = document.createElement("span");
         pill.className = "blank-pill" + (rawStr ? "" : " unanswered");
         appendLatexText(pill, rawStr || "未作答");
-        seg.appendChild(pill);
+        return pill;
       }
-      el.appendChild(seg);
+      const { sub, k, v } = u;
+      const rawStr = String(v == null ? "" : v).trim();
+      const isBlank = rawStr.length === 0;
+      const slotKey = `${sub}:${k}`;
+      const bg = blankGrades[slotKey] || null;
+      const isEditingThis = Boolean(
+        state.inlineBlankEdit &&
+        state.inlineBlankEdit.itemId === it.id &&
+        String(state.inlineBlankEdit.sub) === String(sub) &&
+        String(state.inlineBlankEdit.blank) === String(k) &&
+        (!state.inlineBlankEdit.source || state.inlineBlankEdit.source === containerSource)
+      );
+      const isMulti = isBlankMultiSelected(it.id, sub, k);
+      const isFlash = Boolean((state.flashSlots[`${it.id}|${slotKey}`] || 0) > nowTs);
+
+      const pill = document.createElement("span");
+      let cls = "blank-pill" + (isBlank ? " unanswered" : "");
+      if (bg && bg.status && ["correct", "wrong", "partial", "pending"].includes(bg.status)) {
+        cls += " grade-" + bg.status;
+      }
+      if (isMulti) cls += " multi-sel";
+      if (isFlash) cls += " flash-ok";
+      pill.className = cls;
+      pill.dataset.itemId = it.id;
+      pill.dataset.sub = String(sub);
+      pill.dataset.blank = String(k);
+
+      const idx = document.createElement("span");
+      idx.className = "blank-idx";
+      idx.textContent = fmtBlankIdx(k);
+      pill.appendChild(idx);
+
+      if (isEditingThis) {
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "blank-inline-input";
+        inp.value = rawStr;
+        inp.placeholder = "输入答案（回车保存 / Tab下一空）";
+        inp.onmousedown = (e) => e.stopPropagation();
+        inp.onclick = (e) => e.stopPropagation();
+        inp.ondblclick = (e) => e.stopPropagation();
+        let settled = false;
+        const finish = (commit, moveDir = 0) => {
+          if (settled) return;
+          settled = true;
+          if (commit) {
+            commitInlineBlankEdit(it, sub, k, inp.value, moveDir);
+          } else {
+            state.inlineBlankEdit = null;
+            if (containerSource === "overview" && !state.pinnedItemId && state.selectedItemId === it.id) {
+              state.selectedItemId = null;
+            }
+            refreshOverviewPanel();
+            draw();
+          }
+        };
+        inp.onkeydown = (e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") { e.preventDefault(); finish(true, 0); }
+          else if (e.key === "Tab") { e.preventDefault(); finish(true, e.shiftKey ? -1 : 1); }
+          else if (e.key === "Escape") { e.preventDefault(); finish(false, 0); }
+        };
+        inp.onblur = () => finish(true, 0);
+        pill.appendChild(inp);
+        setTimeout(() => { try { inp.focus(); inp.select(); } catch {} }, 0);
+      } else {
+        const val = document.createElement("span");
+        if (isBlank) {
+          val.textContent = "未作答";
+        } else {
+          appendLatexText(val, rawStr);
+        }
+        pill.appendChild(val);
+
+        if (bg && bg.status && ["correct", "wrong", "partial", "pending"].includes(bg.status)) {
+          const jb = document.createElement("button");
+          jb.type = "button";
+          jb.className = "blank-judge-btn " + bg.status;
+          jb.textContent = bg.status === "correct"
+            ? `对 +${fmtScoreNum(bg.earned)}`
+            : (bg.status === "partial" ? `半 +${fmtScoreNum(bg.earned)}`
+            : (bg.status === "pending" ? "待核" : "错"));
+          jb.title = (bg.standard ? `参考答案：${bg.standard} · ` : "") + "点击切换人工判分（对/半/错/自动）";
+          jb.onmousedown = (e) => e.stopPropagation();
+          jb.onclick = (e) => { e.stopPropagation(); clearTimeout(_pillClickTimer); cycleBlankJudge(it, slotKey, bg.status); };
+          jb.ondblclick = (e) => e.stopPropagation();
+          pill.appendChild(jb);
+        }
+
+        const stdTip = (bg && bg.standard) ? `参考答案：${bg.standard}\n` : "";
+        pill.title = `${stdTip}单击：原地改字 · 双击：聚焦大框拉小框精准重识别 · Shift/Ctrl+点：连续多空联合重识别`;
+        pill.onmousedown = (e) => {
+          if (e.button === 0 && !spaceDown) {
+            e.stopPropagation();
+            // 鼠标刚按下即静默锁定当前题，不重绘 DOM，避免点击/双击期间气泡溜走
+            if (containerSource === "pop") state.pinnedItemId = it.id;
+            state.selectedItemId = it.id;
+          }
+        };
+        pill.onclick = (e) => {
+          e.stopPropagation();
+          if (containerSource === "pop") state.pinnedItemId = it.id;
+          state.selectedItemId = it.id;
+          if (e.shiftKey || e.ctrlKey || e.metaKey) {
+            clearTimeout(_pillClickTimer);
+            toggleMultiBlankSelection(it, sub, k, Boolean(e.shiftKey));
+            return;
+          }
+          clearTimeout(_pillClickTimer);
+          _pillClickTimer = setTimeout(() => {
+            state.selectedItemId = it.id;
+            if (containerSource === "pop") state.pinnedItemId = it.id;
+            else if (containerSource === "overview") state.pinnedItemId = null;
+            state.inlineChipEdit = null;
+            state.inlineBlankEdit = { itemId: it.id, sub: String(sub), blank: String(k), source: containerSource };
+            refreshOverviewPanel();
+            draw();
+          }, 185);
+        };
+        pill.ondblclick = (e) => {
+          e.stopPropagation();
+          clearTimeout(_pillClickTimer);
+          enterSubboxReOcr(it, [{ sub: String(sub), blank: String(k) }]);
+        };
+      }
+      return pill;
+    };
+
+    rowsArr.forEach((rowUnits) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "ans-row";
+      let curSub = null;
+      let curSeg = null;
+      rowUnits.forEach((u) => {
+        if (!curSeg || curSub !== u.sub) {
+          curSub = u.sub;
+          curSeg = document.createElement("span");
+          curSeg.className = "sub-seg";
+          if (u.sub !== "无小题号" && !shownSubLbls.has(u.sub)) {
+            shownSubLbls.add(u.sub);
+            const lbl = document.createElement("span");
+            lbl.className = "sub-lbl";
+            lbl.textContent = `(${u.sub})`;
+            curSeg.appendChild(lbl);
+          }
+          rowEl.appendChild(curSeg);
+        }
+        curSeg.appendChild(buildUnitNode(u));
+      });
+      el.appendChild(rowEl);
     });
     return;
   }
@@ -670,11 +738,11 @@ function renderFillHoverPopover(row, rect, reuseEl = null, animate = false) {
   const pgG = getPageGrading();
   const itG = pgG && pgG.items ? pgG.items[it.id] : null;
   if (itG) {
-    hint.textContent = `得分 ${fmtScoreNum(itG.earned)}/${fmtScoreNum(itG.possible)} · 单击改字 / 双击重识`;
+    hint.textContent = `${fmtScoreNum(itG.earned)}/${fmtScoreNum(itG.possible)}分 · 单击改字`;
   } else if (isPinned) {
-    hint.textContent = edited ? "已订正 · 单击改字 / 双击重识" : "单击胶囊改字 · 双击单空重识";
+    hint.textContent = edited ? "已订正 · 单击改字" : "单击改字 · 双击重识";
   } else {
-    hint.textContent = "点题框固定 · 单击胶囊直接改字";
+    hint.textContent = "点框固定 · 单击改字";
   }
   headRight.appendChild(hint);
   if (isPinned) {

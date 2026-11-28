@@ -362,6 +362,56 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual(r2['stats']['api_done'], r2['stats']['api_success'])
         self.assertGreaterEqual(r2['stats']['prompt_tokens'], 1000 + 1200 + 1280 + 400 + 1280)
 
+    def test_row_layout_normalization_vlm_vote_and_cv_fallback(self):
+        from PIL import ImageDraw
+        from engine.row_layout import build_batch_row_layouts, detect_crop_underline_rows, normalize_row_layout
+
+        # 1) normalize_item 规范化合法 rows，并容忍畸形 rows 不拒收有效答案
+        n1 = normalize_item({'kind': 'fill', 'question_number': '20', 'rows': ['2', 3], 'answers': {'1': {'1': 'a', '2': 'b'}}})
+        self.assertEqual(n1['rows'], [2, 3])
+        n2 = normalize_item({'kind': 'fill', 'question_number': '20', 'rows': [0, -1], 'answers': {'1': {'1': 'a'}}})
+        self.assertNotIn('rows', n2)
+        self.assertIsNone(normalize_row_layout([True, 2]))
+
+        # 2) VLM 多数投票聚合 + 老批次 OpenCV 印刷横线兜底
+        folder = self.folder()
+        crops = folder / 'crops'
+        crops.mkdir(parents=True, exist_ok=True)
+        # 构造一道 2 行印刷横线题图块：第 1 行 2 条横线，第 2 行 3 条横线
+        im = Image.new('L', (1200, 200), 255)
+        dr = ImageDraw.Draw(im)
+        for x1, x2 in ((120, 380), (480, 740)):
+            dr.line([(x1, 75), (x2, 75)], fill=0, width=3)
+        for x1, x2 in ((120, 340), (420, 640), (760, 1020)):
+            dr.line([(x1, 155), (x2, 155)], fill=0, width=3)
+        crop_p = crops / 'q20.png'
+        im.save(crop_p)
+        self.assertEqual(detect_crop_underline_rows(crop_p), [2, 3])
+
+        fake_result = {
+            'pages': [
+                {'id': 'p0', 'items': [
+                    {'id': 'p0_0', 'kind': 'fill', 'number': 20, 'crop': 'crops/q20.png',
+                     'transcription': {'kind': 'fill', 'question_number': '20', 'answers': {'1': {'1': 'a', '2': 'b'}, '2': {'1': 'c', '2': 'd'}, '3': {'1': 'e'}}}},
+                    {'id': 'p0_1', 'kind': 'fill', 'number': 21,
+                     'transcription': {'kind': 'fill', 'question_number': '21', 'rows': [4, 2], 'answers': {'1': {'1': '1', '2': '2', '3': '3', '4': '4'}, '2': {'1': '5', '2': '6'}}}},
+                ]},
+                {'id': 'p1', 'items': [
+                    {'id': 'p1_1', 'kind': 'fill', 'number': 21,
+                     'transcription': {'kind': 'fill', 'question_number': '21', 'rows': [4, 2], 'answers': {'1': {'1': '1', '2': '2', '3': '3', '4': '4'}, '2': {'1': '5', '2': '6'}}}},
+                ]},
+                {'id': 'p2', 'items': [
+                    {'id': 'p2_1', 'kind': 'fill', 'number': 21,
+                     'transcription': {'kind': 'fill', 'question_number': '21', 'rows': [6], 'answers': {'1': {'1': '1', '2': '2', '3': '3', '4': '4'}, '2': {'1': '5', '2': '6'}}}},
+                ]},
+            ]
+        }
+        save_json(folder / 'results.json', fake_result)
+        layouts = build_batch_row_layouts(fake_result, folder, allow_cv_fallback=True, use_cache=True)
+        self.assertEqual(layouts.get('20'), [2, 3])
+        self.assertEqual(layouts.get('21'), [4, 2])
+        self.assertTrue((folder / 'row_layouts_cache.json').is_file())
+
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--temp',type=Path,default=None);args,rest=parser.parse_known_args()

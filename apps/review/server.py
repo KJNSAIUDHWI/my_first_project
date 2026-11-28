@@ -1539,6 +1539,11 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                     mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
                     fb_now = store.read()
                     sc_now, grading_now = _load_grading_snapshot(result, fb_now)
+                    try:
+                        from engine.row_layout import build_batch_row_layouts
+                        row_layouts_now = build_batch_row_layouts(result, store.folder, allow_cv_fallback=True)
+                    except Exception:
+                        row_layouts_now = result.get('row_layouts') if isinstance(result.get('row_layouts'), dict) else {}
                     return self.reply({
                         'result': result,
                         'feedback': fb_now,
@@ -1548,6 +1553,7 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                         'work_mode': runtime_cfg['work_mode'],
                         'schema': sc_now,
                         'grading': grading_now,
+                        'row_layouts': row_layouts_now,
                     })
                 except (OSError, ValueError) as exc:
                     return self.reply({'error': str(exc)}, 409)
