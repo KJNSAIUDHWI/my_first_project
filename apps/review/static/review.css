@@ -303,15 +303,20 @@
     transition: opacity 0.20s cubic-bezier(0.22, 1, 0.36, 1), transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
     cursor: pointer; user-select: none;
   }
+  /* 题号徽章：与选择题 4:B / 卷面题号标完全统一的实心主色白字 + 柔光环视觉语言 */
   .margin-qno {
-    display: inline-flex; align-items: center; font-weight: 700; font-size: 12.5px;
-    color: var(--text); background: #f1f5f3; border: 1px solid var(--line); border-radius: 6px;
-    padding: 1px 7px; vertical-align: baseline; line-height: 1.35;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12.5px; line-height: 1.25; white-space: nowrap;
+    color: #fff; background: var(--accent-strong); border: none; border-radius: 5px;
+    padding: 2px 8px; vertical-align: baseline;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
+    transition: box-shadow 0.16s ease, background-color 0.14s ease;
   }
   .ov-card.hovered .margin-qno,
   .ov-card.active .margin-qno,
   .fill-hover-pop .margin-qno {
-    color: var(--accent-strong); background: var(--accent-soft); border-color: var(--accent-border);
+    color: #fff; background: var(--accent-strong);
+    box-shadow: 0 0 0 2.5px var(--accent-ring), 0 2px 8px var(--accent-shadow);
   }
   .margin-ans {
     font-size: 15.5px; font-weight: 500; color: #0f172a;
@@ -427,15 +432,15 @@
     transition: opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1), transform 0.16s ease, background-color 0.14s ease;
   }
   .fill-mini-tag:hover, .fill-mini-tag.active {
-    background: var(--accent-bright); opacity: 1 !important;
-    transform: scale(1.08);
+    background: var(--accent-strong); opacity: 1 !important;
+    transform: scale(1.07);
     box-shadow: 0 0 0 2.5px var(--accent-ring), 0 3px 10px var(--accent-shadow);
     z-index: 28;
   }
   .fill-mini-tag.pinned {
     background: var(--accent-hover) !important; opacity: 1 !important;
-    transform: scale(1.08);
-    box-shadow: 0 0 0 3px var(--accent-ring), 0 4px 12px var(--accent-shadow);
+    transform: scale(1.07);
+    box-shadow: 0 0 0 2.5px var(--accent-ring), 0 4px 12px var(--accent-shadow);
     z-index: 30;
   }
   .fill-mini-tag.edited { background: #15803d; }
@@ -506,30 +511,28 @@
   }
   .live-run-banner.show { display: flex; }
   .live-run-banner.err { background: #fef2f2; color: #991b1b; border-bottom-color: #fca5a5; }
-  /* 姓名学号胶囊：与整卷统一清透主色体系（不显灰沉、不撞报错红） */
+  /* 姓名学号胶囊：与整卷题号徽章完全同源的实心主色白字视觉语言 */
   .overlay-identity {
-    background: var(--accent-soft);
-    border: 1px solid var(--accent-border);
-    color: var(--accent-strong);
+    background: var(--accent-strong);
+    border: none;
+    color: #fff;
     font-weight: 700;
-    font-size: 13.5px;
-    padding: 3px 10px;
-    border-radius: 6px;
+    font-size: 13px;
+    padding: 3px 9px;
+    border-radius: 5px;
     white-space: nowrap;
-    box-shadow: 0 2px 6px var(--accent-shadow);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
   }
   .overlay-identity.edited {
-    background: #dcfce7;
-    border-color: #4ade80;
-    color: #14532d;
+    background: var(--accent-strong);
+    color: #fff;
   }
   .overlay-identity.active {
     opacity: 1 !important;
-    border-color: var(--accent-bright);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    background: var(--accent-strong);
+    color: #fff;
     transform: scale(1.04);
-    box-shadow: 0 0 0 2.5px var(--accent-ring), 0 4px 10px var(--accent-shadow);
+    box-shadow: 0 0 0 2.5px var(--accent-ring), 0 3px 10px var(--accent-shadow);
     z-index: 30;
   }
   /* 选择题：与填空题统一主色，清晰紧凑左贴徽章 */
