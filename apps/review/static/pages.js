@@ -50,8 +50,7 @@ async function loadAll() {
   });
   if (startIdx < 0) startIdx = state.pages.findIndex(p => !isPageDone(p));
   if (startIdx < 0) startIdx = 0;
-  syncRightSidebarVisibility(false);
-  resizeCanvas();
+  syncRightSidebarVisibility(true);
   await openPage(startIdx, true, true);
 }
 

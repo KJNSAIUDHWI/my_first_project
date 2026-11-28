@@ -1,10 +1,30 @@
 function resizeCanvas() {
   const rect = host.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.round(rect.width * dpr));
-  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   draw();
+}
+
+// 实时监听画布容器尺寸变化（含左右栏 0.18s 展开/收起动画每一帧），彻底杜绝 canvas 像素宽高与 DOM 叠层错位
+if (typeof ResizeObserver !== "undefined") {
+  let _lastHostW = 0, _lastHostH = 0;
+  const _canvasHostRo = new ResizeObserver(() => {
+    const r = host.getBoundingClientRect();
+    const rw = Math.round(r.width), rh = Math.round(r.height);
+    if (rw <= 0 || rh <= 0) return;
+    if (rw !== _lastHostW || rh !== _lastHostH) {
+      _lastHostW = rw;
+      _lastHostH = rh;
+      resizeCanvas();
+    }
+  });
+  _canvasHostRo.observe(host);
 }
 
 function fitCanvas() {
@@ -110,6 +130,14 @@ function hitTestAnyBox(ix, iy) {
 
 function drawCanvasOnly() {
   const rect = host.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const needW = Math.max(1, Math.round(rect.width * dpr));
+  const needH = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== needW || canvas.height !== needH) {
+    canvas.width = needW;
+    canvas.height = needH;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
   if (!state.img) return;
 
