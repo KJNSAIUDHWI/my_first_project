@@ -176,7 +176,7 @@ const state = {
   showLayers: { m1: true, m2: false, m3: true },
   showOverlay: true,
   fillDisplayMode: localStorage.getItem("reviewFillDisplayMode") || "hover", // "hover" | "margin"
-  showConf: false,
+  showConf: localStorage.getItem("reviewShowConf") === "1",
   selectedItemId: null,
   pinnedItemId: null,
   overviewFilter: "all", // "all" | "wrong" | "unanswered" | "edited"

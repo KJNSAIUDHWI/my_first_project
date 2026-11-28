@@ -44,7 +44,7 @@
         <button id="btnMoreMenu" title="显示选项、快捷键与教程"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg><span>更多</span></button>
         <div class="more-menu" id="moreMenu">
           <label class="more-item"><span>显示答案叠加</span><input type="checkbox" id="chkOverlay" checked></label>
-          <label class="more-item"><span>显示置信度</span><input type="checkbox" id="chkConf"></label>
+          <label class="more-item"><span>显示置信度与低置提醒</span><input type="checkbox" id="chkConf"></label>
           <button class="more-item" id="btnToggleRight" type="button"><span class="more-item-label"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>展开/收起右侧栏</span></button>
           <button class="more-item" id="btnSwitchWorkMode" type="button"><span class="more-item-label"><svg class="ui-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/></svg><span id="btnSwitchWorkModeLabel">切换到模型迭代模式</span></span></button>
           <div class="more-sep"></div>
@@ -60,7 +60,10 @@
     <aside class="sidebar-left" id="sidebarLeft">
       <div class="side-head">
         <span style="display:inline-flex;align-items:center;gap:6px;">本批试卷 <span id="liveSyncDot" title="每 3 秒自动同步多人审阅进度与锁定状态" class="live-sync-tag"><i class="status-dot ok"></i>实时</span></span>
-        <span id="leftSummary">0/0</span>
+        <span class="side-head-right">
+          <button type="button" id="btnToggleConfLeft" class="side-conf-btn" aria-pressed="false" title="显示或隐藏置信度与低置提醒"><svg class="ui-ico ui-ico-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>
+          <span id="leftSummary">0/0</span>
+        </span>
       </div>
       <div class="page-list" id="pageList"></div>
     </aside>

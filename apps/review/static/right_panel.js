@@ -267,7 +267,7 @@ function renderRightPanel() {
 
     secAct.innerHTML = `
       <div class="sec-title"><span>快捷操作</span><span>共 ${state.workingBoxes.length} 框</span></div>
-      ${selBox ? `<div class="sel-box-pill"><span class="cls-dot${selMeta.isZone ? " zone" : ""}" style="--cls-color:${selMeta.color};background:${selMeta.color}"></span><b>${escHtml(selMeta.name)}</b><span style="color:var(--muted);">（${escHtml(selConf)}）</span>${selBox._needsRecog ? `<span style="color:#b45309;font-weight:700;">· 待识别</span>` : ""}</div>` : ""}
+      ${selBox ? `<div class="sel-box-pill"><span class="cls-dot${selMeta.isZone ? " zone" : ""}" style="--cls-color:${selMeta.color};background:${selMeta.color}"></span><b>${escHtml(selMeta.name)}</b>${state.showConf ? `<span style="color:var(--muted);">（${escHtml(selConf)}）</span>` : ""}${selBox._needsRecog ? `<span style="color:#b45309;font-weight:700;">· 待识别</span>` : ""}</div>` : ""}
       <div style="display:flex;flex-direction:column;gap:6px;">
         ${selCanVlm ? `<button class="${(selBox._needsRecog || !selHasAns) ? "btn-ai" : "btn-ai-soft"}" id="btnRecogSel" ${busy ? "disabled" : ""} style="width:100%;padding:7px 10px;">${selBtnLabel}</button>` : ""}
         ${pendingIndices.length > 0 ? `<button class="btn-ai-soft" id="btnRecogPending" ${busy ? "disabled" : ""} style="width:100%;padding:6px 10px;">${busy ? `${uiIcon("loader", "ui-ico-sm ui-ico-spin")}<span>识别中…</span>` : `${uiIcon("sparkles", "ui-ico-sm")}<span>一键识别全部待识别框 (${pendingIndices.length})</span>`}</button>` : ""}

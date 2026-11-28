@@ -65,6 +65,7 @@ async function applyReviewMirrorStateIfNeeded() {
     const qLayers = REV_URL_PARAMS.get("layers") || "";
     const qTipCls = REV_URL_PARAMS.get("tip_cls") || "";
     const qTipEl = REV_URL_PARAMS.get("tip_el") || "";
+    const qShowConf = REV_URL_PARAMS.get("show_conf") || "";
     const qItem = REV_URL_PARAMS.get("item") || "";
     if (qWorkMode) {
       state.workMode = qWorkMode === "iteration" ? "iteration" : "grading";
@@ -80,7 +81,13 @@ async function applyReviewMirrorStateIfNeeded() {
       state.showLayers = { m1: setL.has("m1"), m2: setL.has("m2"), m3: setL.has("m3") };
     }
     if (typeof st.show_overlay === "boolean") state.showOverlay = st.show_overlay;
-    if (typeof st.show_conf === "boolean") state.showConf = st.show_conf;
+    if (qShowConf === "1" || qShowConf === "0") {
+      state.showConf = qShowConf === "1";
+    } else if (typeof st.show_conf === "boolean") {
+      state.showConf = st.show_conf;
+    }
+    if ($("chkConf")) $("chkConf").checked = state.showConf;
+    document.body.classList.toggle("show-conf", state.showConf);
     const targetPid = qPage || st.page_id || "";
     if (targetPid) {
       const idx = state.pages.findIndex(p => p.id === targetPid);
@@ -90,8 +97,9 @@ async function applyReviewMirrorStateIfNeeded() {
     if (targetMode && targetMode !== state.mode) {
       _origSetMode(targetMode);
       await new Promise(r => setTimeout(r, 240));
-    } else if (qOverview === "1" || qOverview === "0" || qLayers || qWorkMode) {
+    } else if (qOverview === "1" || qOverview === "0" || qLayers || qWorkMode || qShowConf) {
       updateTopbar();
+      renderLeftList();
       renderRightPanel();
       if (typeof syncRightSidebarVisibility === "function") syncRightSidebarVisibility(true);
     }

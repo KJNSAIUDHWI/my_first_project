@@ -48,6 +48,8 @@ async function loadAll() {
     ? data.row_layouts
     : ((data.result && data.result.row_layouts && typeof data.result.row_layouts === "object") ? data.result.row_layouts : {});
   state.pages = (data.result && data.result.pages) || [];
+  if ($("chkConf")) $("chkConf").checked = state.showConf;
+  document.body.classList.toggle("show-conf", state.showConf);
   updateLiveRunBanner();
 
   // 优先找第一张「未审且未被他人锁定」的试卷，避免多人进入时撞车
@@ -251,9 +253,46 @@ function updateTopbar() {
   $("canvasHint").textContent = state.mode === "edit"
     ? `左键长按拖画新框 · 单击选中后缩放/移动 · 右键删框 · ${primaryKeyLabel("recognizeBox")} 识别选中框 · Ctrl+Z 撤销`
     : `滑过框预览 · 点框固定改字 · 单击胶囊编辑 · 双击单空重识 · Alt 透视 · ${primaryKeyLabel("toggleMode")} 调框`;
+  const confBtnLeft = $("btnToggleConfLeft");
+  if (confBtnLeft) {
+    confBtnLeft.classList.toggle("active", Boolean(state.showConf));
+    confBtnLeft.setAttribute("aria-pressed", state.showConf ? "true" : "false");
+    if (typeof bindRevHoverTip === "function") {
+      bindRevHoverTip(confBtnLeft, () => ({
+        title: state.showConf ? "置信度与低置提醒 · 已开启" : "置信度与低置提醒 · 已隐藏",
+        badge: state.showConf ? "点击关闭" : "点击开启",
+        color: state.showConf ? "#d97706" : "#64748b",
+        dot: true,
+        placement: "below",
+        body: "改卷与迭代模式下均可按需开关：关闭时隐藏左侧待审页低置徽标、顶栏低置按钮及框上百分比，保持卷面清爽；开启后自动标出未审页低置信度项供排查。",
+      }));
+    }
+  }
   updateWorkloadBar();
   updateLowConfButton();
   updateLiveRunBanner();
+}
+
+function setShowConf(on, showTipToast = false) {
+  state.showConf = Boolean(on);
+  const isMirror = (typeof REV_IS_MIRROR !== "undefined" && REV_IS_MIRROR) || new URLSearchParams(window.location.search).get("mirror") === "1";
+  if (!isMirror) {
+    try { localStorage.setItem("reviewShowConf", state.showConf ? "1" : "0"); } catch {}
+  }
+  if ($("chkConf")) $("chkConf").checked = state.showConf;
+  document.body.classList.toggle("show-conf", state.showConf);
+  if (!state.showConf) {
+    state.focusedLowConf = null;
+    state.lowConfCursor = -1;
+  }
+  updateTopbar();
+  renderLeftList();
+  renderRightPanel();
+  draw();
+  if (typeof scheduleReportReviewUiState === "function") scheduleReportReviewUiState();
+  if (showTipToast) {
+    toast(state.showConf ? "已开启置信度与低置提醒（仅提示未审页）" : "已隐藏置信度与低置提醒", 1700);
+  }
 }
 
 /* ==================== 多低置信度项一键循环定位（精确到具体框） ==================== */
@@ -309,7 +348,8 @@ function findNextLowConfPageIdx() {
   if (!state.pages.length) return -1;
   for (let step = 1; step < state.pages.length; step++) {
     const idx = (state.pageIdx + step) % state.pages.length;
-    if (countPageLowConf(state.pages[idx]) > 0) return idx;
+    const pg = state.pages[idx];
+    if (!isPageDone(pg) && countPageLowConf(pg) > 0) return idx;
   }
   return -1;
 }
@@ -317,7 +357,13 @@ function findNextLowConfPageIdx() {
 function updateLowConfButton() {
   const btn = $("btnLowConf");
   if (!btn) return;
-  const targets = getLowConfTargets();
+  if (!state.showConf) {
+    btn.style.display = "none";
+    return;
+  }
+  const curPage = currentPage();
+  const curDone = isPageDone(curPage);
+  const targets = curDone ? [] : getLowConfTargets();
   const keyTag = primaryKeyLabel("nextLowConf");
   if (targets.length > 0) {
     const cur = state.lowConfCursor >= 0 ? ((state.lowConfCursor % targets.length) + 1) : 0;
@@ -398,7 +444,8 @@ function focusTargetAt(targets, cursorIdx) {
 }
 
 function jumpNextLowConf() {
-  const targets = getLowConfTargets();
+  if (!state.showConf) setShowConf(true, false);
+  const targets = isPageDone(currentPage()) ? [] : getLowConfTargets();
   if (!targets.length) {
     const nextIdx = findNextLowConfPageIdx();
     if (nextIdx >= 0) {
@@ -407,7 +454,7 @@ function jumpNextLowConf() {
         if (nextTargets.length) focusTargetAt(nextTargets, 0);
       });
     } else {
-      toast("本批试卷没有待排查的低置信度框", 1800);
+      toast("本批未审试卷没有待排查的低置信度项", 1800);
     }
     return;
   }
@@ -463,7 +510,7 @@ function renderLeftList() {
       </div>
       ${badgeHtml}
     `;
-    if (lowCnt > 0) {
+    if (state.showConf && !done && lowCnt > 0) {
       const subEl = row.querySelector(".page-row-sub");
       const pill = document.createElement("span");
       pill.className = "lowconf-pill-btn";

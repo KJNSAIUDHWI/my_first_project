@@ -204,7 +204,8 @@ $("btnSubmitNext").onclick = () => submitCurrentPage(true);
 $("btnFit").onclick = () => { fitCanvas(); draw(); };
 $("btnZoomIn").onclick = () => { state.scale = Math.min(8, state.scale * 1.2); $("zoomLabel").textContent = Math.round(state.scale * 100) + "%"; draw(); };
 $("btnZoomOut").onclick = () => { state.scale = Math.max(0.08, state.scale / 1.2); $("zoomLabel").textContent = Math.round(state.scale * 100) + "%"; draw(); };
-$("chkConf").onchange = (ev) => { state.showConf = ev.target.checked; document.body.classList.toggle("show-conf", state.showConf); draw(); };
+$("chkConf").onchange = (ev) => setShowConf(ev.target.checked, true);
+if ($("btnToggleConfLeft")) $("btnToggleConfLeft").onclick = () => setShowConf(!state.showConf, true);
 $("chkOverlay").onchange = (ev) => { state.showOverlay = ev.target.checked; fitCanvas(); draw(); };
 $("btnFillDisplayMode").onclick = () => {
   state.fillDisplayMode = state.fillDisplayMode === "hover" ? "margin" : "hover";
