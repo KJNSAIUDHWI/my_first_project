@@ -312,7 +312,7 @@ function renderRightPanel() {
 
       card.onmouseenter = () => {
         if (getLockedFillItemId()) return;
-        clearTimeout(hoverHideTimer);
+        clearHoverTimer();
         if (state.hoverItemId !== it.id || state.hoverSource !== "overview") {
           state.hoverItemId = it.id;
           state.hoverSource = "overview";
@@ -322,9 +322,7 @@ function renderRightPanel() {
       card.onmouseleave = () => {
         if (getLockedFillItemId()) return;
         if (state.hoverSource === "overview" && state.hoverItemId === it.id) {
-          state.hoverItemId = null;
-          state.hoverSource = null;
-          syncHoverPopoverOnly();
+          scheduleOverviewHoverClear(it.id);
         }
       };
       list.appendChild(card);

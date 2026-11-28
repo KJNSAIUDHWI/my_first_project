@@ -77,7 +77,8 @@ host.addEventListener("mousedown", (ev) => {
       state.drag = { type: "view_pending", sx, sy, tx0: state.tx, ty0: state.ty, hitItem: hit };
       return;
     }
-    if (state.selectedItemId || state.pinnedItemId || state.focusedLowConf || state.inlineBlankEdit || state.inlineChipEdit) {
+    if (state.selectedItemId || state.pinnedItemId || state.hoverItemId || state.focusedLowConf || state.inlineBlankEdit || state.inlineChipEdit) {
+      clearHoverTimer();
       state.selectedItemId = null;
       state.pinnedItemId = null;
       state.hoverItemId = null;
@@ -164,14 +165,14 @@ function processHoverMove(ev) {
   // 鼠标位于悬停/固定气泡（或其透明桥接区）内时直接忽略底层画布命中，绝不穿透切题！
   const overPop = ev.target && ev.target.closest && ev.target.closest(".fill-hover-pop");
   if (overPop) {
-    clearTimeout(hoverHideTimer);
+    clearHoverTimer();
     state.hoverInPopover = true;
     return;
   }
   const overRightDock = ev.target && ev.target.closest && ev.target.closest("#sidebarRight");
   if (overRightDock) {
     if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-      clearHoverCanvasImmediate();
+      scheduleHoverClear();
     }
     return;
   }
@@ -183,13 +184,14 @@ function processHoverMove(ev) {
       if (hitItem) {
         setHoverCanvasItem(hitItem.id);
       } else if (state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-        if (!isInPopoverBridge(sx, sy)) clearHoverCanvasImmediate();
+        if (isInPopoverBridge(sx, sy)) clearHoverTimer();
+        else scheduleHoverClear();
       }
     }
   } else {
     host.style.cursor = "grab";
     if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-      clearHoverCanvasImmediate();
+      scheduleHoverClear();
     }
   }
 }
@@ -396,7 +398,7 @@ host.addEventListener("mouseleave", (ev) => {
   const rel = ev && ev.relatedTarget;
   if (rel && rel.closest && rel.closest(".fill-hover-pop")) return;
   if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-    clearHoverCanvasImmediate();
+    scheduleHoverClear();
   }
 });
 host.addEventListener("dblclick", () => { if (!state.subboxTarget) { fitCanvas(); draw(); } });

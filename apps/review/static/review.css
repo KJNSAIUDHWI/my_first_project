@@ -297,17 +297,10 @@
   .overlay-layer.has-focus .choice-zone-badge {
     opacity: 0.42;
   }
-  /* 退出聚焦/蒙版时立即还原清晰度，零淡出拖尾；仅在进入聚焦时平滑压暗 */
-  .overlay-layer:not(.has-focus) .overlay-chip,
-  .overlay-layer:not(.has-focus) .fill-mini-tag,
-  .overlay-layer:not(.has-focus) .choice-zone-badge,
-  .ov-list:not(.has-focus) .ov-card {
-    transition: none !important;
-  }
   .overlay-chip {
     position: absolute; pointer-events: auto;
     border-radius: 4px; line-height: 1.25;
-    transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1), transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: opacity 0.20s cubic-bezier(0.22, 1, 0.36, 1), transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
     cursor: pointer; user-select: none;
   }
   .margin-qno {
@@ -427,7 +420,7 @@
     padding: 3px 8px; border-radius: 5px;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
     white-space: nowrap; user-select: none; z-index: 18;
-    transition: opacity 0.14s ease, transform 0.14s ease, background-color 0.14s ease;
+    transition: opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1), transform 0.16s ease, background-color 0.14s ease;
   }
   .fill-mini-tag:hover, .fill-mini-tag.active {
     background: var(--accent-bright); opacity: 1 !important;

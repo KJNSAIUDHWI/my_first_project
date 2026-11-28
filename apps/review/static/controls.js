@@ -293,6 +293,7 @@ window.addEventListener("keydown", (ev) => {
       return;
     }
     if (state.editingPopItemId || state.pinnedItemId || state.selectedItemId || state.hoverItemId || state.focusedLowConf) {
+      clearHoverTimer();
       state.editingPopItemId = null;
       state.pinnedItemId = null;
       state.selectedItemId = null;

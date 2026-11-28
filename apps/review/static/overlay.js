@@ -380,6 +380,13 @@ function renderLowConfFocusOverlay() {
 }
 
 let hoverHideTimer = null;
+const HOVER_HOLD_MS = 90;
+function clearHoverTimer() {
+  if (hoverHideTimer) {
+    clearTimeout(hoverHideTimer);
+    hoverHideTimer = null;
+  }
+}
 function getLockedFillItemId() {
   if (state.inlineBlankEdit && state.inlineBlankEdit.itemId && state.inlineBlankEdit.source !== "overview") {
     return state.inlineBlankEdit.itemId;
@@ -454,7 +461,7 @@ function syncFocusHighlightClasses(scrollOverview = false) {
   }
 }
 function pinFillItem(itemId) {
-  clearTimeout(hoverHideTimer);
+  clearHoverTimer();
   state.pinnedItemId = itemId;
   state.selectedItemId = itemId;
   state.hoverItemId = itemId;
@@ -465,7 +472,7 @@ function pinFillItem(itemId) {
   }
 }
 function unpinFillItem() {
-  clearTimeout(hoverHideTimer);
+  clearHoverTimer();
   clearTimeout(_ovCenterTimer);
   state.pinnedItemId = null;
   state.selectedItemId = null;
@@ -524,8 +531,7 @@ function isInPopoverBridge(sx, sy) {
   return false;
 }
 function clearHoverCanvasImmediate() {
-  clearTimeout(hoverHideTimer);
-  hoverHideTimer = null;
+  clearHoverTimer();
   clearTimeout(_ovCenterTimer);
   if (getLockedFillItemId()) return;
   if (state.hoverItemId && state.hoverSource !== "overview") {
@@ -534,6 +540,32 @@ function clearHoverCanvasImmediate() {
     state.hoverInPopover = false;
     syncHoverPopoverOnly();
   }
+}
+function scheduleHoverClear() {
+  if (getLockedFillItemId()) return;
+  // 已有 90ms 保持倒计时在跑时不重复重置，防止空白区持续滑动鼠标把退出无限拖延
+  if (hoverHideTimer) return;
+  hoverHideTimer = setTimeout(() => {
+    hoverHideTimer = null;
+    if (!getLockedFillItemId() && !state.hoverInPopover && state.hoverItemId && state.hoverSource !== "overview") {
+      clearTimeout(_ovCenterTimer);
+      state.hoverItemId = null;
+      state.hoverSource = null;
+      syncHoverPopoverOnly();
+    }
+  }, HOVER_HOLD_MS);
+}
+function scheduleOverviewHoverClear(itemId) {
+  if (getLockedFillItemId()) return;
+  if (hoverHideTimer) return;
+  hoverHideTimer = setTimeout(() => {
+    hoverHideTimer = null;
+    if (!getLockedFillItemId() && state.hoverSource === "overview" && state.hoverItemId === itemId) {
+      state.hoverItemId = null;
+      state.hoverSource = null;
+      syncHoverPopoverOnly();
+    }
+  }, HOVER_HOLD_MS);
 }
 function handleOverlayBadgeLeave(it, ev) {
   if (getLockedFillItemId()) return;
@@ -550,19 +582,18 @@ function handleOverlayBadgeLeave(it, ev) {
         setHoverCanvasItem(nextHit.id);
         return;
       }
-      if (isInPopoverBridge(sx, sy)) return;
+      if (isInPopoverBridge(sx, sy)) {
+        clearHoverTimer();
+        return;
+      }
     }
   }
-  clearHoverCanvasImmediate();
-}
-function scheduleHoverClear(ev = null) {
-  if (ev) { handleOverlayBadgeLeave(null, ev); return; }
-  clearHoverCanvasImmediate();
+  scheduleHoverClear();
 }
 function setHoverCanvasItem(itemId) {
   // 已点击固定或正在气泡内编辑时，鼠标滑过其他题框绝不抢焦、绝不销毁气泡
   if (getLockedFillItemId()) return;
-  clearTimeout(hoverHideTimer);
+  clearHoverTimer();
   if (state.hoverItemId !== itemId || state.hoverSource !== "canvas") {
     state.hoverItemId = itemId;
     state.hoverSource = "canvas";
@@ -666,7 +697,7 @@ function renderFillHoverPopover(row, rect, reuseEl = null, animate = false) {
   pop.appendChild(ansEl);
 
   pop.onmouseenter = () => {
-    clearTimeout(hoverHideTimer);
+    clearHoverTimer();
     state.hoverInPopover = true;
   };
   pop.onmouseleave = (ev) => {
