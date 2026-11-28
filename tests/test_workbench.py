@@ -596,6 +596,398 @@ class WorkbenchTests(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_multi_agent_providers_prompt_switch_and_session_concurrency(self):
+        """验证多 Agent 适配、默认全权、截图开关提示词切换、防竞争冒险单会话串行/多会话并发及密钥脱敏。"""
+        from apps.workbench import agent_providers as ap
+
+        # 1. 多 Agent 手动路径覆盖 + 命令契约（ZCode/OpenCode/WorkBuddy/豆包/Antigravity/Custom）
+        fake_root = self.work / "fake_agents"
+        zc_dir = fake_root / "ZCode"
+        (zc_dir / "resources" / "glm").mkdir(parents=True)
+        (zc_dir / "resources" / "config" / "provider").mkdir(parents=True)
+        (zc_dir / "ZCode.exe").write_bytes(b"MZ")
+        (zc_dir / "resources" / "glm" / "zcode.cjs").write_text("", encoding="utf-8")
+        (zc_dir / "resources" / "config" / "provider" / "zcode-builtin.json").write_text("{}", encoding="utf-8")
+
+        bins = {}
+        for nm in ("opencode.exe", "codebuddy.exe", "trae-cli.exe", "agy.exe"):
+            p = fake_root / nm
+            p.write_bytes(b"MZ")
+            bins[nm] = str(p)
+
+        cfg = {
+            "agent_paths": {
+                "zcode": str(zc_dir),
+                "opencode": bins["opencode.exe"],
+                "workbuddy": bins["codebuddy.exe"],
+                "doubao": bins["trae-cli.exe"],
+                "antigravity": bins["agy.exe"],
+            },
+            "agent_custom_cmd": "myagent --cwd {cwd} -p {prompt}",
+        }
+        det = ap.detect_all_agents(cfg, deep=False)
+        self.assertTrue(det["ok"])
+        self.assertEqual(set(det["available"]), {"zcode", "opencode", "workbuddy", "doubao", "antigravity", "custom"})
+
+        sp_zc = ap.build_agent_command("测试", ROOT, provider="zcode", mode="yolo", cfg=cfg)
+        self.assertTrue(sp_zc["ok"])
+        self.assertIn("yolo", sp_zc["cmd"])
+        self.assertIn("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE", sp_zc["env_patch"])
+        self.assertIn("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE", sp_zc["env_patch"])
+
+        sp_oc = ap.build_agent_command("测试", ROOT, provider="opencode", cfg=cfg)
+        self.assertEqual(sp_oc["cmd"][1], "run")
+        sp_wb = ap.build_agent_command("测试", ROOT, provider="workbuddy", session_id="s1", cfg=cfg)
+        self.assertIn("-r", sp_wb["cmd"])
+        sp_db = ap.build_agent_command("测试", ROOT, provider="doubao", cfg=cfg)
+        self.assertEqual(sp_db["cmd"][1], "run")
+        sp_ag = ap.build_agent_command("测试", ROOT, provider="antigravity", cfg=cfg)
+        self.assertIn("-p", sp_ag["cmd"])
+        sp_cu = ap.build_agent_command("hello", ROOT, provider="custom", cfg=cfg)
+        self.assertEqual(sp_cu["cmd"][0], "myagent")
+
+        # 2. 截图开关提示词自动切换 + 两类改动（含 GitHub 自动推送）规范
+        p_text_only = ap.build_computer_use_prompt(user_message="修一下报错", surface="review", attached_images=[])
+        self.assertIn("capture --target review", p_text_only)
+        self.assertIn("git push origin main", p_text_only)
+        self.assertNotIn("不要重复截一次同样的整页图", p_text_only)
+
+        fake_shot = self.work / "shot.png"
+        fake_shot.write_bytes(b"PNG")
+        p_with_shot = ap.build_computer_use_prompt(user_message="看下这个按钮", surface="workbench", attached_images=[str(fake_shot)])
+        self.assertIn("不要重复截一次同样的整页图", p_with_shot)
+        self.assertNotIn("当前仅提供文字状态快照", p_with_shot)
+
+        # 3. AiSessionManager：同 chat_id 严格单实例串行（防竞争冒险）+ 不同 chat_id 真正并发 + 密钥输入传递但日志/回复严格脱敏
+        trace_file = self.work / "trace.jsonl"
+        worker_script = self.work / "mock_agent.py"
+        worker_script.write_text(
+            "import json, os, sys, time\n"
+            "tag, delay, trace_p, secret_check = sys.argv[1], float(sys.argv[2]), sys.argv[3], sys.argv[4]\n"
+            "t_start = time.monotonic()\n"
+            "with open(trace_p, 'a', encoding='utf-8') as f: f.write(json.dumps({'tag': tag, 'ev': 'start', 't': t_start}) + '\\n')\n"
+            "time.sleep(delay)\n"
+            "t_end = time.monotonic()\n"
+            "with open(trace_p, 'a', encoding='utf-8') as f: f.write(json.dumps({'tag': tag, 'ev': 'end', 't': t_end}) + '\\n')\n"
+            "print(json.dumps({'sessionId': 'sess_' + tag, 'response': 'done ' + tag + ' got=' + secret_check, 'usage': {'inputTokens': 10, 'outputTokens': 5}}))\n",
+            encoding="utf-8",
+        )
+        events = []
+        mgr = ap.AiSessionManager(ROOT, self.batches, publish_cb=events.append)
+
+        fake_secret = "sk-dummyimportsecret9876543210"
+        # 同 chat_id 连发两轮：必须严格串行（t2_start >= t1_end）
+        r1 = mgr.submit_turn(
+            chat_id="same_chat",
+            provider="zcode",
+            mode="yolo",
+            user_message=f"请帮我导入密钥 {fake_secret}",
+            command_override={"ok": True, "provider": "zcode", "provider_label": "MockZCode", "cwd": str(self.work), "cmd": [sys.executable, str(worker_script), "s1", "0.35", str(trace_file), fake_secret], "env_patch": {}},
+        )
+        r2 = mgr.submit_turn(
+            chat_id="same_chat",
+            provider="zcode",
+            mode="yolo",
+            user_message="第二条排队消息",
+            command_override={"ok": True, "provider": "zcode", "provider_label": "MockZCode", "cwd": str(self.work), "cmd": [sys.executable, str(worker_script), "s2", "0.25", str(trace_file), "none"], "env_patch": {}},
+        )
+        self.assertTrue(r1["ok"] and r2["ok"])
+
+        # 不同 chat_id 并发发送：必须真正并行重叠
+        c_a = mgr.submit_turn(
+            chat_id="conc_a",
+            provider="zcode",
+            mode="yolo",
+            user_message="并发A",
+            command_override={"ok": True, "provider": "zcode", "provider_label": "MockZCode", "cwd": str(self.work), "cmd": [sys.executable, str(worker_script), "ca", "0.45", str(trace_file), "none"], "env_patch": {}},
+        )
+        c_b = mgr.submit_turn(
+            chat_id="conc_b",
+            provider="zcode",
+            mode="yolo",
+            user_message="并发B",
+            command_override={"ok": True, "provider": "zcode", "provider_label": "MockZCode", "cwd": str(self.work), "cmd": [sys.executable, str(worker_script), "cb", "0.45", str(trace_file), "none"], "env_patch": {}},
+        )
+        self.assertTrue(c_a["ok"] and c_b["ok"])
+
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            ss = [mgr.snapshot_session(x) for x in ("same_chat", "conc_a", "conc_b")]
+            if all(s and not s["running"] and s["queued"] == 0 and s["status"] == "done" for s in ss):
+                break
+            time.sleep(0.05)
+
+        rows = [json.loads(ln) for ln in trace_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        times = {(r["tag"], r["ev"]): r["t"] for r in rows}
+        # 同一对话严格不重叠（先完成 s1 再开始 s2）
+        self.assertGreaterEqual(times[("s2", "start")], times[("s1", "end")] - 0.01)
+        # 不同对话真正并发重叠（cb 在 ca 结束前已开始，ca 在 cb 结束前已开始）
+        self.assertLess(times[("cb", "start")], times[("ca", "end")])
+        self.assertLess(times[("ca", "start")], times[("cb", "end")])
+
+        # 密钥在消息记录与响应中已彻底脱敏，绝不泄露明文
+        same_snap = mgr.snapshot_session("same_chat")
+        all_txt = json.dumps(same_snap, ensure_ascii=False)
+        self.assertNotIn(fake_secret, all_txt)
+
+    def test_config_and_secret_import_export_and_cli_sanitization(self):
+        """验证配置/密钥一键导入导出（隔离临时 root 不污染真实 .env）与 CLI 参数脱敏。"""
+        from apps.workbench import cli as wb_cli
+
+        # 1. CLI 参数日志脱敏
+        san = wb_cli._sanitize_argv(["config", "set-vlm", "--api-key", "sk-testsecret99998888", "--password=mypwd123", "--model", "demo"])
+        self.assertNotIn("sk-testsecret99998888", " ".join(san))
+        self.assertNotIn("mypwd123", " ".join(san))
+        self.assertIn("***", san)
+
+        # 2. 隔离 root 下的 Hub 配置/密钥导入导出
+        iso_root = self.work / "iso_root"
+        iso_root.mkdir(parents=True)
+        iso_batches = iso_root / "batches"
+        state = wb_serve.WorkbenchState(root=iso_root, batches_root=iso_batches, port=0)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), wb_serve.make_handler(state))
+        port = srv.server_address[1]
+        state.port = port
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        try:
+            base = f"http://127.0.0.1:{port}"
+            fake_key = "ark-dummy-test-key-" + "abcd" * 4
+            imp_payload = {
+                "workbench": {"api_concurrency": 6, "ai_default_mode": "yolo", "ai_default_screenshot": True},
+                "vlm": {"provider": "doubao", "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions", "model": "doubao-seed-test", "api_key": fake_key},
+                "source": "ai",
+            }
+            req = urllib.request.Request(
+                f"{base}/api/config/import",
+                data=json.dumps(imp_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                res = json.loads(r.read().decode("utf-8"))
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["config"]["api_concurrency"], 6)
+            self.assertTrue(res["config"]["ai_default_screenshot"])
+            # 响应只含脱敏密钥，不含明文
+            self.assertNotIn(fake_key, json.dumps(res, ensure_ascii=False))
+            self.assertTrue((iso_root / ".env").is_file())
+
+            # 默认导出（脱敏）不含明文密钥
+            with urllib.request.urlopen(f"{base}/api/config/export", timeout=5) as r:
+                exp_safe = json.loads(r.read().decode("utf-8"))
+            self.assertNotIn("api_key", exp_safe["vlm"])
+            self.assertTrue(exp_safe["vlm"].get("api_key_masked"))
+
+            # 迁移导出（include_secrets=1）包含密钥供跨机导入
+            with urllib.request.urlopen(f"{base}/api/config/export?include_secrets=1", timeout=5) as r:
+                exp_full = json.loads(r.read().decode("utf-8"))
+            self.assertEqual(exp_full["vlm"].get("api_key"), fake_key)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_review_8904_isomorphic_crud_page_locks_sse_and_hub_proxy(self):
+        """验证 8904 同构 CLI 改字/改选项/删框、页级版本号防竞争冒险、UI 焦点投送 SSE 与 8888 同源代理。"""
+        from PIL import Image
+        from apps.review import server as review_server
+
+        rec_dir = self.work / "rec_8904"
+        (rec_dir / "pages").mkdir(parents=True)
+        (rec_dir / "crops").mkdir(parents=True)
+        for pid in ("p001", "p002"):
+            Image.new("RGB", (800, 600), (255, 255, 255)).save(rec_dir / "pages" / f"{pid}.jpg")
+        (rec_dir / "manifest.json").write_text(json.dumps({"run": "test_8904"}), encoding="utf-8")
+        results = {
+            "status": "completed",
+            "pages": [
+                {
+                    "id": "p001", "name": "paper_001", "image": "pages/p001.jpg", "width": 800, "height": 600,
+                    "boxes": [
+                        {"cls": 5, "stage": "m3", "box": [40, 80, 360, 180], "item_id": "p001_001"},
+                        {"cls": 3, "stage": "m2", "box": [40, 200, 200, 260], "item_id": "p001_002"},
+                    ],
+                    "items": [
+                        {"id": "p001_001", "page_id": "p001", "kind": "fill", "number": 15, "box": [40, 80, 360, 180], "status": "待复核", "issues": ["涂改"], "transcription": {"question_number": "15", "answers": {"无小题号": {"1": "电"}}}},
+                        {"id": "p001_002", "page_id": "p001", "kind": "choice", "number": 1, "box": [40, 200, 200, 260], "status": "已识别", "answer": "A"},
+                    ],
+                },
+                {
+                    "id": "p002", "name": "paper_002", "image": "pages/p002.jpg", "width": 800, "height": 600,
+                    "boxes": [{"cls": 5, "stage": "m3", "box": [50, 50, 300, 150], "item_id": "p002_001"}],
+                    "items": [{"id": "p002_001", "page_id": "p002", "kind": "fill", "number": 16, "box": [50, 50, 300, 150], "status": "已识别", "transcription": {"question_number": "16", "answers": {"无小题号": {"1": "2"}}}}],
+                },
+            ],
+            "stats": {},
+        }
+        (rec_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False), encoding="utf-8")
+
+        # 启动临时 Hub + 临时 8904 服务
+        hub_state = wb_serve.WorkbenchState(root=ROOT, batches_root=self.batches, port=0)
+        hub_srv = ThreadingHTTPServer(("127.0.0.1", 0), wb_serve.make_handler(hub_state))
+        hub_port = hub_srv.server_address[1]
+        hub_state.port = hub_port
+        threading.Thread(target=hub_srv.serve_forever, daemon=True).start()
+
+        rev_srv = review_server.make_server(rec_dir, port=0, host="127.0.0.1", allow_sync_data=False, hub_port=hub_port)
+        rev_port = rev_srv.server_address[1]
+        threading.Thread(target=rev_srv.serve_forever, daemon=True).start()
+
+        def cli_post(path, payload):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{rev_port}{path}",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json", "X-AutoGrade-Internal": "cli"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read().decode("utf-8"))
+
+        try:
+            # 1. 跨站 Origin 仍被 403 拦截
+            bad_req = urllib.request.Request(
+                f"http://127.0.0.1:{rev_port}/api/review/set-text",
+                data=b'{"page_id":"p001","item_id":"p001_001","text":"x"}',
+                headers={"Content-Type": "application/json", "Origin": "http://evil.example", "X-AutoGrade-Internal": "cli"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(bad_req, timeout=5)
+            self.assertEqual(ctx.exception.code, 403)
+
+            # 2. 订阅 8904 SSE，验证改字/改选项/删框/焦点投送实时推送
+            sse_events = []
+            sse_ready = threading.Event()
+
+            def _read_sse():
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{rev_port}/api/events", timeout=8) as resp:
+                        sse_ready.set()
+                        for raw in resp:
+                            ln = raw.decode("utf-8", errors="ignore").strip()
+                            if ln.startswith("data:"):
+                                sse_events.append(json.loads(ln[5:].strip()))
+                                if len(sse_events) >= 3:
+                                    break
+                except Exception:
+                    pass
+
+            th_sse = threading.Thread(target=_read_sse, daemon=True)
+            th_sse.start()
+            sse_ready.wait(timeout=3.0)
+            time.sleep(0.1)
+
+            # 同构改字 + 乐观版本锁冲突检测
+            r_txt = cli_post("/api/review/set-text", {"page_id": "p001", "item_id": "p001_001", "text": "电源", "expected_page_rev": 0})
+            self.assertTrue(r_txt["ok"])
+            self.assertEqual(r_txt["page_rev"], 1)
+
+            with self.assertRaises(urllib.error.HTTPError) as ctx_rev:
+                cli_post("/api/review/set-text", {"page_id": "p001", "item_id": "p001_001", "text": "过期写入", "expected_page_rev": 0})
+            self.assertEqual(ctx_rev.exception.code, 409)
+
+            # 改选择题 + 投送焦点指令
+            r_ch = cli_post("/api/review/set-choice", {"page_id": "p001", "item_id": "p001_002", "answer": "BC"})
+            self.assertTrue(r_ch["ok"])
+            r_cmd = cli_post("/api/ui/command", {"action": "focus", "page_id": "p001", "item_id": "p001_001", "label": "查看第15题"})
+            self.assertTrue(r_cmd["ok"])
+
+            th_sse.join(timeout=3.0)
+            ev_types = [e.get("type") for e in sse_events]
+            self.assertIn("data_updated", ev_types)
+            self.assertIn("ui_command", ev_types)
+
+            # 3. 删框 + ui-state 镜像读写 + /api/hub/agents 同源代理
+            r_del = cli_post("/api/review/delete-box", {"page_id": "p002", "item_id": "p002_001"})
+            self.assertTrue(r_del["ok"])
+            self.assertEqual(r_del["remaining_items"], 0)
+
+            cli_post("/api/ui-state", {"client_id": "c1", "page_id": "p001", "mode": "edit", "selected_item_id": "p001_001"})
+            with urllib.request.urlopen(f"http://127.0.0.1:{rev_port}/api/ui-state?client_id=c1", timeout=5) as r:
+                ui_res = json.loads(r.read().decode("utf-8"))
+            self.assertEqual(ui_res["active"]["page_id"], "p001")
+            self.assertEqual(ui_res["active"]["mode"], "edit")
+
+            with urllib.request.urlopen(f"http://127.0.0.1:{rev_port}/api/hub/agents", timeout=5) as r:
+                ag_res = json.loads(r.read().decode("utf-8"))
+            self.assertTrue(ag_res["ok"])
+            self.assertIn("zcode", ag_res["agents"])
+        finally:
+            rev_srv._stop_event.set()
+            rev_srv.shutdown()
+            rev_srv.server_close()
+            hub_srv.shutdown()
+            hub_srv.server_close()
+
+    def test_offscreen_capture_canvas_and_headless_ui_mirror(self):
+        """验证离屏高清试卷合成裁切 + 本机无头浏览器离屏 UI 渲染与元素清单导出。"""
+        from PIL import Image
+        from apps.workbench import capture as cap_mod
+
+        # 1. 审阅试卷高清离屏合成（整页 + 单题特写 + 自定义比例裁切）
+        rec_dir = self.work / "rec_cap"
+        (rec_dir / "pages").mkdir(parents=True)
+        Image.new("RGB", (900, 700), (250, 250, 250)).save(rec_dir / "pages" / "p001.jpg")
+        (rec_dir / "results.json").write_text(json.dumps({
+            "pages": [{
+                "id": "p001", "name": "cap_001", "image": "pages/p001.jpg", "width": 900, "height": 700,
+                "boxes": [{"cls": 5, "stage": "m3", "box": [80, 120, 420, 240], "item_id": "p001_001"}],
+                "items": [{"id": "p001_001", "page_id": "p001", "kind": "fill", "number": 15, "box": [80, 120, 420, 240], "status": "待复核", "issues": ["涂改"], "transcription": {"question_number": "15", "answers": {"无小题号": {"1": "电能"}}}}],
+            }]
+        }, ensure_ascii=False), encoding="utf-8")
+
+        c_page = cap_mod.capture_review_canvas(rec_dir, self.batches, page_id="p001", with_elements=True)
+        self.assertTrue(c_page["ok"])
+        self.assertTrue(Path(c_page["path"]).is_file())
+        self.assertTrue(Path(c_page["elements_path"]).is_file())
+        self.assertEqual(c_page["elements_count"], 1)
+
+        c_item = cap_mod.capture_review_canvas(rec_dir, self.batches, item_id="p001_001")
+        self.assertTrue(c_item["ok"])
+        self.assertEqual(c_item["scope"], "item")
+        self.assertLess(c_item["width"], 500)
+
+        c_crop = cap_mod.capture_review_canvas(rec_dir, self.batches, page_id="p001", crop="0.0,0.0,0.5,0.5")
+        self.assertTrue(c_crop["ok"])
+        self.assertEqual(c_crop["scope"], "crop")
+        self.assertEqual(c_crop["width"], 450)
+
+        # 2. 若本机存在 Edge/Chrome，实测无头离屏 UI 渲染 + ui_state 镜像 + 元素清单 + selector 精确裁切
+        if cap_mod.find_headless_browser():
+            state = wb_serve.WorkbenchState(root=ROOT, batches_root=self.batches, port=0)
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), wb_serve.make_handler(state))
+            port = srv.server_address[1]
+            state.port = port
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                state.update_ui_state({"client_id": "mirror_t", "view": "check"})
+                res_ui = cap_mod.capture_headless_ui(
+                    f"http://127.0.0.1:{port}/",
+                    self.batches,
+                    target="workbench",
+                    mirror_client="mirror_t",
+                    with_elements=True,
+                )
+                self.assertTrue(res_ui["ok"], res_ui.get("error"))
+                self.assertTrue(Path(res_ui["path"]).is_file())
+                self.assertGreater(res_ui["elements_count"], 5)
+                el_ids = {e.get("id") for e in res_ui["elements"]}
+                self.assertIn("btnOpenAi", el_ids)
+
+                res_sel = cap_mod.capture_headless_ui(
+                    f"http://127.0.0.1:{port}/",
+                    self.batches,
+                    target="workbench",
+                    selector="#btnOpenAi",
+                    with_elements=False,
+                )
+                self.assertTrue(res_sel["ok"], res_sel.get("error"))
+                self.assertLess(res_sel["width"], 260)
+                self.assertLess(res_sel["height"], 100)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

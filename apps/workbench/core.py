@@ -151,8 +151,64 @@ def find_opencode(cfg: dict | None = None) -> str | None:
     return None
 
 
+def _discover_zcode_registry_dirs() -> list[Path]:
+    """从 Windows 卸载注册表读取 ZCode 自定义安装目录（如 D:\\Dev\\Zcode）。"""
+    if os.name != "nt":
+        return []
+    found: list[Path] = []
+    seen: set[str] = set()
+    try:
+        import winreg
+    except Exception:
+        return []
+    roots = [
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    for hive, subkey in roots:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                n_sub, _, _ = winreg.QueryInfoKey(key)
+                for idx in range(n_sub):
+                    try:
+                        name = winreg.EnumKey(key, idx)
+                        with winreg.OpenKey(key, name) as sk:
+                            try:
+                                disp, _ = winreg.QueryValueEx(sk, "DisplayName")
+                            except OSError:
+                                disp = ""
+                            if "zcode" not in str(disp or "").lower():
+                                continue
+                            for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
+                                try:
+                                    raw, _ = winreg.QueryValueEx(sk, val_name)
+                                except OSError:
+                                    continue
+                                s = str(raw or "").strip()
+                                if not s:
+                                    continue
+                                if s.startswith('"') and '"' in s[1:]:
+                                    s = s[1 : s.index('"', 1)]
+                                else:
+                                    s = s.split(",")[0].strip()
+                                    if val_name == "UninstallString" and " /" in s:
+                                        s = s.split(" /", 1)[0].strip()
+                                p = Path(s)
+                                cand = p if p.is_dir() else p.parent
+                                key_norm = str(cand).lower()
+                                if cand.is_dir() and key_norm not in seen:
+                                    seen.add(key_norm)
+                                    found.append(cand)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return found
+
+
 def find_zcode(cfg: dict | None = None, *, probe_version: bool = False) -> dict:
-    """探测本机 ZCode CLI（支持桌面端 Electron node-bundle 与独立 CLI，支持配置覆盖）。"""
+    """探测本机 ZCode CLI（支持桌面端 Electron node-bundle、注册表自定义路径与独立 CLI）。"""
     cfg = cfg or {}
     custom_exe = str(cfg.get("zcode_exe") or "").strip()
     custom_cli = str(cfg.get("zcode_cli") or "").strip()
@@ -161,19 +217,41 @@ def find_zcode(cfg: dict | None = None, *, probe_version: bool = False) -> dict:
         "mode": "",
         "exe": "",
         "cli": "",
+        "builtin_provider_config": "",
         "version": "",
     }
 
+    def _detect_builtin_cfg(cli_path: str) -> str:
+        try:
+            p = Path(cli_path).resolve()
+            # 典型结构：<ZCode>/resources/glm/zcode.cjs -> <ZCode>/resources/config/provider/zcode-builtin.json
+            for cand in (
+                p.parent / "provider" / "zcode-builtin.json",
+                p.parent.parent / "config" / "provider" / "zcode-builtin.json",
+            ):
+                if cand.is_file():
+                    return str(cand)
+        except Exception:
+            pass
+        return ""
+
     # 1. 配置显式覆盖
     if custom_exe and custom_cli and Path(custom_exe).is_file() and Path(custom_cli).is_file():
-        result.update({"available": True, "mode": "electron_bundle", "exe": custom_exe, "cli": custom_cli})
+        result.update({
+            "available": True,
+            "mode": "electron_bundle",
+            "exe": custom_exe,
+            "cli": custom_cli,
+            "builtin_provider_config": _detect_builtin_cfg(custom_cli),
+        })
     elif custom_cli and Path(custom_cli).is_file() and custom_cli.lower().endswith((".exe", ".cmd", ".bat")):
         result.update({"available": True, "mode": "cli", "exe": custom_cli, "cli": custom_cli})
 
-    # 2. 常见桌面端 Electron bundle 安装路径（ZCode.exe + resources/glm/zcode.cjs）
+    # 2. 常见桌面端 Electron bundle 安装路径 + Windows 卸载注册表自定义目录（ZCode.exe + resources/glm/zcode.cjs）
     if not result["available"]:
         local_app = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
         prog_files = [
+            *_discover_zcode_registry_dirs(),
             Path(os.environ.get("ProgramFiles") or "C:/Program Files") / "ZCode",
             Path(os.environ.get("ProgramFiles(x86)") or "C:/Program Files (x86)") / "ZCode",
             local_app / "Programs" / "ZCode",
@@ -183,20 +261,30 @@ def find_zcode(cfg: dict | None = None, *, probe_version: bool = False) -> dict:
             exe_p = base / "ZCode.exe"
             cli_p = base / "resources" / "glm" / "zcode.cjs"
             if exe_p.is_file() and cli_p.is_file():
-                result.update({"available": True, "mode": "electron_bundle", "exe": str(exe_p), "cli": str(cli_p)})
+                result.update({
+                    "available": True,
+                    "mode": "electron_bundle",
+                    "exe": str(exe_p),
+                    "cli": str(cli_p),
+                    "builtin_provider_config": _detect_builtin_cfg(str(cli_p)),
+                })
                 break
 
     # 3. 独立 PATH 或 ~/.zcode/bin 包装脚本
     if not result["available"]:
-        for name in ("zcode", "zcode.cmd", "zcode.exe"):
+        for name in ("zcode", "zcode.cmd", "zcode.exe", "zcodecli", "zcodecli.cmd", "zcodecli.exe"):
             found = shutil.which(name)
             if found:
                 result.update({"available": True, "mode": "cli", "exe": found, "cli": found})
                 break
     if not result["available"]:
-        cand_cmd = Path.home() / ".zcode" / "bin" / "zcode.cmd"
-        if cand_cmd.is_file():
-            result.update({"available": True, "mode": "cli", "exe": str(cand_cmd), "cli": str(cand_cmd)})
+        for cand_cmd in (
+            Path.home() / ".zcode" / "bin" / "zcode.cmd",
+            Path.home() / ".zcode" / "bin" / "zcodecli.cmd",
+        ):
+            if cand_cmd.is_file():
+                result.update({"available": True, "mode": "cli", "exe": str(cand_cmd), "cli": str(cand_cmd)})
+                break
 
     if result["available"] and probe_version:
         try:
@@ -236,6 +324,13 @@ def build_zcode_command(
     if zc["mode"] == "electron_bundle":
         cmd = [zc["exe"], zc["cli"]]
         env_patch = {"ELECTRON_RUN_AS_NODE": "1"}
+        builtin_cfg = str(zc.get("builtin_provider_config") or "").strip()
+        if builtin_cfg and Path(builtin_cfg).is_file():
+            if not os.environ.get("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"):
+                env_patch["ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"] = builtin_cfg
+            if not os.environ.get("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"):
+                base_dir = Path(os.environ.get("ZCODE_DATA_BASE_DIR") or Path.home())
+                env_patch["ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"] = str(base_dir / ".zcode" / "v2" / "provider_config.json")
     else:
         cmd = [zc["exe"]]
         env_patch = {}

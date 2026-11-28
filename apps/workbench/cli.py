@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -45,8 +46,60 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import core  # noqa: E402
+import agent_providers  # noqa: E402
+import capture as capture_mod  # noqa: E402
 import server as wb_serve  # noqa: E402
 from engine import run_log  # noqa: E402
+
+
+_SENSITIVE_CLI_FLAGS = {"--api-key", "--password", "--token", "--secret", "--key"}
+
+
+def _sanitize_argv(argv: list[str]) -> list[str]:
+    """脱敏 CLI 参数列表，防止把命令行传入的密钥或密码写入 cli-*.jsonl 日志。"""
+    out: list[str] = []
+    hide_next = False
+    for tok in argv:
+        if hide_next:
+            out.append("***")
+            hide_next = False
+            continue
+        low = tok.lower()
+        if low in _SENSITIVE_CLI_FLAGS:
+            out.append(tok)
+            hide_next = True
+            continue
+        matched_eq = False
+        for fl in _SENSITIVE_CLI_FLAGS:
+            if low.startswith(fl + "="):
+                out.append(tok.split("=", 1)[0] + "=***")
+                matched_eq = True
+                break
+        if matched_eq:
+            continue
+        out.append(run_log.mask_secret(tok))
+    return out
+
+
+def _review_request(review_url: str, method: str, path: str, payload: dict | None = None, timeout: float = 15.0) -> tuple[bool, int, dict]:
+    url = f"{review_url.rstrip('/')}{path}"
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    headers = {"X-AutoGrade-Internal": "cli"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return True, resp.status, body if isinstance(body, dict) else {"value": body}
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8", errors="replace"))
+        except Exception:
+            body = {"ok": False, "error": f"HTTP {exc.code}: {exc.reason}"}
+        return False, exc.code, body if isinstance(body, dict) else {"ok": False, "error": str(body)}
+    except Exception as exc:
+        return False, 0, {"ok": False, "error": str(exc)}
 
 
 def _hub_url(args) -> str:
@@ -83,14 +136,14 @@ def _emit_output(args, *, command: str, ok: bool, exit_code: int, data: dict[str
         run_log.append_cli_log(
             core.DEFAULT_BATCHES_ROOT,
             command=command,
-            argv=sys.argv[1:],
+            argv=_sanitize_argv(sys.argv[1:]),
             source="cli",
             actor="cli",
             exit_code=exit_code,
             duration_ms=dur_ms,
             ok=ok,
             batch_id=str(data.get("batch_id") or (data.get("active_batch") or {}).get("batch_id") or ""),
-            message=error or f"cli {command} {'ok' if ok else 'failed'}",
+            message=run_log.mask_secret(error or f"cli {command} {'ok' if ok else 'failed'}"),
         )
     except Exception:
         pass
@@ -247,7 +300,14 @@ def cmd_capabilities(args, t0: float) -> int:
             {"name": "stop", "safety": "mutating", "args": ["--json"], "desc": "停止工作台正在运行的识别/补跑任务"},
             {"name": "benchmark", "safety": "long_task", "args": ["--samples", "--detach", "--json"], "desc": "执行零 API 费用本机性能压测"},
             {"name": "repair-pip", "safety": "mutating", "args": ["[packages...]", "--dry-run", "--json"], "desc": "测速选源安装缺失 Python 依赖"},
+            {"name": "config", "safety": "mutating", "args": ["get|set|set-vlm|import|export", "--json"], "desc": "查看/修改工作台配置与 VLM 密钥，或整包导入导出配置"},
+            {"name": "weights", "safety": "mutating", "args": ["unpack --password <pwd>", "--json"], "desc": "解压加密模型权重包"},
+            {"name": "agents", "safety": "read_only", "args": ["list|test", "--deep", "--probe-version", "--json"], "desc": "探测或测试本机可用 CLI Agent（ZCode/OpenCode/CodeBuddy/豆包/Antigravity）"},
+            {"name": "capture", "safety": "read_only", "args": ["--target workbench|review", "--mode auto|ui|canvas", "--page", "--item", "--selector", "--crop", "--with-elements", "--som", "--json"], "desc": "后台离屏无遮挡截图并导出交互元素清单"},
+            {"name": "ui", "safety": "mutating", "args": ["state|focus|navigate|click", "--target workbench|review", "--selector", "--page", "--item", "--view", "--json"], "desc": "查询前台 UI 焦点或向浏览器投送高亮焦点/跳转指令"},
+            {"name": "review", "safety": "mutating", "args": ["status|page|set-text|set-choice|delete-box|re-ocr|confirm|nav", "--review-url", "--json"], "desc": "8904 审阅页同构 CRUD 操作（页级锁防竞争冒险并实时推给前端）"},
         ],
+        "agents": agent_providers.detect_all_agents(core.load_config(), deep=False),
         "tools": info["tools"],
         "ports": info["ports"],
         "project_root": info["project_root"],
@@ -559,6 +619,409 @@ def cmd_open(args, t0: float) -> int:
     return _emit_output(args, command="open", ok=True, exit_code=0, data={**res, "url": url}, t0=t0, text_lines=[f"服务已就绪：{url}"])
 
 
+def cmd_config(args, t0: float) -> int:
+    hub = _hub_url(args)
+    action = getattr(args, "action", "get") or "get"
+
+    if action == "get":
+        cfg = core.load_config()
+        vlm = core.get_vlm_settings(ROOT)
+        infer = core.get_infer_settings()
+        agents = agent_providers.detect_all_agents(cfg, deep=False)
+        data = {"workbench": cfg, "vlm": vlm, "infer_settings": infer, "agents": agents}
+        lines = [
+            f"大模型 API：{vlm.get('provider')} / {vlm.get('model')}（密钥：{vlm.get('api_key_masked') or '未配置'}）",
+            f"推理参数：device={infer.get('infer_device')} batch={infer.get('yolo_batch')} workers={infer.get('cpu_workers')} api_conc={infer.get('api_concurrency')}",
+            f"默认 AI Agent：{agents.get('recommended')}（可用：{', '.join(agents.get('available') or []) or '无'}）",
+        ]
+        return _emit_output(args, command="config.get", ok=True, exit_code=0, data=data, t0=t0, text_lines=lines)
+
+    if action == "set":
+        patch: dict[str, Any] = {"source": "cli"}
+        if getattr(args, "infer_device", None) is not None:
+            patch["infer_device"] = args.infer_device
+        if getattr(args, "yolo_batch", None) is not None:
+            patch["yolo_batch"] = int(args.yolo_batch)
+        if getattr(args, "cpu_workers", None) is not None:
+            patch["cpu_workers"] = int(args.cpu_workers)
+        if getattr(args, "api_concurrency", None) is not None:
+            patch["api_concurrency"] = int(args.api_concurrency)
+        if getattr(args, "agent_provider", None) is not None:
+            patch["ai_helper_provider"] = args.agent_provider
+        if getattr(args, "ai_mode", None) is not None:
+            patch["ai_default_mode"] = args.ai_mode
+        if getattr(args, "ai_screenshot", None) is not None:
+            patch["ai_default_screenshot"] = str(args.ai_screenshot).lower() in ("1", "true", "yes", "on")
+        if getattr(args, "custom_agent_cmd", None) is not None:
+            patch["agent_custom_cmd"] = args.custom_agent_cmd
+        ap_list = getattr(args, "agent_path", None) or []
+        if ap_list:
+            ap_map: dict[str, str] = {}
+            for item in ap_list:
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    ap_map[k.strip().lower()] = v.strip()
+            if ap_map:
+                patch["agent_paths"] = ap_map
+
+        if _hub_alive(hub):
+            ok_h, _, res = _hub_request(hub, "POST", "/api/config", patch, timeout=min(10.0, args.timeout))
+            if ok_h and res.get("ok"):
+                return _emit_output(args, command="config.set", ok=True, exit_code=0, data={**res, "via_hub": True}, t0=t0, text_lines=["工作台配置已更新并同步至界面"])
+        patch.pop("source", None)
+        if "agent_paths" in patch:
+            cur_ap = dict(core.load_config().get("agent_paths") or {})
+            cur_ap.update(patch["agent_paths"])
+            patch["agent_paths"] = cur_ap
+        cfg = core.save_config(patch)
+        return _emit_output(args, command="config.set", ok=True, exit_code=0, data={"config": cfg, "via_hub": False}, t0=t0, text_lines=["工作台配置已保存"])
+
+    if action == "set-vlm":
+        api_key = str(getattr(args, "api_key", "") or "").strip()
+        key_env = str(getattr(args, "api_key_env", "") or "").strip()
+        if not api_key and key_env:
+            api_key = str(os.environ.get(key_env) or "").strip()
+        payload = {
+            "provider": str(getattr(args, "provider", "") or core.get_vlm_settings(ROOT).get("provider") or "doubao"),
+            "base_url": str(getattr(args, "base_url", "") or ""),
+            "model": str(getattr(args, "model", "") or ""),
+            "api_key": api_key,
+        }
+        via_hub = False
+        if _hub_alive(hub):
+            ok_h, _, res = _hub_request(hub, "POST", "/api/vlm/config", payload, timeout=min(12.0, args.timeout))
+            via_hub = ok_h
+        else:
+            res = core.save_vlm_settings(
+                provider=payload["provider"],
+                base_url=payload["base_url"],
+                api_key=payload["api_key"],
+                model=payload["model"],
+                root=ROOT,
+            )
+        if not res.get("ok"):
+            return _emit_output(args, command="config.set-vlm", ok=False, exit_code=1, data=res, error=str(res.get("error") or "保存 VLM 配置失败"), t0=t0)
+        test_res = None
+        if getattr(args, "test", False):
+            test_res = core.test_vlm_settings(root=ROOT)
+        cfg_safe = res.get("config") or core.get_vlm_settings(ROOT)
+        lines = [f"已写入大模型配置：{cfg_safe.get('provider')} / {cfg_safe.get('model')}（密钥：{cfg_safe.get('api_key_masked') or '未变'}）"]
+        if test_res is not None:
+            lines.append("连通测试：" + ("通过" if test_res.get("ok") else f"失败：{test_res.get('error')}"))
+        ok_all = bool(res.get("ok") and (test_res is None or test_res.get("ok")))
+        return _emit_output(args, command="config.set-vlm", ok=ok_all, exit_code=0 if ok_all else 1, data={"config": cfg_safe, "test": test_res, "via_hub": via_hub}, error="" if ok_all else str((test_res or {}).get("error") or ""), t0=t0, text_lines=lines)
+
+    if action == "export":
+        inc_sec = bool(getattr(args, "include_secrets", False))
+        cfg_now = core.load_config()
+        vlm_now = core.get_vlm_settings(ROOT)
+        vlm_out: dict[str, Any] = {
+            "provider": vlm_now.get("provider", "doubao"),
+            "base_url": vlm_now.get("base_url", ""),
+            "model": vlm_now.get("model", ""),
+        }
+        if inc_sec:
+            rk = core._read_env_key(ROOT, "VLM_API_KEY") or core._read_env_key(ROOT, "ARK_API_KEY")
+            if rk:
+                vlm_out["api_key"] = rk
+        else:
+            vlm_out["api_key_masked"] = vlm_now.get("api_key_masked", "")
+        bundle = {
+            "schema_version": 1,
+            "exported_at": core.now_str(),
+            "include_secrets": inc_sec,
+            "workbench": cfg_now,
+            "vlm": vlm_out,
+        }
+        out_p = getattr(args, "out", "") or ""
+        if out_p:
+            p = Path(out_p).resolve()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 返回给终端/日志的结果不暴露明文密钥
+            safe_data = {"path": str(p), "include_secrets": inc_sec, "vlm_model": vlm_out.get("model", "")}
+            return _emit_output(args, command="config.export", ok=True, exit_code=0, data=safe_data, t0=t0, text_lines=[f"已导出配置包到：{p}（{'含密钥，请妥善保管勿上传 Git' if inc_sec else '已脱敏不含密钥'}）"])
+        # 直接输出到 stdout 时不返回明文密钥
+        bundle_safe = {**bundle, "vlm": {k: ("***" if k == "api_key" else v) for k, v in vlm_out.items()}}
+        return _emit_output(args, command="config.export", ok=True, exit_code=0, data=bundle_safe, t0=t0, text_lines=[json.dumps(bundle_safe, ensure_ascii=False, indent=2)])
+
+    if action == "import":
+        fpath = str(getattr(args, "file", "") or "").strip()
+        if not fpath or not Path(fpath).is_file():
+            return _emit_output(args, command="config.import", ok=False, exit_code=2, data={}, error=f"找不到配置文件：{fpath}", t0=t0)
+        raw_txt = Path(fpath).read_text(encoding="utf-8-sig")
+        if Path(fpath).suffix.lower() == ".env" or (not raw_txt.lstrip().startswith("{") and "=" in raw_txt):
+            # 支持直接导入 .env 文件（按行 KEY=VALUE）
+            env_dict: dict[str, str] = {}
+            for ln in raw_txt.splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                env_dict[k.strip()] = v.strip().strip('"').strip("'")
+            payload = {"env": env_dict, "source": "cli"}
+        else:
+            payload = json.loads(raw_txt)
+            if not isinstance(payload, dict):
+                return _emit_output(args, command="config.import", ok=False, exit_code=2, data={}, error="配置文件必须是 JSON 对象或 .env 文件", t0=t0)
+            payload["source"] = "cli"
+
+        via_hub = False
+        if _hub_alive(hub):
+            ok_h, _, res = _hub_request(hub, "POST", "/api/config/import", payload, timeout=min(15.0, args.timeout))
+            via_hub = ok_h
+        else:
+            applied = []
+            if isinstance(payload.get("workbench"), dict):
+                core.save_config(payload["workbench"])
+                applied.append("工作台配置")
+            if isinstance(payload.get("vlm"), dict) and any(str(payload["vlm"].get(k) or "").strip() for k in ("provider", "base_url", "api_key", "model")):
+                vr = core.save_vlm_settings(
+                    provider=str(payload["vlm"].get("provider") or "doubao"),
+                    base_url=str(payload["vlm"].get("base_url") or ""),
+                    api_key=str(payload["vlm"].get("api_key") or ""),
+                    model=str(payload["vlm"].get("model") or ""),
+                    root=ROOT,
+                )
+                if not vr.get("ok"):
+                    return _emit_output(args, command="config.import", ok=False, exit_code=1, data=vr, error=str(vr.get("error") or "导入 VLM 失败"), t0=t0)
+                applied.append("大模型 API 配置与密钥")
+            if isinstance(payload.get("env"), dict) and payload["env"]:
+                er = core.save_env_keys({str(k): str(v) for k, v in payload["env"].items() if str(v or "").strip()}, root=ROOT)
+                if not er.get("ok"):
+                    return _emit_output(args, command="config.import", ok=False, exit_code=1, data=er, error=str(er.get("error") or "导入 .env 失败"), t0=t0)
+                applied.append(f".env({len(payload['env'])}项)")
+            res = {"ok": True, "applied": applied, "message": "配置导入完成：" + ("、".join(applied) or "无变更"), "vlm": core.get_vlm_settings(ROOT)}
+
+        test_res = core.test_vlm_settings(root=ROOT) if (res.get("ok") and getattr(args, "test", False)) else None
+        ok_all = bool(res.get("ok") and (test_res is None or test_res.get("ok")))
+        lines = [str(res.get("message") or "配置已导入")]
+        if test_res is not None:
+            lines.append("连通测试：" + ("通过" if test_res.get("ok") else f"失败：{test_res.get('error')}"))
+        return _emit_output(args, command="config.import", ok=ok_all, exit_code=0 if ok_all else 1, data={**res, "test": test_res, "via_hub": via_hub}, error="" if ok_all else str((test_res or res).get("error") or ""), t0=t0, text_lines=lines)
+
+    return _emit_output(args, command="config", ok=False, exit_code=2, data={}, error=f"不支持的 config 操作：{action}", t0=t0)
+
+
+def cmd_weights(args, t0: float) -> int:
+    hub = _hub_url(args)
+    pwd = str(getattr(args, "password", "") or "")
+    if not pwd:
+        return _emit_output(args, command="weights.unpack", ok=False, exit_code=2, data={}, error="请通过 --password 提供权重包解压密码", t0=t0)
+    if _hub_alive(hub):
+        ok_h, _, res = _hub_request(hub, "POST", "/api/repair/weights", {"password": pwd}, timeout=max(60.0, args.timeout))
+        if ok_h:
+            ok = bool(res.get("ok"))
+            return _emit_output(args, command="weights.unpack", ok=ok, exit_code=0 if ok else 1, data={**res, "via_hub": True}, error="" if ok else str(res.get("error") or ""), t0=t0, text_lines=[str(res.get("message") or res.get("error") or "")])
+    res = core.unpack_weights(pwd, root=ROOT)
+    ok = bool(res.get("ok"))
+    return _emit_output(args, command="weights.unpack", ok=ok, exit_code=0 if ok else 1, data={**res, "via_hub": False}, error="" if ok else str(res.get("error") or ""), t0=t0, text_lines=[str(res.get("message") or res.get("error") or "")])
+
+
+def cmd_agents(args, t0: float) -> int:
+    action = getattr(args, "action", "list") or "list"
+    cfg = core.load_config()
+    if action == "test":
+        prov = str(getattr(args, "provider", "") or "").strip().lower()
+        if not prov:
+            return _emit_output(args, command="agents.test", ok=False, exit_code=2, data={}, error="请指定要测试的 Agent 名称（如 zcode/opencode/workbuddy/doubao/antigravity）", t0=t0)
+        res = agent_providers.test_agent_provider(prov, cfg)
+        ok = bool(res.get("ok"))
+        return _emit_output(args, command="agents.test", ok=ok, exit_code=0 if ok else 1, data=res, error="" if ok else str(res.get("error") or ""), t0=t0, text_lines=[f"{prov}: {'可用 (' + str(res.get('version', '')) + ')' if ok else res.get('error')}"])
+    res = agent_providers.detect_all_agents(cfg, deep=bool(getattr(args, "deep", False)), probe_version=bool(getattr(args, "probe_version", False)))
+    lines = [f"本机 CLI Agent 探测（{'扩展扫描' if res['deep'] else '快探'} · {res['elapsed_ms']}ms，推荐：{res['recommended']}）："]
+    for a in res["list"]:
+        st = f"✓ {a['cli']}" if a["available"] else "✗ 未检测到"
+        ver = f" [{a['version']}]" if a.get("version") else ""
+        lines.append(f"  - {a['id']:12s} ({a['label']}): {st}{ver}")
+    return _emit_output(args, command="agents.list", ok=True, exit_code=0, data=res, t0=t0, text_lines=lines)
+
+
+def cmd_capture(args, t0: float) -> int:
+    hub = _hub_url(args)
+    target = str(getattr(args, "target", "workbench") or "workbench").lower()
+    mode = str(getattr(args, "mode", "auto") or "auto").lower()
+    payload = {
+        "target": target,
+        "mode": mode,
+        "page_id": str(getattr(args, "page", "") or ""),
+        "item_id": str(getattr(args, "item", "") or ""),
+        "selector": str(getattr(args, "selector", "") or ""),
+        "crop": getattr(args, "crop", None),
+        "with_elements": not bool(getattr(args, "no_elements", False)),
+        "som": bool(getattr(args, "som", False)),
+        "mirror_client": str(getattr(args, "client_id", "") or ""),
+        "review_port": int(urllib.parse.urlparse(str(getattr(args, "review_url", "http://127.0.0.1:8904"))).port or 8904),
+    }
+    out_p = Path(args.out).resolve() if getattr(args, "out", None) else None
+
+    if target == "review" and (mode == "canvas" or (mode == "auto" and not payload["selector"] and not payload["som"])):
+        active = core.get_active_batch()
+        if not active:
+            return _emit_output(args, command="capture", ok=False, exit_code=1, data={}, error="当前没有活跃批次", t0=t0)
+        res = capture_mod.capture_review_canvas(
+            Path(active["recognize_dir"]),
+            core.DEFAULT_BATCHES_ROOT,
+            page_id=payload["page_id"],
+            item_id=payload["item_id"],
+            crop=payload["crop"],
+            with_elements=payload["with_elements"],
+            out_path=out_p,
+        )
+    elif _hub_alive(hub) and out_p is None:
+        ok_h, _, res = _hub_request(hub, "POST", "/api/capture", payload, timeout=max(25.0, args.timeout))
+        if not ok_h and not res.get("ok"):
+            return _emit_output(args, command="capture", ok=False, exit_code=1, data=res, error=str(res.get("error") or "截图失败"), t0=t0)
+    else:
+        url = str(getattr(args, "review_url", "http://127.0.0.1:8904")) if target == "review" else hub
+        res = capture_mod.capture_headless_ui(
+            url,
+            core.DEFAULT_BATCHES_ROOT,
+            target=target,
+            mirror_client=payload["mirror_client"],
+            selector=payload["selector"],
+            crop=payload["crop"],
+            with_elements=payload["with_elements"],
+            som=payload["som"],
+            out_path=out_p,
+        )
+    ok = bool(res.get("ok"))
+    lines = [f"截图完成：{res.get('path')}（{res.get('width')}x{res.get('height')}，元素 {res.get('elements_count', 0)} 个）"] if ok else [str(res.get("error") or "截图失败")]
+    return _emit_output(args, command="capture", ok=ok, exit_code=0 if ok else 1, data=res, error="" if ok else str(res.get("error") or ""), t0=t0, text_lines=lines)
+
+
+def cmd_ui(args, t0: float) -> int:
+    hub = _hub_url(args)
+    review_url = str(getattr(args, "review_url", "http://127.0.0.1:8904") or "http://127.0.0.1:8904")
+    target = str(getattr(args, "target", "workbench") or "workbench").lower()
+    action = str(getattr(args, "action", "state") or "state").lower()
+
+    if action == "state":
+        if target == "review":
+            ok, _, res = _review_request(review_url, "GET", "/api/ui-state", timeout=min(10.0, args.timeout))
+        else:
+            ok, _, res = _hub_request(hub, "GET", "/api/ui-state", timeout=min(10.0, args.timeout))
+        return _emit_output(args, command="ui.state", ok=ok and bool(res.get("ok")), exit_code=0 if (ok and res.get("ok")) else 1, data=res, error="" if ok else str(res.get("error") or "无法读取界面状态"), t0=t0, text_lines=[json.dumps(res.get("active") or {}, ensure_ascii=False, indent=2)])
+
+    payload = {
+        "source": "ai",
+        "action": action,
+        "target": str(getattr(args, "selector", "") or ""),
+        "page_id": str(getattr(args, "page", "") or ""),
+        "item_id": str(getattr(args, "item", "") or ""),
+        "view": str(getattr(args, "view", "") or ""),
+        "label": str(getattr(args, "label", "") or ""),
+        "client_id": str(getattr(args, "client_id", "") or ""),
+        "force_nav": bool(getattr(args, "force_nav", False)),
+    }
+    if target == "review":
+        ok, _, res = _review_request(review_url, "POST", "/api/ui/command", payload, timeout=min(10.0, args.timeout))
+    else:
+        ok, _, res = _hub_request(hub, "POST", "/api/ui/command", payload, timeout=min(10.0, args.timeout))
+    ok_all = bool(ok and res.get("ok"))
+    return _emit_output(args, command=f"ui.{action}", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or "投送 UI 指令失败"), t0=t0, text_lines=[f"已向前台 {target} 投送指令：{action} {payload['target'] or payload['item_id'] or payload['page_id'] or payload['view']}"])
+
+
+def cmd_review(args, t0: float) -> int:
+    review_url = str(getattr(args, "review_url", "http://127.0.0.1:8904") or "http://127.0.0.1:8904")
+    action = str(getattr(args, "action", "status") or "status").lower()
+    to = min(30.0, args.timeout)
+
+    if action == "status":
+        ok, _, res = _review_request(review_url, "GET", "/api/review/status", timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        lines = [f"8904 审阅进度：{res.get('pages_reviewed', 0)}/{res.get('pages_total', 0)} 页 | 异常/待复核题块：{res.get('issue_count', 0)}"] if ok_all else [str(res.get("error") or "8904 未启动")]
+        return _emit_output(args, command="review.status", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=lines)
+
+    if action == "page":
+        pid = str(getattr(args, "page", "") or "").strip()
+        if not pid:
+            return _emit_output(args, command="review.page", ok=False, exit_code=2, data={}, error="请提供 --page <page_id>", t0=t0)
+        ok, _, res = _review_request(review_url, "GET", f"/api/review/page/{urllib.parse.quote(pid)}", timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.page", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"第 {pid} 页（rev={res.get('page_rev', 0)}）：{len((res.get('page') or {}).get('items') or [])} 个题目条目"])
+
+    if action == "set-text":
+        payload = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "text": str(getattr(args, "text", "") or ""),
+            "label": str(getattr(args, "label", "已订正") or "已订正"),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        if getattr(args, "expected_rev", None) is not None:
+            payload["expected_page_rev"] = int(args.expected_rev)
+        ok, _, res = _review_request(review_url, "POST", "/api/review/set-text", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.set-text", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已更新 {payload['page_id']}/{payload['item_id']} 订正文字并推送到前台"])
+
+    if action == "set-choice":
+        payload = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "answer": str(getattr(args, "answer", "") or ""),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        ok, _, res = _review_request(review_url, "POST", "/api/review/set-choice", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.set-choice", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已修改选择题 {payload['item_id']} 为 {payload['answer']} 并推送到前台"])
+
+    if action == "delete-box":
+        payload: dict[str, Any] = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        if getattr(args, "box_index", None) is not None:
+            payload["box_index"] = int(args.box_index)
+        ok, _, res = _review_request(review_url, "POST", "/api/review/delete-box", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.delete-box", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已删除标框并同步到前台（剩余 {res.get('remaining_items', 0)} 题）"])
+
+    if action == "confirm":
+        payload = {
+            "page_id": str(getattr(args, "page", "") or ""),
+            "page_status": str(getattr(args, "label", "已确认") or "已确认"),
+            "note": str(getattr(args, "text", "") or ""),
+            "reviewer": str(getattr(args, "reviewer", "AI助手") or "AI助手"),
+        }
+        ok, _, res = _review_request(review_url, "POST", "/api/submit-page", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.confirm", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已整页确认 {payload['page_id']} 并同步到前台"])
+
+    if action == "re-ocr":
+        pid = str(getattr(args, "page", "") or "")
+        iid = str(getattr(args, "item", "") or "")
+        ok_p, _, pdet = _review_request(review_url, "GET", f"/api/review/page/{urllib.parse.quote(pid)}", timeout=to)
+        if not ok_p or not pdet.get("ok"):
+            return _emit_output(args, command="review.re-ocr", ok=False, exit_code=1, data=pdet, error=str(pdet.get("error") or "读取目标页失败"), t0=t0)
+        it = next((x for x in ((pdet.get("page") or {}).get("items") or []) if x.get("id") == iid), None)
+        if not it:
+            return _emit_output(args, command="review.re-ocr", ok=False, exit_code=1, data={}, error=f"找不到题块 {iid}", t0=t0)
+        cls = 0 if it.get("kind") == "identity" else 5
+        ok, _, res = _review_request(review_url, "POST", "/api/recognize-box", {
+            "page_id": pid,
+            "targets": [{"cls": cls, "box": it["box"], "item_id": iid}],
+        }, timeout=max(60.0, args.timeout))
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.re-ocr", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已重新识别 {iid} 并落盘推送前台"])
+
+    if action == "nav":
+        payload = {
+            "source": "ai",
+            "action": "navigate",
+            "page_id": str(getattr(args, "page", "") or ""),
+            "item_id": str(getattr(args, "item", "") or ""),
+            "force_nav": True,
+            "label": str(getattr(args, "label", "") or f"跳转到 {getattr(args, 'page', '')}"),
+        }
+        ok, _, res = _review_request(review_url, "POST", "/api/ui/command", payload, timeout=to)
+        ok_all = bool(ok and res.get("ok"))
+        return _emit_output(args, command="review.nav", ok=ok_all, exit_code=0 if ok_all else 1, data=res, error="" if ok_all else str(res.get("error") or ""), t0=t0, text_lines=[f"已推送跳转指令到 8904：{payload['page_id']} {payload['item_id']}"])
+
+    return _emit_output(args, command="review", ok=False, exit_code=2, data={}, error=f"不支持的 review 操作：{action}", t0=t0)
+
+
 def main():
     t0 = time.monotonic()
     # 共享全局参数父解析器：无论放在子命令前还是子命令后均有效（彻底消除 --hub 位置坑）
@@ -644,6 +1107,75 @@ def main():
     p_op.add_argument("--m", default="m1", choices=["m1", "m2", "m3"])
     p_op.add_argument("--no-browser", action="store_true")
 
+    p_cfg = sub.add_parser("config", parents=[common], help="查看/修改配置、导入 VLM 密钥或整包导入导出配置")
+    p_cfg.add_argument("action", nargs="?", default="get", choices=["get", "set", "set-vlm", "import", "export"])
+    p_cfg.add_argument("--provider", default="")
+    p_cfg.add_argument("--base-url", default="")
+    p_cfg.add_argument("--model", default="")
+    p_cfg.add_argument("--api-key", default="")
+    p_cfg.add_argument("--api-key-env", default="")
+    p_cfg.add_argument("--infer-device", default=None)
+    p_cfg.add_argument("--yolo-batch", type=int, default=None)
+    p_cfg.add_argument("--cpu-workers", type=int, default=None)
+    p_cfg.add_argument("--api-concurrency", type=int, default=None)
+    p_cfg.add_argument("--agent-provider", default=None)
+    p_cfg.add_argument("--agent-path", action="append", default=[], help="手动配置 Agent 路径，格式如 zcode=D:\\Dev\\Zcode")
+    p_cfg.add_argument("--custom-agent-cmd", default=None)
+    p_cfg.add_argument("--ai-mode", default=None, choices=["yolo", "guarded", "plan"])
+    p_cfg.add_argument("--ai-screenshot", default=None)
+    p_cfg.add_argument("--file", default="", help="import 时指定 JSON 配置包或 .env 文件")
+    p_cfg.add_argument("--out", default="", help="export 时输出路径")
+    p_cfg.add_argument("--include-secrets", action="store_true", help="export 时包含明文 API Key（用于迁移到另一台电脑）")
+    p_cfg.add_argument("--test", action="store_true", help="写入 VLM 密钥后立刻测试视觉连通性")
+
+    p_wt = sub.add_parser("weights", parents=[common], help="解压加密模型权重包")
+    p_wt.add_argument("action", nargs="?", default="unpack", choices=["unpack"])
+    p_wt.add_argument("--password", required=True)
+
+    p_agts = sub.add_parser("agents", parents=[common], help="快探或测试本机可用 CLI Agent")
+    p_agts.add_argument("action", nargs="?", default="list", choices=["list", "test"])
+    p_agts.add_argument("provider", nargs="?", default="")
+    p_agts.add_argument("--deep", action="store_true", help="可选扩展扫描常见开发目录（默认快探不扫盘）")
+    p_agts.add_argument("--probe-version", action="store_true")
+
+    p_cap = sub.add_parser("capture", parents=[common], help="后台离屏无遮挡截图（与前台实时状态一致）并导出元素清单")
+    p_cap.add_argument("--target", default="workbench", choices=["workbench", "review"])
+    p_cap.add_argument("--mode", default="auto", choices=["auto", "ui", "canvas"])
+    p_cap.add_argument("--page", default="")
+    p_cap.add_argument("--item", default="")
+    p_cap.add_argument("--selector", default="")
+    p_cap.add_argument("--crop", default=None, help="裁切区域 x1,y1,x2,y2（像素或 0~1 比例）")
+    p_cap.add_argument("--som", action="store_true", help="在离屏图上叠加可交互元素数字标号")
+    p_cap.add_argument("--with-elements", action="store_true", default=True, help="附带导出可交互元素清单（默认开启）")
+    p_cap.add_argument("--no-elements", action="store_true")
+    p_cap.add_argument("--client-id", default="")
+    p_cap.add_argument("--review-url", default="http://127.0.0.1:8904")
+    p_cap.add_argument("--out", default=None)
+
+    p_ui = sub.add_parser("ui", parents=[common], help="查询前台 UI 状态或向浏览器投送焦点/导航/点击指令")
+    p_ui.add_argument("action", nargs="?", default="state", choices=["state", "focus", "navigate", "click", "toast"])
+    p_ui.add_argument("--target", default="workbench", choices=["workbench", "review"])
+    p_ui.add_argument("--selector", default="")
+    p_ui.add_argument("--page", default="")
+    p_ui.add_argument("--item", default="")
+    p_ui.add_argument("--view", default="")
+    p_ui.add_argument("--label", default="")
+    p_ui.add_argument("--client-id", default="")
+    p_ui.add_argument("--force-nav", action="store_true")
+    p_ui.add_argument("--review-url", default="http://127.0.0.1:8904")
+
+    p_rev = sub.add_parser("review", parents=[common], help="8904 审阅页同构数据操作（页级锁 + SSE 实时映射 GUI）")
+    p_rev.add_argument("action", nargs="?", default="status", choices=["status", "page", "set-text", "set-choice", "delete-box", "re-ocr", "confirm", "nav"])
+    p_rev.add_argument("--page", default="")
+    p_rev.add_argument("--item", default="")
+    p_rev.add_argument("--text", default="")
+    p_rev.add_argument("--answer", default="")
+    p_rev.add_argument("--label", default="已订正")
+    p_rev.add_argument("--box-index", type=int, default=None)
+    p_rev.add_argument("--expected-rev", type=int, default=None)
+    p_rev.add_argument("--reviewer", default="AI助手")
+    p_rev.add_argument("--review-url", default="http://127.0.0.1:8904")
+
     args = ap.parse_args()
     if args.cmd == "serve":
         wb_serve.run_server(port=args.port, open_browser=args.open)
@@ -664,6 +1196,12 @@ def main():
         "runs": cmd_runs,
         "logs": cmd_logs,
         "open": cmd_open,
+        "config": cmd_config,
+        "weights": cmd_weights,
+        "agents": cmd_agents,
+        "capture": cmd_capture,
+        "ui": cmd_ui,
+        "review": cmd_review,
     }[args.cmd](args, t0)
 
 

@@ -540,6 +540,38 @@
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
     padding-top: 8px; border-top: 1px solid var(--line-soft);
   }
+  /* 8904 全局非阻塞 AI 帮手抽屉 + 焦点投送光环 */
+  .rev-ai-drawer {
+    position: fixed; top: 58px; right: 12px; bottom: 12px; width: min(430px, 94vw);
+    z-index: 120; background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .rev-ai-drawer.hidden { display: none !important; }
+  .rev-ai-head { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 6px; background: #f8faf9; }
+  .rev-ai-tabs { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; gap: 5px; overflow-x: auto; background: #fcfdfc; flex-shrink: 0; }
+  .rev-ai-tab { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .rev-ai-tab.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 700; }
+  .rev-ai-tab .dot-run { width: 6px; height: 6px; border-radius: 50%; background: #16a34a; display: inline-block; }
+  .rev-ai-cfg { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); background: #f9fafb; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; flex-shrink: 0; }
+  .rev-ai-cfg.hidden { display: none !important; }
+  .rev-ai-body { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #fafbfa; }
+  .rev-ai-msg { padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-width: 96%; }
+  .rev-ai-msg.user { align-self: flex-end; background: var(--brand-soft); color: #103c28; border: 1px solid #b7e4cd; }
+  .rev-ai-msg.assistant { align-self: flex-start; background: #fff; color: var(--text); border: 1px solid var(--line); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+  .rev-ai-msg-meta { font-size: 10.5px; color: var(--muted); margin-bottom: 3px; }
+  .rev-ai-foot { padding: 8px 10px; border-top: 1px solid var(--line); background: #fff; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .rev-focus-ring {
+    position: fixed; z-index: 150; pointer-events: none;
+    border: 3px solid #2563eb; border-radius: 10px;
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.24), 0 8px 24px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s ease;
+  }
+  .rev-focus-ring.hidden { display: none !important; }
+  .rev-focus-tag {
+    position: absolute; top: -25px; left: 0; background: #2563eb; color: #fff;
+    font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -569,6 +601,7 @@
       <button id="btnFillDisplayMode" title="切换填空题展示：悬停气泡（默认） / 左右双侧总览">💬 悬停</button>
       <button id="btnPrev">← 上一张</button>
       <button class="btn-primary" id="btnSubmitNext">✓ 确认并下一张 (D)</button>
+      <button class="btn-ai-soft" id="btnReviewAi" title="全局 AI 帮手（同构改题/调框/导入配置/离屏截图，不阻塞审阅）">🤖 AI 帮手</button>
       <div class="more-wrap">
         <button id="btnMoreMenu" title="显示选项、快捷键与教程">⚙ 更多 ▾</button>
         <div class="more-menu" id="moreMenu">
@@ -617,6 +650,74 @@
       <div class="right-scroll" id="rightBody"></div>
     </aside>
   </div>
+
+  <!-- 8904 全局非阻塞 AI 帮手抽屉 -->
+  <aside class="rev-ai-drawer hidden" id="reviewAiDrawer" aria-label="审阅 AI 帮手抽屉">
+    <div class="rev-ai-head">
+      <div style="display:flex;align-items:center;gap:6px">
+        <strong style="font-size:13.5px">🤖 审阅 AI 帮手</strong>
+        <span class="badge badge-todo" id="revAiBadge">就绪</span>
+      </div>
+      <div style="display:flex;gap:5px">
+        <button id="btnRevAiCfg" type="button" style="padding:3px 7px;font-size:11.5px">⚙ 配置</button>
+        <button id="btnRevAiClose" type="button" style="padding:3px 7px;font-size:11.5px">收起</button>
+      </div>
+    </div>
+    <div class="rev-ai-tabs" id="revAiTabs">
+      <button id="btnRevNewChat" type="button" style="padding:3px 8px;font-size:11.5px">＋ 新并发对话</button>
+    </div>
+    <div class="rev-ai-cfg hidden" id="revAiCfg">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <label>引擎：<select id="revAiProvider" style="padding:2px 5px;border:1px solid var(--line);border-radius:6px;font-size:11.5px">
+          <option value="auto">自动优选</option>
+          <option value="zcode">ZCode (智谱)</option>
+          <option value="opencode">OpenCode</option>
+          <option value="workbuddy">WorkBuddy/CodeBuddy</option>
+          <option value="doubao">豆包 / Trae CLI</option>
+          <option value="antigravity">Antigravity (agy)</option>
+          <option value="custom">自定义模板</option>
+        </select></label>
+        <label>权限：<select id="revAiMode" style="padding:2px 5px;border:1px solid var(--line);border-radius:6px;font-size:11.5px">
+          <option value="yolo" selected>完全权限 (默认)</option>
+          <option value="guarded">受控 (guarded)</option>
+          <option value="plan">仅诊断 (plan)</option>
+        </select></label>
+      </div>
+      <div style="display:flex;gap:5px;align-items:center">
+        <input id="revAiPathInput" type="text" placeholder="可选：手动填当前 Agent 路径" style="flex:1;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font-size:11.5px">
+        <button id="btnRevSavePath" type="button" style="padding:3px 7px;font-size:11px">保存</button>
+        <button id="btnRevTestAgent" type="button" style="padding:3px 7px;font-size:11px">测试</button>
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+        <button id="btnRevDeepScan" type="button" style="padding:3px 7px;font-size:11px">🔍 扩展扫描(可选)</button>
+        <button id="btnRevImportCfg" type="button" style="padding:3px 7px;font-size:11px">📥 导入配置/密钥</button>
+        <input id="revCfgFile" type="file" accept=".json,.env,.txt" style="display:none">
+        <span id="revAiScanMsg" style="color:var(--muted);font-size:11px"></span>
+      </div>
+    </div>
+    <div id="revAiHint" style="padding:5px 10px;border-bottom:1px solid var(--line-soft);font-size:11px;color:var(--muted);background:#fff">发送瞬间冻结当前页现场，发完可继续自由翻页审阅。</div>
+    <div id="revAiMeta" style="padding:3px 10px;font-size:10.5px;color:var(--muted);background:#fff;border-bottom:1px solid #f1f5f9"></div>
+    <div class="rev-ai-body" id="revAiBody">
+      <div class="rev-ai-msg assistant">在审阅页直接用自然语言指挥 AI：
+• 帮我看下这页第 15 题涂改的字，改对并保存
+• 删掉多检出来的空框并重新识别
+• 聚焦到本页所有待复核项
+发送后你可以继续翻下一页，互不阻塞。</div>
+    </div>
+    <div class="rev-ai-foot">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px">
+        <label style="display:inline-flex;align-items:center;gap:4px;color:var(--muted);cursor:pointer" title="默认仅传文字快照，AI 需要时自动调 capture 截高清试卷图或 UI 图；勾选后发送即附带实时截图并精简提示词">
+          <input id="chkRevAiShot" type="checkbox"> 附带当前画面截图
+        </label>
+        <button id="btnRevAiStop" type="button" class="btn-danger" style="display:none;padding:2px 8px;font-size:11px">■ 停止</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <input id="revAiInput" type="text" placeholder="输入中文指令（支持改字/删框/重识/修报错/导入密钥）..." style="flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:12px">
+        <button class="btn-primary" id="btnRevAiSend" type="button" style="padding:6px 12px">发送</button>
+      </div>
+    </div>
+  </aside>
+  <div class="rev-focus-ring hidden" id="revFocusRing"><span class="rev-focus-tag" id="revFocusTag">🤖 AI 聚焦</span></div>
 
   <!-- 游戏风键位设置弹窗（支持主/副双键位 + 鼠标手势说明） -->
   <dialog class="kb-dlg" id="kbDialog">
@@ -3577,7 +3678,7 @@ window.addEventListener("keydown", (ev) => {
   }
 
   const tag = (ev.target && ev.target.tagName || "").toLowerCase();
-  if (tag === "input" || tag === "textarea") return;
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
 
   // 按住 Alt 临时透视隐藏答案浮层
   if (ev.key === "Alt") {
@@ -3694,8 +3795,402 @@ window.addEventListener("beforeunload", (ev) => {
   }
 });
 
+/* ==================== 8904 UI 状态镜像 + SSE 实时联动 + 焦点投送 + 全局 AI 帮手抽屉 ==================== */
+const REV_URL_PARAMS = new URLSearchParams(window.location.search);
+const REV_IS_MIRROR = REV_URL_PARAMS.get("mirror") === "1";
+const REV_MIRROR_CLIENT = REV_URL_PARAMS.get("mirror_client") || "";
+window.__MIRROR_APPLIED__ = !REV_IS_MIRROR;
+window.__RECENT_ERRORS__ = [];
+window.addEventListener("error", e => {
+  window.__RECENT_ERRORS__.push(`JS错误: ${e.message || "unknown"}`);
+  if (window.__RECENT_ERRORS__.length > 10) window.__RECENT_ERRORS__.shift();
+});
+window.addEventListener("unhandledrejection", e => {
+  window.__RECENT_ERRORS__.push(`Promise异常: ${e.reason?.message || e.reason || "unknown"}`);
+  if (window.__RECENT_ERRORS__.length > 10) window.__RECENT_ERRORS__.shift();
+});
+
+function collectReviewUiState() {
+  const p = currentPage();
+  return {
+    client_id: CLIENT_ID,
+    page_id: p ? p.id : "",
+    page_name: p ? p.name : "",
+    mode: state.mode,
+    selected_item_id: state.selectedItemId || state.editingPopItemId || "",
+    selected_box_idx: state.selectedBoxIdx,
+    zoom: Number((state.scale || 1).toFixed(3)),
+    fill_display_mode: state.fillDisplayMode,
+    show_overlay: Boolean(state.showOverlay),
+    show_conf: Boolean(state.showConf),
+    reviewer: REVIEWER || "",
+    recent_errors: window.__RECENT_ERRORS__.slice(-6),
+  };
+}
+let _revUiTimer = null;
+function scheduleReportReviewUiState() {
+  if (REV_IS_MIRROR) return;
+  clearTimeout(_revUiTimer);
+  _revUiTimer = setTimeout(() => {
+    api("/api/ui-state", collectReviewUiState()).catch(() => {});
+  }, 240);
+}
+// 包装 openPage / setMode 使其自动上报焦点
+const _origOpenPage = openPage;
+openPage = async function(...args) {
+  const r = await _origOpenPage.apply(this, args);
+  scheduleReportReviewUiState();
+  return r;
+};
+const _origSetMode = setMode;
+setMode = function(...args) {
+  const r = _origSetMode.apply(this, args);
+  scheduleReportReviewUiState();
+  return r;
+};
+
+async function applyReviewMirrorStateIfNeeded() {
+  if (!REV_IS_MIRROR) return;
+  try {
+    const qs = REV_MIRROR_CLIENT ? `?client_id=${encodeURIComponent(REV_MIRROR_CLIENT)}` : "";
+    const res = await api("/api/ui-state" + qs);
+    const st = (res && res.active) || {};
+    if (st.fill_display_mode) state.fillDisplayMode = st.fill_display_mode;
+    if (typeof st.show_overlay === "boolean") state.showOverlay = st.show_overlay;
+    if (typeof st.show_conf === "boolean") state.showConf = st.show_conf;
+    if (st.page_id) {
+      const idx = state.pages.findIndex(p => p.id === st.page_id);
+      if (idx >= 0 && idx !== state.pageIdx) await _origOpenPage(idx, true, true);
+    }
+    if (st.mode && st.mode !== state.mode) _origSetMode(st.mode);
+    if (st.selected_item_id) state.selectedItemId = st.selected_item_id;
+    draw();
+  } catch {}
+  window.__MIRROR_APPLIED__ = true;
+}
+
+let _revFocusTimer = null;
+function castReviewFocus(rect, label = "AI 聚焦") {
+  const ring = $("revFocusRing"), tag = $("revFocusTag");
+  if (!ring || !rect || rect.width < 2 || rect.height < 2) return;
+  ring.style.left = Math.max(2, rect.left - 5) + "px";
+  ring.style.top = Math.max(2, rect.top - 5) + "px";
+  ring.style.width = (rect.width + 10) + "px";
+  ring.style.height = (rect.height + 10) + "px";
+  if (tag) tag.textContent = "🤖 " + label;
+  ring.classList.remove("hidden");
+  clearTimeout(_revFocusTimer);
+  _revFocusTimer = setTimeout(() => ring.classList.add("hidden"), 4500);
+}
+function focusReviewTarget(cmd) {
+  if (!cmd) return;
+  const doFocusNow = () => {
+    if (cmd.target) {
+      const el = document.querySelector(cmd.target);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        setTimeout(() => {
+          castReviewFocus(el.getBoundingClientRect(), cmd.label || "AI 聚焦元素");
+          if (cmd.action === "click") setTimeout(() => el.click(), 320);
+        }, 160);
+        return;
+      }
+    }
+    if (cmd.item_id) {
+      const it = (state.workingItems || []).find(x => x.id === cmd.item_id);
+      if (it && Array.isArray(it.box) && it.box.length === 4) {
+        state.selectedItemId = it.id;
+        draw();
+        const hr = host.getBoundingClientRect();
+        const [x1, y1, x2, y2] = it.box;
+        const left = hr.left + x1 * state.scale + state.tx;
+        const top = hr.top + y1 * state.scale + state.ty;
+        const width = Math.max(20, (x2 - x1) * state.scale);
+        const height = Math.max(20, (y2 - y1) * state.scale);
+        castReviewFocus({ left, top, width, height }, cmd.label || `AI 聚焦 ${it.number ? "第" + it.number + "题" : it.id}`);
+      }
+    }
+  };
+  const cur = currentPage();
+  if (cmd.page_id && (!cur || cur.id !== cmd.page_id)) {
+    const idx = state.pages.findIndex(p => p.id === cmd.page_id);
+    if (idx >= 0 && (cmd.force_nav || cmd.action === "navigate" || cmd.action === "focus")) {
+      openPage(idx, true, true).then(() => setTimeout(doFocusNow, 180));
+      return;
+    }
+  }
+  doFocusNow();
+}
+
+function connectReviewSSE() {
+  if (!window.EventSource) return;
+  const es = new EventSource("/api/events");
+  es.onmessage = async (e) => {
+    try {
+      const ev = JSON.parse(e.data);
+      if (ev.type === "data_updated") {
+        const cur = currentPage();
+        if (ev.page_id && cur && cur.id === ev.page_id) {
+          await hotReloadResults(false);
+          toast("🤖 " + (ev.message || "当前页已由 AI 实时更新"), 2600);
+        } else {
+          await pollLive();
+          if (ev.source === "ai" && ev.message) {
+            toast("🤖 " + ev.message + "（未打断当前页）", 3200);
+          }
+        }
+      } else if (ev.type === "ui_command") {
+        focusReviewTarget(ev);
+        if (ev.label) toast("🤖 " + ev.label, 2800);
+      }
+    } catch {}
+  };
+  es.onerror = () => { try { es.close(); } catch {} setTimeout(connectReviewSSE, 3500); };
+}
+
+/* 8904 全局 AI 帮手抽屉（通过 /api/hub/* 同源代理共享 8888 多会话管理器） */
+let REV_AI_SESSIONS = {};
+let REV_ACTIVE_CHAT = "";
+let REV_AGENTS_CACHE = null;
+
+function escHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+async function hubApi(path, body = null) {
+  const opts = body === null
+    ? { method: "GET", headers: { "X-Review-Token": TOKEN } }
+    : { method: "POST", headers: { "Content-Type": "application/json", "X-Review-Token": TOKEN }, body: JSON.stringify(body) };
+  const r = await fetch("/api/hub" + path, { cache: "no-store", ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `请求失败 (${r.status})`);
+  return data;
+}
+function renderRevAgentsUI(info) {
+  REV_AGENTS_CACHE = info;
+  const sel = $("revAiProvider");
+  if (sel && info && Array.isArray(info.list)) {
+    const cur = sel.value || info.preferred || "auto";
+    sel.innerHTML = `<option value="auto">自动优选 (${escHtml(info.recommended || "无")})</option>` +
+      info.list.map(a => `<option value="${escHtml(a.id)}">${a.available ? "✓ " : "✗ "}${escHtml(a.label)}</option>`).join("");
+    sel.value = cur;
+  }
+  const targetId = (sel && sel.value !== "auto") ? sel.value : (info?.recommended || "");
+  const ag = info?.agents?.[targetId];
+  if ($("revAiHint")) {
+    $("revAiHint").textContent = ag && ag.available
+      ? `引擎：${ag.label} · 改动实时推给本页（发送瞬间冻结当前页，发完可继续翻页）`
+      : "未检测到本机 CLI Agent，可点「⚙ 配置」填路径或执行可选扩展扫描。";
+  }
+}
+function renderRevAiTabs() {
+  const bar = $("revAiTabs");
+  if (!bar) return;
+  const list = Object.values(REV_AI_SESSIONS);
+  bar.innerHTML = list.map((s, i) => {
+    const act = s.chat_id === REV_ACTIVE_CHAT ? " active" : "";
+    const dot = s.running ? '<i class="dot-run"></i>' : "";
+    return `<button class="rev-ai-tab${act}" type="button" data-chat-id="${escHtml(s.chat_id)}">${dot}${escHtml(s.title || ("对话 " + (i + 1)))}</button>`;
+  }).join("") + `<button id="btnRevNewChat" type="button" style="padding:3px 8px;font-size:11.5px">＋ 新并发对话</button>`;
+  bar.querySelectorAll("[data-chat-id]").forEach(b => {
+    b.onclick = () => {
+      REV_ACTIVE_CHAT = b.dataset.chatId;
+      renderRevAiTabs();
+      renderRevAiSession(REV_AI_SESSIONS[REV_ACTIVE_CHAT]);
+    };
+  });
+  const btnN = $("btnRevNewChat");
+  if (btnN) btnN.onclick = async () => {
+    try {
+      const r = await hubApi("/ai/sessions/new", { surface: "review", provider: $("revAiProvider").value, mode: $("revAiMode").value });
+      if (r.session) {
+        REV_AI_SESSIONS[r.session.chat_id] = r.session;
+        REV_ACTIVE_CHAT = r.session.chat_id;
+        renderRevAiTabs();
+        renderRevAiSession(r.session);
+      }
+    } catch (e) { toast(e.message, 3000); }
+  };
+}
+function renderRevAiSession(s) {
+  if (!s) return;
+  const running = Boolean(s.running);
+  const st = s.status || "idle";
+  const b = $("revAiBadge");
+  if (b) {
+    b.className = "badge " + (running || st === "done" ? "badge-done" : (st === "error" ? "badge-lock" : "badge-todo"));
+    b.textContent = running ? (s.queued ? `执行中(排队${s.queued})` : "执行中...") : (st === "done" ? "已完成" : (st === "error" ? "异常" : "就绪"));
+  }
+  if ($("btnRevAiStop")) $("btnRevAiStop").style.display = running ? "" : "none";
+  const meta = [];
+  if (s.provider_label || s.provider) meta.push(`引擎：${s.provider_label || s.provider}`);
+  if (s.mode) meta.push(`权限：${s.mode}`);
+  const u = s.usage || {};
+  if (u.inputTokens || u.outputTokens) meta.push(`Token：${u.inputTokens || 0}/${u.outputTokens || 0}`);
+  if ($("revAiMeta")) $("revAiMeta").textContent = meta.join(" · ");
+  const body = $("revAiBody");
+  if (!body) return;
+  const msgs = Array.isArray(s.messages) ? s.messages : [];
+  if (!msgs.length && !running) {
+    body.innerHTML = `<div class="rev-ai-msg assistant">已就绪：可让 AI 直接读图改字、删框重识、查报错或导入密钥配置。</div>`;
+    return;
+  }
+  const html = msgs.map(m => {
+    const att = (m.attach && m.attach.length) ? ` · 📷 ${escHtml(m.attach.join(", "))}` : "";
+    return `<div class="rev-ai-msg ${m.role === "user" ? "user" : "assistant"}"><div class="rev-ai-msg-meta">${m.role === "user" ? "你" : "AI 帮手"} · ${escHtml(m.ts || "")}${att}</div>${escHtml(m.text || "")}</div>`;
+  });
+  if (running) {
+    html.push(`<div class="rev-ai-msg assistant"><div class="rev-ai-msg-meta">AI 帮手 · 执行中</div>${escHtml(s.response || "⏳ 正在分析当前冻结页面并执行同构操作，你可以继续自由审阅...")}</div>`);
+  }
+  body.innerHTML = html.join("");
+  body.scrollTop = body.scrollHeight;
+}
+function connectReviewHubSSE() {
+  if (!window.EventSource) return;
+  const es = new EventSource("/api/hub/events");
+  es.onmessage = (e) => {
+    try {
+      const ev = JSON.parse(e.data);
+      if (ev.step === "ai" && ev.ai_snapshot && ev.ai_snapshot.chat_id) {
+        REV_AI_SESSIONS[ev.ai_snapshot.chat_id] = ev.ai_snapshot;
+        if (!REV_ACTIVE_CHAT) REV_ACTIVE_CHAT = ev.ai_snapshot.chat_id;
+        renderRevAiTabs();
+        if (ev.ai_snapshot.chat_id === REV_ACTIVE_CHAT) renderRevAiSession(ev.ai_snapshot);
+      }
+    } catch {}
+  };
+  es.onerror = () => { try { es.close(); } catch {} setTimeout(connectReviewHubSSE, 5000); };
+}
+
+if ($("btnReviewAi")) {
+  $("btnReviewAi").onclick = () => {
+    const d = $("reviewAiDrawer");
+    d.classList.toggle("hidden");
+    if (!d.classList.contains("hidden")) {
+      hubApi("/agents").then(renderRevAgentsUI).catch(e => { $("revAiHint").textContent = e.message; });
+      hubApi("/ai/sessions").then(r => {
+        for (const s of (r.sessions || [])) REV_AI_SESSIONS[s.chat_id] = s;
+        if (!REV_ACTIVE_CHAT && r.sessions?.length) REV_ACTIVE_CHAT = r.sessions[0].chat_id;
+        renderRevAiTabs();
+        if (REV_ACTIVE_CHAT && REV_AI_SESSIONS[REV_ACTIVE_CHAT]) renderRevAiSession(REV_AI_SESSIONS[REV_ACTIVE_CHAT]);
+      }).catch(() => {});
+      setTimeout(() => $("revAiInput")?.focus(), 80);
+    }
+  };
+}
+if ($("btnRevAiClose")) $("btnRevAiClose").onclick = () => $("reviewAiDrawer").classList.add("hidden");
+if ($("btnRevAiCfg")) $("btnRevAiCfg").onclick = () => $("revAiCfg").classList.toggle("hidden");
+if ($("revAiProvider")) $("revAiProvider").onchange = () => renderRevAgentsUI(REV_AGENTS_CACHE);
+if ($("btnRevSavePath")) {
+  $("btnRevSavePath").onclick = async () => {
+    const prov = $("revAiProvider").value;
+    const val = $("revAiPathInput").value.trim();
+    if (prov === "auto") { $("revAiScanMsg").textContent = "先选具体 Agent 再填路径"; return; }
+    try {
+      const r = await hubApi("/config", prov === "custom" ? { agent_custom_cmd: val } : { agent_paths: { [prov]: val } });
+      if (r.agents) renderRevAgentsUI(r.agents);
+      $("revAiScanMsg").textContent = "已保存并重探";
+    } catch (e) { $("revAiScanMsg").textContent = e.message; }
+  };
+}
+if ($("btnRevTestAgent")) {
+  $("btnRevTestAgent").onclick = async () => {
+    const p = $("revAiProvider").value === "auto" ? (REV_AGENTS_CACHE?.recommended || "zcode") : $("revAiProvider").value;
+    $("revAiScanMsg").textContent = `测试 ${p}...`;
+    try {
+      const r = await hubApi("/agents/test", { provider: p });
+      $("revAiScanMsg").textContent = `✓ ${p} 正常 (${r.version || "OK"})`;
+    } catch (e) { $("revAiScanMsg").textContent = `✗ ${e.message}`; }
+  };
+}
+if ($("btnRevDeepScan")) {
+  $("btnRevDeepScan").onclick = async () => {
+    $("revAiScanMsg").textContent = "扩展扫描中...";
+    try {
+      const r = await hubApi("/agents?deep=1");
+      renderRevAgentsUI(r);
+      $("revAiScanMsg").textContent = `完成 (${r.elapsed_ms}ms，发现 ${r.available.length} 个)`;
+    } catch (e) { $("revAiScanMsg").textContent = e.message; }
+  };
+}
+if ($("btnRevImportCfg")) {
+  $("btnRevImportCfg").onclick = () => $("revCfgFile").click();
+  $("revCfgFile").onchange = async () => {
+    const f = $("revCfgFile").files?.[0];
+    if (!f) return;
+    try {
+      const txt = await f.text();
+      let payload;
+      if (txt.trim().startsWith("{")) payload = JSON.parse(txt);
+      else {
+        const env = {};
+        for (const ln of txt.split(/\r?\n/)) {
+          const s = ln.trim();
+          if (!s || s.startsWith("#") || !s.includes("=")) continue;
+          const idx = s.indexOf("=");
+          env[s.slice(0, idx).trim()] = s.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+        }
+        payload = { env };
+      }
+      const r = await hubApi("/config/import", payload);
+      $("revAiScanMsg").textContent = "✓ " + (r.message || "已导入");
+      toast(r.message || "配置/密钥导入完成", 3200);
+    } catch (e) { $("revAiScanMsg").textContent = "✗ " + e.message; }
+    finally { $("revCfgFile").value = ""; }
+  };
+}
+if ($("revAiInput")) {
+  $("revAiInput").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !$("btnRevAiSend").disabled) $("btnRevAiSend").click();
+  });
+}
+if ($("btnRevAiSend")) {
+  $("btnRevAiSend").onclick = async () => {
+    const note = $("revAiInput").value.trim();
+    $("btnRevAiSend").disabled = true;
+    try {
+      const r = await hubApi("/ai/run", {
+        chat_id: REV_ACTIVE_CHAT,
+        surface: "review",
+        provider: $("revAiProvider").value,
+        mode: $("revAiMode").value,
+        note,
+        attach_screenshot: Boolean($("chkRevAiShot").checked),
+        ui_state: collectReviewUiState(),
+        review_port: Number(window.location.port || 8904),
+      });
+      $("revAiInput").value = "";
+      if (r.headless && r.session) {
+        REV_ACTIVE_CHAT = r.session.chat_id;
+        REV_AI_SESSIONS[r.session.chat_id] = r.session;
+        renderRevAiTabs();
+        renderRevAiSession(r.session);
+        toast(r.message || "AI 帮手已启动", 2600);
+      } else if (r.prompt) {
+        $("revAiBody").innerHTML = `<div class="rev-ai-msg assistant">${escHtml((r.message || "") + "\n\n" + r.prompt)}</div>`;
+        toast(r.message || "已复制诊断提示词", 3000);
+      }
+    } catch (e) { toast("启动失败：" + e.message, 3500); }
+    finally { $("btnRevAiSend").disabled = false; }
+  };
+}
+if ($("btnRevAiStop")) {
+  $("btnRevAiStop").onclick = async () => {
+    try {
+      const r = await hubApi("/ai/stop", { chat_id: REV_ACTIVE_CHAT });
+      toast(r.message || "已停止", 2000);
+    } catch (e) { toast(e.message, 2500); }
+  };
+}
+
 resizeCanvas();
-loadAll().catch(err => toast("加载失败：" + err.message, 5000));
+loadAll().then(async () => {
+  await applyReviewMirrorStateIfNeeded();
+  if (!REV_IS_MIRROR) {
+    connectReviewSSE();
+    connectReviewHubSSE();
+    scheduleReportReviewUiState();
+  }
+}).catch(err => toast("加载失败：" + err.message, 5000));
 </script>
 </body>
 </html>

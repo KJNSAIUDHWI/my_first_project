@@ -339,6 +339,23 @@
   .tour-pop h4{margin:0 0 5px;font-size:14.5px}
   .tour-pop p{margin:0 0 11px;font-size:12.5px;color:var(--muted);line-height:1.5}
 
+  /* 非阻塞右侧 AI 帮手抽屉（不模糊背景，可边操作界面边看 AI 实时联动） */
+  .ai-drawer{position:fixed;top:64px;right:14px;bottom:14px;width:min(450px,94vw);z-index:95;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.2);display:flex;flex-direction:column;overflow:hidden}
+  .ai-drawer-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px;background:#f8faf9}
+  .ai-tabs{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--line);overflow-x:auto;background:#fcfdfc;flex-shrink:0}
+  .ai-tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .ai-tab.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700}
+  .ai-tab .dot-run{width:6px;height:6px;border-radius:50%;background:#16a34a;display:inline-block}
+  .ai-cfg-box{padding:9px 12px;border-bottom:1px solid var(--line);background:#f9fafb;font-size:12px;display:flex;flex-direction:column;gap:7px;flex-shrink:0}
+  .ai-chat-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#fafbfa}
+  .ai-msg{padding:9px 11px;border-radius:11px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-width:96%}
+  .ai-msg.user{align-self:flex-end;background:#e6f4ed;color:#103c28;border:1px solid #b7e4cd}
+  .ai-msg.assistant{align-self:flex-start;background:#fff;color:var(--ink);border:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  .ai-msg-meta{font-size:10.5px;color:var(--muted);margin-bottom:3px}
+  .ai-drawer-foot{padding:10px 12px;border-top:1px solid var(--line);background:#fff;display:flex;flex-direction:column;gap:7px;flex-shrink:0}
+  .ai-focus-ring{position:fixed;z-index:130;pointer-events:none;border:3px solid #2563eb;border-radius:10px;box-shadow:0 0 0 6px rgba(37,99,235,.22),0 8px 24px rgba(37,99,235,.28);transition:all .22s ease}
+  .ai-focus-tag{position:absolute;top:-26px;left:0;background:#2563eb;color:#fff;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+
   @media(max-width:1040px){
     .env-arch-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
     .env-arch-wrap .flow-svg{display:none}
@@ -365,6 +382,7 @@
       </div>
     </div>
     <div class="row">
+      <button id="btnOpenAi" class="btn sm hidden" type="button" title="打开 ZCode AI 帮手诊断面板">🤖 AI 帮手</button>
       <button id="btnOpenVlm" class="btn sm hidden" type="button" title="配置大模型视觉 API">⚙ API</button>
       <button id="btnOpenGuide" class="btn sm" type="button" title="操作引导">? 引导</button>
       <span id="rolePill" class="role-pill host"><i class="dot"></i><span>主机</span></span>
@@ -930,30 +948,73 @@
   <span id="liveText">就绪</span>
 </div>
 
-<!-- AI 助手诊断面板（支持 ZCode 无头流式输出与 opencode/剪贴板降级） -->
-<dialog id="aiHelperDialog" style="width:min(720px,94vw);border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:#fff;box-shadow:0 18px 48px rgba(15,23,42,.18)">
-  <div class="between" style="margin-bottom:8px">
-    <div class="row" style="gap:8px;align-items:center">
-      <h3 style="margin:0;font-size:16px">🤖 AI 助手诊断面板</h3>
+<!-- 全局非阻塞 AI 帮手右侧抽屉（多 Agent 快探 + 多会话并发 + 配置导入 + 离屏视觉） -->
+<aside id="aiDrawer" class="ai-drawer hidden" aria-label="AI 帮手全局抽屉">
+  <div class="ai-drawer-head">
+    <div class="row" style="gap:7px;align-items:center">
+      <strong style="font-size:14.5px">🤖 AI 帮手</strong>
       <span class="badge" id="aiStatusBadge">就绪</span>
     </div>
-    <button class="btn sm" id="btnCloseAiDlg" type="button">关闭</button>
+    <div class="row" style="gap:5px">
+      <button class="btn xs" id="btnToggleAiCfg" type="button" title="切换 Agent、手动路径、扩展扫描与配置导入">⚙ 配置</button>
+      <button class="btn xs" id="btnCloseAiDlg" type="button">收起</button>
+    </div>
   </div>
-  <div class="muted" id="aiProviderHint" style="margin-bottom:10px;font-size:12.5px">自动探测本机 ZCode CLI（默认只读 plan 模式，绝不泄露 API Key 或学生姓名学号）。</div>
-  <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-    <label style="font-size:12.5px;color:var(--muted)">权限模式：
-      <select id="aiModeSelect" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px">
-        <option value="plan" selected>只读诊断 (--mode plan · 推荐)</option>
-        <option value="guarded">受控修复 (--mode guarded)</option>
-      </select>
-    </label>
-    <input id="aiNoteInput" type="text" placeholder="补充想让 AI 排查的问题（可选，留空则结合环境自检与报错日志诊断）" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
-    <button class="btn primary sm" id="btnStartAi" type="button">开始诊断</button>
-    <button class="btn sm hidden" id="btnStopAi" type="button" style="color:var(--err);border-color:#fecaca">停止</button>
+  <div class="ai-tabs" id="aiTabsBar">
+    <button class="btn xs" id="btnNewAiChat" type="button" title="新建独立并发对话（不同对话互不阻塞）">＋ 新并发对话</button>
   </div>
-  <div id="aiMetaBar" class="muted" style="font-size:12px;margin-bottom:6px;display:flex;gap:14px;flex-wrap:wrap"></div>
-  <pre id="aiResponseBox" style="margin:0;padding:12px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;min-height:140px;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.6;font-family:ui-monospace,Consolas,monospace">点击「开始诊断」后，将在此实时显示 AI 回复或降级剪贴板结果。</pre>
-</dialog>
+  <div id="aiCfgBox" class="ai-cfg-box hidden">
+    <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+      <label>引擎：<select id="aiProviderSelect" style="padding:3px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+        <option value="auto">自动优选</option>
+        <option value="zcode">ZCode (智谱)</option>
+        <option value="opencode">OpenCode</option>
+        <option value="workbuddy">WorkBuddy/CodeBuddy</option>
+        <option value="doubao">豆包 / Trae CLI</option>
+        <option value="antigravity">Antigravity (agy)</option>
+        <option value="custom">自定义模板</option>
+      </select></label>
+      <label>权限：<select id="aiModeSelect" style="padding:3px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+        <option value="yolo" selected>完全权限 (默认 · 直接干活)</option>
+        <option value="guarded">受控模式 (guarded)</option>
+        <option value="plan">仅诊断 (plan)</option>
+      </select></label>
+    </div>
+    <div class="row" style="gap:5px;align-items:center">
+      <input id="aiManualPathInput" type="text" placeholder="可选：手动填当前所选 Agent 可执行路径或自定义命令模板" style="flex:1;padding:4px 7px;border:1px solid var(--line);border-radius:6px;font-size:12px">
+      <button class="btn xs" id="btnSaveAgentPath" type="button">保存</button>
+      <button class="btn xs" id="btnTestAgent" type="button">测连通</button>
+    </div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+      <button class="btn xs" id="btnDeepScanAgents" type="button" title="默认快探不扫盘，需要时可点此扩展扫描常见开发目录">🔍 扩展扫描(可选)</button>
+      <button class="btn xs" id="btnImportCfgFile" type="button" title="一键导入 .json 配置包或 .env 密钥文件">📥 导入配置/密钥</button>
+      <input id="aiCfgFileInput" type="file" accept=".json,.env,.txt" class="hidden">
+      <span id="aiAgentScanMsg" class="muted" style="font-size:11.5px"></span>
+    </div>
+  </div>
+  <div class="muted" id="aiProviderHint" style="padding:6px 12px;border-bottom:1px solid var(--line);font-size:11.5px;background:#fff">正在探测本机 Agent...</div>
+  <div id="aiMetaBar" class="muted" style="padding:4px 12px;font-size:11px;display:flex;gap:10px;flex-wrap:wrap;background:#fff;border-bottom:1px solid #f1f5f9"></div>
+  <div class="ai-chat-body" id="aiChatBody">
+    <div id="aiResponseBox" class="ai-msg assistant">直接用中文下达指令即可，比如：
+• 帮我修一下当前报错
+• 把豆包 API Key 配成 xxx 并测一下连通性
+• 看看最近失败了哪些题，帮我补跑
+发送后你可以继续自由操作页面，不用停在原地。</div>
+  </div>
+  <div class="ai-drawer-foot">
+    <div class="between" style="font-size:11.5px">
+      <label class="row" style="gap:5px;cursor:pointer;color:var(--muted)" title="默认只传文字状态，AI 有需要会自动调 capture 截屏；勾选后发送即附带实时离屏截图并精简提示词">
+        <input id="chkAiAttachShot" type="checkbox"> 附带当前界面截图
+      </label>
+      <button class="btn xs hidden" id="btnStopAi" type="button" style="color:var(--err);border-color:#fecaca">■ 停止本对话</button>
+    </div>
+    <div class="row" style="gap:6px">
+      <input id="aiNoteInput" type="text" placeholder="输入自然语言指令（支持直接导入配置/密钥、查错、操控界面）..." style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:9px;font-size:12.5px">
+      <button class="btn primary sm" id="btnStartAi" type="button">发送</button>
+    </div>
+  </div>
+</aside>
+<div id="aiFocusRing" class="ai-focus-ring hidden"><span id="aiFocusTag" class="ai-focus-tag">🤖 AI 聚焦</span></div>
 
 <!-- 新手引导弹窗 -->
 <dialog id="guideDialog" class="guide-dlg">
@@ -1147,6 +1208,98 @@ function setView(view) {
     if (view === 'check') drawEnvArchConnectors();
     if (view === 'overview') PipeFlow.relayout();
   });
+  scheduleReportUiState();
+}
+
+/* ==================== 前台 UI 状态同步（离屏一致渲染）与 AI 焦点投送 ==================== */
+const URL_PARAMS = new URLSearchParams(window.location.search);
+const IS_MIRROR_MODE = URL_PARAMS.get('mirror') === '1';
+const MIRROR_CLIENT_ID = URL_PARAMS.get('mirror_client') || '';
+window.__RECENT_ERRORS__ = [];
+window.__MIRROR_APPLIED__ = !IS_MIRROR_MODE;
+window.addEventListener('error', e => {
+  window.__RECENT_ERRORS__.push(`JS错误: ${e.message || 'unknown'}`);
+  if (window.__RECENT_ERRORS__.length > 10) window.__RECENT_ERRORS__.shift();
+});
+window.addEventListener('unhandledrejection', e => {
+  window.__RECENT_ERRORS__.push(`Promise异常: ${e.reason?.message || e.reason || 'unknown'}`);
+  if (window.__RECENT_ERRORS__.length > 10) window.__RECENT_ERRORS__.shift();
+});
+
+let _uiStateTimer = null;
+function collectWbUiState() {
+  return {
+    client_id: CLIENT_ID,
+    view: CURRENT_VIEW,
+    batch_id: OVERVIEW?.active_batch?.batch_id || '',
+    scroll_y: Math.round(window.scrollY || 0),
+    arch_collapsed: ARCH_COLLAPSED,
+    recent_errors: window.__RECENT_ERRORS__.slice(-6),
+  };
+}
+function scheduleReportUiState() {
+  if (IS_MIRROR_MODE || !OVERVIEW?.is_host) return;
+  clearTimeout(_uiStateTimer);
+  _uiStateTimer = setTimeout(() => {
+    api('/api/ui-state', { method: 'POST', body: JSON.stringify(collectWbUiState()) }).catch(() => {});
+  }, 220);
+}
+async function applyMirrorUiStateIfNeeded() {
+  if (!IS_MIRROR_MODE) return;
+  try {
+    const qs = MIRROR_CLIENT_ID ? `?client_id=${encodeURIComponent(MIRROR_CLIENT_ID)}` : '';
+    const res = await api('/api/ui-state' + qs);
+    const st = res?.active || {};
+    if (st.view && ['check', 'ingest', 'overview', 'train'].includes(st.view)) {
+      setView(st.view);
+      if (st.view === 'check' && !CHECK) renderCheck(await api('/api/check'));
+      if (st.view === 'train') await refreshTrainOverview();
+    }
+    if (typeof st.arch_collapsed === 'boolean') {
+      ARCH_COLLAPSED = st.arch_collapsed;
+      applyArchCollapseUI();
+    }
+    if (st.scroll_y) window.scrollTo(0, Number(st.scroll_y) || 0);
+  } catch (_) {}
+  window.__MIRROR_APPLIED__ = true;
+}
+
+let _focusRingTimer = null;
+function castFocusOnElement(selector, label = '') {
+  if (!selector) return false;
+  const el = document.querySelector(selector);
+  if (!el) return false;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+  setTimeout(() => {
+    const r = el.getBoundingClientRect();
+    const ring = $('aiFocusRing'), tag = $('aiFocusTag');
+    if (!ring || r.width < 2 || r.height < 2) return;
+    ring.style.left = Math.max(2, r.left - 5) + 'px';
+    ring.style.top = Math.max(2, r.top - 5) + 'px';
+    ring.style.width = (r.width + 10) + 'px';
+    ring.style.height = (r.height + 10) + 'px';
+    if (tag) tag.textContent = '🤖 ' + (label || 'AI 聚焦');
+    ring.classList.remove('hidden');
+    clearTimeout(_focusRingTimer);
+    _focusRingTimer = setTimeout(() => ring.classList.add('hidden'), 4200);
+  }, 180);
+  return true;
+}
+function handleUiCommand(ev) {
+  if (!ev || IS_MIRROR_MODE) return;
+  if (ev.view && ['check', 'ingest', 'overview', 'train'].includes(ev.view)) {
+    setView(ev.view);
+    if (ev.view === 'check' && !CHECK) api('/api/check').then(renderCheck).catch(() => {});
+    if (ev.view === 'train') refreshTrainOverview();
+  }
+  if (ev.action === 'focus' && ev.target) {
+    castFocusOnElement(ev.target, ev.label || 'AI 聚焦');
+  } else if (ev.action === 'click' && ev.target) {
+    castFocusOnElement(ev.target, ev.label || 'AI 操作');
+    const el = document.querySelector(ev.target);
+    if (el) setTimeout(() => el.click(), 320);
+  }
+  if (ev.message) showBanner('ai', ev.message, 4200);
 }
 
 async function api(url, opts = {}) {
@@ -2145,6 +2298,7 @@ function renderOverview(data) {
   $('hostStepper').classList.toggle('hidden', !isHost);
   $('inviteBar').classList.toggle('hidden', !isHost);
   $('hostBatchActions').classList.toggle('hidden', !isHost);
+  $('btnOpenAi').classList.toggle('hidden', !isHost);
   $('btnOpenVlm').classList.toggle('hidden', !isHost);
   $('lanUrlText').textContent = data.lan_url;
 
@@ -2173,6 +2327,9 @@ function renderOverview(data) {
   $('btnStartRecognize').textContent = job.running ? '识别中...' : (ab?.has_recognition ? '重新识别' : '开始识别');
 
   renderPipelineDashboard(data);
+  if (data.agents) syncAgentsUI(data.agents, data.config);
+  if (Array.isArray(data.ai_sessions)) syncAiSessions(data.ai_sessions);
+  scheduleReportUiState();
   if (isHost) {
     syncPerfPanel(data.hardware, data.infer_settings);
     if (data.benchmark_job) renderBenchmarkJob(data.benchmark_job);
@@ -2257,7 +2414,7 @@ function renderOverview(data) {
       if (data.last_check) renderCheck(data.last_check);
       setView(ab ? 'overview' : 'ingest');
     }
-    if (!getUserName()) {
+    if (!getUserName() && !IS_MIRROR_MODE) {
       $('nameInput').value = isHost ? '主机' : '';
       $('nameDialog').showModal();
     }
@@ -2348,7 +2505,10 @@ function connectSSE() {
         highlightElement('task_' + ev.step.replace('service_', ''));
         refreshOverview();
       } else if (ev.step === 'ai' && ev.ai_snapshot) {
-        renderAiPanel(ev.ai_snapshot);
+        if (OVERVIEW) OVERVIEW.ai_job = ev.ai_snapshot;
+        upsertAiSessionSnapshot(ev.ai_snapshot);
+      } else if (ev.step === 'ui_command') {
+        handleUiCommand(ev);
       } else if (ev.step === 'overview') {
         refreshOverview();
       }
@@ -2505,6 +2665,111 @@ $('btnConfirmPwd').onclick = async () => {
   } catch (err) { $('pwdErr').textContent = err.message; }
   finally { $('btnConfirmPwd').disabled = false; }
 };
+/* ==================== 全局非阻塞 AI 帮手抽屉（多 Agent + 多会话并发 + 配置导入） ==================== */
+let AI_SESSIONS = {};
+let ACTIVE_CHAT_ID = '';
+let AGENTS_CACHE = null;
+
+function syncAgentsUI(agentsInfo, cfg) {
+  AGENTS_CACHE = agentsInfo;
+  const sel = $('aiProviderSelect');
+  if (sel && agentsInfo?.list) {
+    const curVal = sel.value || cfg?.ai_helper_provider || 'auto';
+    sel.innerHTML = `<option value="auto">自动优选 (${esc(agentsInfo.recommended || '无')})</option>` +
+      agentsInfo.list.map(a => `<option value="${esc(a.id)}">${a.available ? '✓ ' : '✗ '}${esc(a.label)}</option>`).join('');
+    sel.value = curVal;
+  }
+  if ($('aiModeSelect') && cfg?.ai_default_mode && !$('aiModeSelect').dataset.userPicked) {
+    $('aiModeSelect').value = cfg.ai_default_mode;
+  }
+  if ($('chkAiAttachShot') && typeof cfg?.ai_default_screenshot === 'boolean' && !$('chkAiAttachShot').dataset.userPicked) {
+    $('chkAiAttachShot').checked = cfg.ai_default_screenshot;
+  }
+  updateAiProviderHint();
+}
+
+function updateAiProviderHint() {
+  const hint = $('aiProviderHint');
+  if (!hint) return;
+  const info = AGENTS_CACHE;
+  const chosen = $('aiProviderSelect')?.value || 'auto';
+  const targetId = chosen === 'auto' ? (info?.recommended || '') : chosen;
+  const ag = info?.agents?.[targetId];
+  if (ag && ag.available) {
+    hint.textContent = `当前引擎：${ag.label}（${ag.cli}）· 支持同构操控界面、导入配置/密钥与离屏截图`;
+  } else {
+    hint.textContent = '未检测到所选 CLI Agent，点右上「⚙ 配置」可手动填路径或执行可选扩展扫描，也可直接复制提示词。';
+  }
+  if ($('aiManualPathInput') && chosen !== 'auto') {
+    const cfgPaths = OVERVIEW?.config?.agent_paths || {};
+    $('aiManualPathInput').value = chosen === 'custom'
+      ? (OVERVIEW?.config?.agent_custom_cmd || '')
+      : (cfgPaths[chosen] || '');
+  }
+}
+
+function syncAiSessions(list) {
+  if (!Array.isArray(list)) return;
+  for (const s of list) {
+    if (s && s.chat_id) AI_SESSIONS[s.chat_id] = s;
+  }
+  if (!ACTIVE_CHAT_ID || !AI_SESSIONS[ACTIVE_CHAT_ID]) {
+    const ids = Object.keys(AI_SESSIONS);
+    if (ids.length) ACTIVE_CHAT_ID = ids[0];
+  }
+  renderAiTabs();
+  if (ACTIVE_CHAT_ID && AI_SESSIONS[ACTIVE_CHAT_ID]) renderAiPanel(AI_SESSIONS[ACTIVE_CHAT_ID]);
+}
+
+function upsertAiSessionSnapshot(snap) {
+  if (!snap || !snap.chat_id) return;
+  AI_SESSIONS[snap.chat_id] = snap;
+  if (!ACTIVE_CHAT_ID) ACTIVE_CHAT_ID = snap.chat_id;
+  renderAiTabs();
+  if (snap.chat_id === ACTIVE_CHAT_ID) renderAiPanel(snap);
+}
+
+function renderAiTabs() {
+  const bar = $('aiTabsBar');
+  if (!bar) return;
+  const sessions = Object.values(AI_SESSIONS);
+  const tabsHtml = sessions.map((s, idx) => {
+    const active = s.chat_id === ACTIVE_CHAT_ID ? ' active' : '';
+    const dot = s.running ? '<i class="dot-run"></i>' : '';
+    const lbl = esc(s.title || `对话 ${idx + 1}`);
+    return `<button class="ai-tab${active}" type="button" data-chat-id="${esc(s.chat_id)}">${dot}${lbl}</button>`;
+  }).join('');
+  bar.innerHTML = tabsHtml + `<button class="btn xs" id="btnNewAiChat" type="button" title="新建独立并发对话（与已有对话并发执行）">＋ 新并发对话</button>`;
+  bar.querySelectorAll('[data-chat-id]').forEach(b => {
+    b.onclick = () => {
+      ACTIVE_CHAT_ID = b.dataset.chatId;
+      renderAiTabs();
+      renderAiPanel(AI_SESSIONS[ACTIVE_CHAT_ID]);
+    };
+  });
+  const btnNew = $('btnNewAiChat');
+  if (btnNew) btnNew.onclick = createNewConcurrentChat;
+}
+
+async function createNewConcurrentChat() {
+  try {
+    const res = await api('/api/ai/sessions/new', {
+      method: 'POST',
+      body: JSON.stringify({
+        surface: 'workbench',
+        provider: $('aiProviderSelect')?.value || 'auto',
+        mode: $('aiModeSelect')?.value || 'yolo',
+      }),
+    });
+    if (res.session) {
+      AI_SESSIONS[res.session.chat_id] = res.session;
+      ACTIVE_CHAT_ID = res.session.chat_id;
+      renderAiTabs();
+      renderAiPanel(res.session);
+    }
+  } catch (err) { showBanner('ai', '创建对话失败：' + err.message); }
+}
+
 function renderAiPanel(aiJob) {
   if (!aiJob) return;
   const running = Boolean(aiJob.running);
@@ -2512,64 +2777,172 @@ function renderAiPanel(aiJob) {
   const badge = $('aiStatusBadge');
   if (badge) {
     badge.className = 'badge ' + (running ? 'ok' : (st === 'done' ? 'ok' : (st === 'error' ? 'err' : 'warn')));
-    badge.textContent = running ? '诊断中...' : (st === 'done' ? '已完成' : (st === 'error' ? '异常' : (st === 'stopped' ? '已停止' : '就绪')));
+    badge.textContent = running ? (aiJob.queued ? `执行中(排队${aiJob.queued})` : '执行中...') : (st === 'done' ? '已完成' : (st === 'error' ? '异常' : (st === 'stopped' ? '已停止' : '就绪')));
   }
-  if ($('btnStartAi')) $('btnStartAi').disabled = running;
   if ($('btnStopAi')) $('btnStopAi').classList.toggle('hidden', !running);
   const meta = [];
-  if (aiJob.provider) meta.push(`引擎：${aiJob.provider}`);
-  if (aiJob.mode) meta.push(`模式：${aiJob.mode}`);
-  if (aiJob.session_id) meta.push(`会话：${aiJob.session_id.slice(0, 16)}`);
+  if (aiJob.provider_label || aiJob.provider) meta.push(`引擎：${aiJob.provider_label || aiJob.provider}`);
+  if (aiJob.mode) meta.push(`权限：${aiJob.mode}`);
+  if (aiJob.session_id) meta.push(`会话：${aiJob.session_id.slice(0, 14)}`);
   const u = aiJob.usage || {};
-  if (u.inputTokens || u.outputTokens) meta.push(`Token：输入 ${u.inputTokens || 0} / 输出 ${u.outputTokens || 0}`);
-  if ($('aiMetaBar')) $('aiMetaBar').textContent = meta.join('  ·  ');
-  if ($('aiResponseBox')) {
-    const txt = aiJob.response || (aiJob.logs || []).join('\n') || aiJob.error || '';
-    if (txt) $('aiResponseBox').textContent = txt;
+  if (u.inputTokens || u.outputTokens) meta.push(`Token：${u.inputTokens || 0}/${u.outputTokens || 0}`);
+  if ($('aiMetaBar')) $('aiMetaBar').textContent = meta.join(' · ');
+
+  const body = $('aiChatBody');
+  if (!body) return;
+  const msgs = Array.isArray(aiJob.messages) ? aiJob.messages : [];
+  if (!msgs.length && !running && !aiJob.response && !aiJob.error) {
+    body.innerHTML = `<div id="aiResponseBox" class="ai-msg assistant">直接用中文下达指令即可（默认完全权限，支持查错、操控界面、导入配置/密钥、修代码并同步 GitHub）。</div>`;
+    return;
   }
+  const html = msgs.map(m => {
+    const att = (m.attach && m.attach.length) ? ` · 📷 ${esc(m.attach.join(', '))}` : '';
+    return `<div class="ai-msg ${m.role === 'user' ? 'user' : 'assistant'}"><div class="ai-msg-meta">${m.role === 'user' ? '你' : 'AI 帮手'} · ${esc(m.ts || '')}${att}</div>${esc(m.text || '')}</div>`;
+  });
+  if (running) {
+    const liveTxt = aiJob.response || '⏳ AI 正在读取实时状态、分析并执行同构操作，你可以继续自由操作主界面...';
+    html.push(`<div id="aiResponseBox" class="ai-msg assistant"><div class="ai-msg-meta">AI 帮手 · 执行中</div>${esc(liveTxt)}</div>`);
+  }
+  body.innerHTML = html.join('');
+  body.scrollTop = body.scrollHeight;
 }
 
 function openAiHelperDialog() {
-  const zc = OVERVIEW?.zcode;
-  if ($('aiProviderHint')) {
-    $('aiProviderHint').textContent = zc?.available
-      ? `已检测到本机 ZCode CLI（${zc.cli}），默认使用安全只读 --mode plan 模式，严禁泄露 API Key 或学生信息。`
-      : '未检测到 ZCode CLI，点击「开始诊断」将自动尝试 opencode 或复制脱敏诊断提示词到剪贴板。';
+  const drawer = $('aiDrawer');
+  if (!drawer) return;
+  drawer.classList.toggle('hidden');
+  if (!drawer.classList.contains('hidden')) {
+    if (!AGENTS_CACHE) api('/api/agents').then(r => syncAgentsUI(r, OVERVIEW?.config)).catch(() => {});
+    api('/api/ai/sessions').then(r => syncAiSessions(r.sessions || [])).catch(() => {});
+    updateAiProviderHint();
+    setTimeout(() => $('aiNoteInput')?.focus(), 80);
   }
-  if (OVERVIEW?.ai_job) renderAiPanel(OVERVIEW.ai_job);
-  $('aiHelperDialog').showModal();
 }
 
-$('btnAskAgent').onclick = () => openAiHelperDialog();
-$('btnCloseAiDlg').onclick = () => $('aiHelperDialog').close();
+if ($('btnOpenAi')) $('btnOpenAi').onclick = () => openAiHelperDialog();
+$('btnAskAgent').onclick = () => { $('aiDrawer')?.classList.remove('hidden'); updateAiProviderHint(); };
+$('btnCloseAiDlg').onclick = () => $('aiDrawer')?.classList.add('hidden');
+if ($('btnToggleAiCfg')) $('btnToggleAiCfg').onclick = () => $('aiCfgBox')?.classList.toggle('hidden');
+if ($('aiProviderSelect')) {
+  $('aiProviderSelect').onchange = () => {
+    updateAiProviderHint();
+    api('/api/config', { method: 'POST', body: JSON.stringify({ ai_helper_provider: $('aiProviderSelect').value }) }).catch(() => {});
+  };
+}
+if ($('aiModeSelect')) {
+  $('aiModeSelect').onchange = () => {
+    $('aiModeSelect').dataset.userPicked = '1';
+    api('/api/config', { method: 'POST', body: JSON.stringify({ ai_default_mode: $('aiModeSelect').value }) }).catch(() => {});
+  };
+}
+if ($('chkAiAttachShot')) {
+  $('chkAiAttachShot').onchange = () => {
+    $('chkAiAttachShot').dataset.userPicked = '1';
+    api('/api/config', { method: 'POST', body: JSON.stringify({ ai_default_screenshot: $('chkAiAttachShot').checked }) }).catch(() => {});
+  };
+}
+if ($('btnSaveAgentPath')) {
+  $('btnSaveAgentPath').onclick = async () => {
+    const prov = $('aiProviderSelect')?.value || 'auto';
+    const val = $('aiManualPathInput')?.value.trim() || '';
+    if (prov === 'auto') { $('aiAgentScanMsg').textContent = '请先在左侧选择具体 Agent 再填路径'; return; }
+    const body = prov === 'custom' ? { agent_custom_cmd: val } : { agent_paths: { [prov]: val } };
+    try {
+      const res = await api('/api/config', { method: 'POST', body: JSON.stringify(body) });
+      if (res.agents) syncAgentsUI(res.agents, res.config);
+      $('aiAgentScanMsg').textContent = '已保存路径并重新探测';
+    } catch (err) { $('aiAgentScanMsg').textContent = '保存失败：' + err.message; }
+  };
+}
+if ($('btnTestAgent')) {
+  $('btnTestAgent').onclick = async () => {
+    const prov = $('aiProviderSelect')?.value || 'auto';
+    const target = prov === 'auto' ? (AGENTS_CACHE?.recommended || 'zcode') : prov;
+    $('aiAgentScanMsg').textContent = `测试 ${target}...`;
+    try {
+      const res = await api('/api/agents/test', { method: 'POST', body: JSON.stringify({ provider: target }) });
+      $('aiAgentScanMsg').textContent = `✓ ${target} 正常（${res.version || 'OK'}）`;
+    } catch (err) { $('aiAgentScanMsg').textContent = `✗ ${err.message}`; }
+  };
+}
+if ($('btnDeepScanAgents')) {
+  $('btnDeepScanAgents').onclick = async () => {
+    $('aiAgentScanMsg').textContent = '扩展扫描中...';
+    try {
+      const res = await api('/api/agents?deep=1');
+      syncAgentsUI(res, OVERVIEW?.config);
+      $('aiAgentScanMsg').textContent = `扩展扫描完成（${res.elapsed_ms}ms，发现 ${res.available.length} 个）`;
+    } catch (err) { $('aiAgentScanMsg').textContent = '扫描失败：' + err.message; }
+  };
+}
+if ($('btnImportCfgFile')) {
+  $('btnImportCfgFile').onclick = () => $('aiCfgFileInput')?.click();
+  $('aiCfgFileInput').onchange = async () => {
+    const f = $('aiCfgFileInput').files?.[0];
+    if (!f) return;
+    try {
+      const txt = await f.text();
+      let payload;
+      if (txt.trim().startsWith('{')) {
+        payload = JSON.parse(txt);
+      } else {
+        const env = {};
+        for (const ln of txt.split(/\r?\n/)) {
+          const s = ln.trim();
+          if (!s || s.startsWith('#') || !s.includes('=')) continue;
+          const idx = s.indexOf('=');
+          env[s.slice(0, idx).trim()] = s.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+        }
+        payload = { env };
+      }
+      const res = await api('/api/config/import', { method: 'POST', body: JSON.stringify(payload) });
+      $('aiAgentScanMsg').textContent = '✓ ' + (res.message || '导入完成');
+      showBanner('ai', res.message || '配置/密钥已导入', 4500);
+      await refreshOverview();
+    } catch (err) {
+      $('aiAgentScanMsg').textContent = '✗ 导入失败：' + err.message;
+    } finally { $('aiCfgFileInput').value = ''; }
+  };
+}
+if ($('aiNoteInput')) {
+  $('aiNoteInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !$('btnStartAi').disabled) $('btnStartAi').click();
+  });
+}
 $('btnStartAi').onclick = async () => {
+  const note = $('aiNoteInput').value.trim();
   $('btnStartAi').disabled = true;
   try {
     const res = await api('/api/ai/run', {
       method: 'POST',
       body: JSON.stringify({
-        mode: $('aiModeSelect').value,
-        note: $('aiNoteInput').value.trim(),
-        session_id: OVERVIEW?.ai_job?.session_id || '',
+        chat_id: ACTIVE_CHAT_ID,
+        surface: 'workbench',
+        provider: $('aiProviderSelect')?.value || 'auto',
+        mode: $('aiModeSelect')?.value || 'yolo',
+        note,
+        attach_screenshot: Boolean($('chkAiAttachShot')?.checked),
+        ui_state: collectWbUiState(),
       }),
     });
-    if (res.headless) {
-      showBanner('ai', res.message || 'ZCode AI 助手已启动', 4000);
-      const st = await api('/api/ai/status');
-      if (st.ai_job) renderAiPanel(st.ai_job);
-    } else {
-      if ($('aiResponseBox')) $('aiResponseBox').textContent = (res.message || '') + (res.prompt ? '\n\n--- 已复制提示词 ---\n' + res.prompt : '');
+    $('aiNoteInput').value = '';
+    if (res.headless && res.session) {
+      ACTIVE_CHAT_ID = res.session.chat_id;
+      upsertAiSessionSnapshot(res.session);
+      showBanner('ai', res.message || 'AI 帮手已启动', 4000);
+    } else if (res.prompt) {
+      $('aiChatBody').innerHTML = `<div id="aiResponseBox" class="ai-msg assistant">${esc((res.message || '') + '\n\n' + res.prompt)}</div>`;
       showBanner('ai', res.message || '已复制诊断提示词', 4500);
     }
   } catch (err) {
-    if ($('aiResponseBox')) $('aiResponseBox').textContent = '启动失败：' + err.message;
+    showBanner('ai', '发送失败：' + err.message, 4500);
   } finally {
     $('btnStartAi').disabled = false;
   }
 };
 $('btnStopAi').onclick = async () => {
   try {
-    const res = await api('/api/ai/stop', { method: 'POST', body: '{}' });
+    const res = await api('/api/ai/stop', { method: 'POST', body: JSON.stringify({ chat_id: ACTIVE_CHAT_ID }) });
     showBanner('ai', res.message || '已停止 AI 助手');
   } catch (err) { alert(err.message); }
 };
@@ -3117,12 +3490,15 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 
 // 初始化
-refreshOverview().then(() => {
-  pingPresence('总览');
-  connectSSE();
-  scheduleOverviewPoll(4500);
-  setInterval(() => { if (!document.hidden && (CURRENT_VIEW === 'train' || TRAIN_DATA?.train_job?.running)) refreshTrainOverview(); }, 3500);
-  setInterval(() => pingPresence('总览'), 25000);
+refreshOverview().then(async () => {
+  await applyMirrorUiStateIfNeeded();
+  if (!IS_MIRROR_MODE) {
+    pingPresence('总览');
+    connectSSE();
+    scheduleOverviewPoll(4500);
+    setInterval(() => { if (!document.hidden && (CURRENT_VIEW === 'train' || TRAIN_DATA?.train_job?.running)) refreshTrainOverview(); }, 3500);
+    setInterval(() => pingPresence('总览'), 25000);
+  }
 });
 </script>
 </body>

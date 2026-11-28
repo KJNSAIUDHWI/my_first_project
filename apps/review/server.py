@@ -7,12 +7,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
+import queue
 import secrets
 import shutil
 import sys
 import threading
 import time
 import tarfile
+import urllib.error
+import urllib.parse
 import urllib.request
 from urllib.parse import unquote, urlparse
 
@@ -96,13 +99,216 @@ def prepare_math_assets(folder, async_download: bool = False):
         _download()
 
 
+class ReviewEventBus:
+    """8904 实时事件总线：CLI / AI / 协同修改或焦点投送时即时推送给所有已连浏览器。"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._subs: list[queue.Queue] = []
+        self._recent: list[dict] = []
+
+    def subscribe(self) -> queue.Queue:
+        q: queue.Queue = queue.Queue(maxsize=64)
+        with self._lock:
+            self._subs.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue) -> None:
+        with self._lock:
+            if q in self._subs:
+                self._subs.remove(q)
+
+    def publish(self, event: dict) -> None:
+        ev = {**event, 'ts': datetime.now().strftime('%H:%M:%S')}
+        with self._lock:
+            self._recent.append(ev)
+            if len(self._recent) > 40:
+                self._recent = self._recent[-40:]
+            subs = list(self._subs)
+        for q in subs:
+            try:
+                q.put_nowait(ev)
+            except queue.Full:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(ev)
+                except Exception:
+                    pass
+
+
 class ReviewStore:
     def __init__(self, folder):
         self.folder = Path(folder).resolve()
         self.path = self.folder/'feedback.json'
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self._page_locks_guard = threading.Lock()
+        self._page_locks: dict[str, threading.RLock] = {}
+        self._page_revs: dict[str, int] = {}
         # Bind feedback to immutable input/model manifest, not changing completion status.
         self.identity = hashlib.sha256((self.folder/'manifest.json').read_bytes()).hexdigest()
+
+    def page_lock(self, page_id: str) -> threading.RLock:
+        """单页细粒度可重入锁：不同页并发操作互不阻塞，同一页写操作自动串行化防竞争冒险。"""
+        pid = str(page_id or '')
+        with self._page_locks_guard:
+            lk = self._page_locks.get(pid)
+            if lk is None:
+                lk = threading.RLock()
+                self._page_locks[pid] = lk
+            return lk
+
+    def bump_page_rev(self, page_id: str) -> int:
+        pid = str(page_id or '')
+        with self._page_locks_guard:
+            nxt = int(self._page_revs.get(pid) or 0) + 1
+            self._page_revs[pid] = nxt
+            return nxt
+
+    def page_rev(self, page_id: str) -> int:
+        with self._page_locks_guard:
+            return int(self._page_revs.get(str(page_id or '')) or 0)
+
+    def page_revs_snapshot(self) -> dict[str, int]:
+        with self._page_locks_guard:
+            return dict(self._page_revs)
+
+    def get_page_detail(self, page_id: str) -> dict:
+        results = _read_json_safe(self.folder / 'results.json')
+        pages = results.get('pages') or []
+        page = next((p for p in pages if p.get('id') == page_id or p.get('name') == page_id), None)
+        if not page:
+            raise ValueError(f'目标试卷页不存在：{page_id}')
+        fb = self.read()
+        fb_items = fb.get('items') or {}
+        pid = page['id']
+        item_fb = {it['id']: fb_items[it['id']] for it in (page.get('items') or []) if it.get('id') in fb_items}
+        return {
+            'ok': True,
+            'page_id': pid,
+            'page_rev': self.page_rev(pid),
+            'page': page,
+            'page_feedback': fb_items.get(pid),
+            'item_feedback': item_fb,
+            'feedback_revision': fb.get('revision', 0),
+        }
+
+    def set_item_text(
+        self,
+        *,
+        page_id: str,
+        item_id: str,
+        text: str = '',
+        answer: str | None = None,
+        label: str = '已订正',
+        reviewer: str = 'AI助手',
+        expected_page_rev: int | None = None,
+    ) -> dict:
+        """页级加锁订正单道手写题文字或选择题答案（同时写入 feedback.json，供 CLI/AI 同构调用）。"""
+        with self.page_lock(page_id):
+            if expected_page_rev is not None and int(expected_page_rev) != self.page_rev(page_id):
+                raise ValueError(f'页面 {page_id} 已被其他操作更新（期望 rev={expected_page_rev}，当前 rev={self.page_rev(page_id)}），请先刷新再写')
+            with self.lock:
+                results = _read_json_safe(self.folder / 'results.json')
+                pages = results.get('pages') or []
+                page = next((p for p in pages if p.get('id') == page_id), None)
+                if not page:
+                    raise ValueError(f'目标试卷页不存在：{page_id}')
+                item = next((it for it in (page.get('items') or []) if it.get('id') == item_id), None)
+                if not item:
+                    raise ValueError(f'页面 {page_id} 中不存在题块：{item_id}')
+                clean_label = label if label in LABELS + ('',) else '已订正'
+                state = self.read()
+                now_iso = datetime.now().isoformat(timespec='seconds')
+                state['revision'] += 1
+                rec = {
+                    'label': clean_label,
+                    'correction': str(text or '')[:20000],
+                    'updated': now_iso,
+                    'revision': state['revision'],
+                    'reviewer': str(reviewer or 'AI助手')[:32],
+                }
+                if answer is not None:
+                    rec['answer'] = str(answer).strip()[:32]
+                state['items'][item_id] = rec
+                save_json(self.path, state)
+                with (self.folder / 'feedback_history.jsonl').open('a', encoding='utf-8') as fh:
+                    fh.write(json.dumps({'id': item_id, **rec}, ensure_ascii=False) + '\n')
+                new_rev = self.bump_page_rev(page_id)
+                return {
+                    'ok': True,
+                    'page_id': page_id,
+                    'item_id': item_id,
+                    'page_rev': new_rev,
+                    'record': rec,
+                    'feedback': state,
+                }
+
+    def delete_item_or_box(
+        self,
+        *,
+        page_id: str,
+        item_id: str = '',
+        box_index: int | None = None,
+        reviewer: str = 'AI助手',
+        expected_page_rev: int | None = None,
+    ) -> dict:
+        """页级加锁删除指定题块/标框并同步持久化到 results.json 与 pages/<pid>.json。"""
+        with self.page_lock(page_id):
+            if expected_page_rev is not None and int(expected_page_rev) != self.page_rev(page_id):
+                raise ValueError(f'页面 {page_id} 已被其他操作更新（期望 rev={expected_page_rev}，当前 rev={self.page_rev(page_id)}）')
+            with self.lock:
+                results_path = self.folder / 'results.json'
+                results = _read_json_safe(results_path)
+                pages = results.get('pages') or []
+                page = next((p for p in pages if p.get('id') == page_id), None)
+                if not page:
+                    raise ValueError(f'目标试卷页不存在：{page_id}')
+                items = list(page.get('items') or [])
+                boxes = list(page.get('boxes') or [])
+                deleted_ids = []
+                if item_id:
+                    target_it = next((it for it in items if it.get('id') == item_id), None)
+                    if not target_it:
+                        raise ValueError(f'页面 {page_id} 中不存在题块：{item_id}')
+                    items = [it for it in items if it.get('id') != item_id]
+                    boxes = [b for b in boxes if b.get('item_id') != item_id and self._box_iou(b.get('box') or [0, 0, 0, 0], target_it.get('box') or [0, 0, 0, 0]) < 0.85]
+                    deleted_ids.append(item_id)
+                elif box_index is not None:
+                    bi = int(box_index)
+                    if not (0 <= bi < len(boxes)):
+                        raise ValueError(f'标框索引越界：{bi}（共 {len(boxes)} 个）')
+                    removed = boxes.pop(bi)
+                    rid = str(removed.get('item_id') or '')
+                    if rid:
+                        items = [it for it in items if it.get('id') != rid]
+                        deleted_ids.append(rid)
+                else:
+                    raise ValueError('请提供 item_id 或 box_index')
+                page['items'] = items
+                page['boxes'] = boxes
+                self._recompute_results_stats(results)
+                save_json(results_path, results)
+                page_file = self.folder / 'pages' / (page_id + '.json')
+                if page_file.is_file():
+                    try:
+                        pf = _read_json_safe(page_file, retries=4, delay=0.03)
+                        pf['items'] = items
+                        pf['boxes'] = boxes
+                        save_json(page_file, pf)
+                    except Exception:
+                        pass
+                new_rev = self.bump_page_rev(page_id)
+                mtime = results_path.stat().st_mtime if results_path.is_file() else 0.0
+                return {
+                    'ok': True,
+                    'page_id': page_id,
+                    'deleted_item_ids': deleted_ids,
+                    'remaining_items': len(items),
+                    'remaining_boxes': len(boxes),
+                    'page_rev': new_rev,
+                    'results_mtime': mtime,
+                    'reviewer': reviewer,
+                }
 
     def read(self):
         if not self.path.exists():
@@ -752,11 +958,62 @@ class ReviewStore:
         }
 
 
-def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_data=True, client_factory=None):
+def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_data=True, client_factory=None, hub_port=8888):
     store = ReviewStore(folder)
     claims = ClaimManager(ttl_seconds=lock_ttl)
+    bus = ReviewEventBus()
+    ui_states: dict[str, dict] = {}
+    ui_lock = threading.Lock()
+    stop_event = threading.Event()
     token = secrets.token_urlsafe(24)
     template_path = Path(__file__).resolve().parent / 'index.html'
+
+    def _is_loopback_cli(handler: BaseHTTPRequestHandler) -> bool:
+        ip = str((handler.client_address or ('', 0))[0])
+        if ip not in ('127.0.0.1', '::1', 'localhost'):
+            return False
+        if handler.headers.get('Origin'):
+            return False
+        return handler.headers.get('X-AutoGrade-Internal') == 'cli'
+
+    def _proxy_hub(handler: BaseHTTPRequestHandler, method: str, target_path: str, raw_body: bytes | None = None):
+        """将 8904 页内 AI 帮手 / Agent 探测 / 离屏截图请求同源代理到 8888 工作台，零 CORS 冲突且共享多会话管理器。"""
+        url = f'http://127.0.0.1:{int(hub_port)}{target_path}'
+        headers = {}
+        if raw_body is not None:
+            headers['Content-Type'] = 'application/json'
+        req = urllib.request.Request(url, data=raw_body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                data = resp.read()
+                ctype = resp.headers.get('Content-Type') or 'application/json; charset=utf-8'
+                return handler.reply(data, code=resp.status, content_type=ctype)
+        except urllib.error.HTTPError as exc:
+            try:
+                data = exc.read()
+            except Exception:
+                data = json.dumps({'ok': False, 'error': f'工作台返回 HTTP {exc.code}'}, ensure_ascii=False).encode()
+            return handler.reply(data, code=exc.code)
+        except Exception as exc:
+            return handler.reply({
+                'ok': False,
+                'error': f'无法连接工作台控制中心 (127.0.0.1:{hub_port})，请先启动工作台后再使用 AI 帮手：{exc}',
+            }, 503)
+
+    def _latest_ui_state(client_id: str = '') -> dict:
+        with ui_lock:
+            now = time.time()
+            # 清理 10 分钟未活跃的客户端 UI 快照
+            stale = [k for k, v in ui_states.items() if now - float(v.get('_ts') or 0) > 600]
+            for k in stale:
+                ui_states.pop(k, None)
+            if client_id and client_id in ui_states:
+                return dict(ui_states[client_id])
+            if not ui_states:
+                return {}
+            latest = max(ui_states.values(), key=lambda x: float(x.get('_ts') or 0))
+            return dict(latest)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -772,10 +1029,109 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
             self.wfile.write(body)
 
         def do_GET(self):
-            name = unquote(urlparse(self.path).path)
+            parsed = urlparse(self.path)
+            name = unquote(parsed.path)
+            qs = urllib.parse.parse_qs(parsed.query)
             if name == '/':
                 template = template_path.read_text(encoding='utf-8')
                 return self.reply(template.replace('__TOKEN__', token).encode(), content_type='text/html; charset=utf-8')
+            if name == '/api/events':
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_header('Connection', 'keep-alive')
+                self.end_headers()
+                q = bus.subscribe()
+                try:
+                    self.wfile.write(b': connected\n\n')
+                    self.wfile.flush()
+                    while not stop_event.is_set():
+                        try:
+                            ev = q.get(timeout=5)
+                            chunk = ('data: ' + json.dumps(ev, ensure_ascii=False) + '\n\n').encode('utf-8')
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                        except queue.Empty:
+                            self.wfile.write(b': keepalive\n\n')
+                            self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
+                finally:
+                    bus.unsubscribe(q)
+                return
+            if name == '/api/ui-state':
+                cid = str((qs.get('client_id') or [''])[0] or '').strip()
+                with ui_lock:
+                    all_clients = {k: {kk: vv for kk, vv in v.items() if kk != '_ts'} for k, v in ui_states.items()}
+                cur = _latest_ui_state(cid)
+                cur.pop('_ts', None)
+                return self.reply({'ok': True, 'active': cur, 'clients': all_clients, 'page_revs': store.page_revs_snapshot()})
+            if name == '/api/review/status':
+                try:
+                    results = _read_json_safe(store.folder / 'results.json')
+                    fb = store.read()
+                    fb_items = fb.get('items') or {}
+                    pages = results.get('pages') or []
+                    reviewed = sum(1 for p in pages if fb_items.get(p.get('id'), {}).get('label'))
+                    issue_items = []
+                    for p in pages:
+                        for it in (p.get('items') or []):
+                            if (it.get('issues') or []) or it.get('status') in ('调用失败', '结构异常', '待复核'):
+                                issue_items.append({
+                                    'page_id': p.get('id'),
+                                    'item_id': it.get('id'),
+                                    'kind': it.get('kind'),
+                                    'number': it.get('number'),
+                                    'status': it.get('status'),
+                                    'issues': it.get('issues') or [],
+                                })
+                    cur_ui = _latest_ui_state()
+                    cur_ui.pop('_ts', None)
+                    return self.reply({
+                        'ok': True,
+                        'folder': str(store.folder),
+                        'pages_total': len(pages),
+                        'pages_reviewed': reviewed,
+                        'issue_count': len(issue_items),
+                        'issue_items': issue_items[:60],
+                        'stats': results.get('stats') or {},
+                        'locks': claims.snapshot(),
+                        'ui_state': cur_ui,
+                        'page_revs': store.page_revs_snapshot(),
+                    })
+                except (OSError, ValueError) as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 409)
+            if name.startswith('/api/review/page/'):
+                pid = name[len('/api/review/page/'):].strip('/')
+                try:
+                    return self.reply(store.get_page_detail(pid))
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 404)
+            if name == '/api/hub/events':
+                # SSE 代理：把 8888 的 AI 会话实时事件转发给 8904 抽屉
+                url = f'http://127.0.0.1:{int(hub_port)}/api/events'
+                try:
+                    req = urllib.request.Request(url, method='GET')
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                        self.send_header('Cache-Control', 'no-cache')
+                        self.send_header('Connection', 'keep-alive')
+                        self.end_headers()
+                        while not stop_event.is_set():
+                            line = resp.readline()
+                            if not line:
+                                break
+                            self.wfile.write(line)
+                            self.wfile.flush()
+                except Exception:
+                    pass
+                return
+            if name.startswith('/api/hub/'):
+                target_path = '/api/' + name[len('/api/hub/'):]
+                if parsed.query:
+                    target_path += '?' + parsed.query
+                return _proxy_hub(self, 'GET', target_path)
             if name == '/api/state':
                 try:
                     results_path = store.folder/'results.json'
@@ -789,6 +1145,7 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                         'feedback': store.read(),
                         'locks': claims.snapshot(),
                         'results_mtime': mtime,
+                        'page_revs': store.page_revs_snapshot(),
                     })
                 except (OSError, ValueError) as exc:
                     return self.reply({'error': str(exc)}, 409)
@@ -816,6 +1173,7 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                         'feedback': store.read(),
                         'locks': claims.snapshot(),
                         'results_mtime': mtime,
+                        'page_revs': store.page_revs_snapshot(),
                         **res_meta,
                     })
                 except (OSError, ValueError) as exc:
@@ -828,21 +1186,139 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
             self.reply({'error': '接口不存在'}, 404)
 
         def do_POST(self):
-            path = unquote(urlparse(self.path).path)
+            parsed = urlparse(self.path)
+            path = unquote(parsed.path)
             origin = self.headers.get('Origin')
             if origin and origin != 'http://' + self.headers.get('Host', ''):
                 return self.reply({'error': '禁止跨站修改'}, 403)
-            # release 允许 sendBeacon 携带 body 内 token
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= 2000000:
                     raise ValueError('请求过长或为空')
-                value = json.loads(self.rfile.read(size))
+                raw_bytes = self.rfile.read(size)
+                value = json.loads(raw_bytes)
             except (ValueError, KeyError, TypeError) as exc:
                 return self.reply({'error': str(exc)}, 400)
+
             req_token = self.headers.get('X-Review-Token') or (value.get('token') if isinstance(value, dict) else None)
-            if req_token != token:
+            is_cli = _is_loopback_cli(self)
+            if req_token != token and not is_cli:
                 return self.reply({'error': '请求无效'}, 403)
+
+            if path.startswith('/api/hub/'):
+                target_path = '/api/' + path[len('/api/hub/'):]
+                if parsed.query:
+                    target_path += '?' + parsed.query
+                return _proxy_hub(self, 'POST', target_path, raw_bytes)
+
+            if path == '/api/ui-state':
+                cid = str(value.get('client_id') or 'default').strip()[:64] or 'default'
+                snap = {
+                    'client_id': cid,
+                    'page_id': str(value.get('page_id') or '')[:64],
+                    'page_name': str(value.get('page_name') or '')[:120],
+                    'mode': str(value.get('mode') or 'view')[:24],
+                    'selected_item_id': str(value.get('selected_item_id') or '')[:80],
+                    'selected_box_idx': int(value.get('selected_box_idx') if value.get('selected_box_idx') is not None else -1),
+                    'zoom': float(value.get('zoom') or 1.0),
+                    'fill_display_mode': str(value.get('fill_display_mode') or 'hover')[:24],
+                    'show_overlay': bool(value.get('show_overlay', True)),
+                    'show_conf': bool(value.get('show_conf', False)),
+                    'reviewer': str(value.get('reviewer') or '')[:32],
+                    'recent_errors': [str(x)[:200] for x in (value.get('recent_errors') or [])[:8]] if isinstance(value.get('recent_errors'), list) else [],
+                    '_ts': time.time(),
+                }
+                with ui_lock:
+                    ui_states[cid] = snap
+                return self.reply({'ok': True})
+
+            if path == '/api/ui/command':
+                cmd_ev = {
+                    'type': 'ui_command',
+                    'source': str(value.get('source') or ('cli' if is_cli else 'gui')),
+                    'action': str(value.get('action') or 'focus').strip()[:32],
+                    'target': str(value.get('target') or '').strip()[:160],
+                    'page_id': str(value.get('page_id') or '').strip()[:64],
+                    'item_id': str(value.get('item_id') or '').strip()[:80],
+                    'client_id': str(value.get('client_id') or '').strip()[:64],
+                    'label': str(value.get('label') or '').strip()[:120],
+                    'force_nav': bool(value.get('force_nav', False)),
+                }
+                bus.publish(cmd_ev)
+                return self.reply({'ok': True, 'dispatched': cmd_ev})
+
+            if path == '/api/review/set-text':
+                try:
+                    out = store.set_item_text(
+                        page_id=str(value.get('page_id') or '').strip(),
+                        item_id=str(value.get('item_id') or '').strip(),
+                        text=str(value.get('text') if 'text' in value else value.get('correction', '')),
+                        answer=value.get('answer'),
+                        label=str(value.get('label') or '已订正'),
+                        reviewer=str(value.get('reviewer') or 'AI助手'),
+                        expected_page_rev=value.get('expected_page_rev'),
+                    )
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'set_text',
+                        'page_id': out['page_id'],
+                        'item_id': out['item_id'],
+                        'page_rev': out['page_rev'],
+                        'message': f"AI 已更新 {out['page_id']} / {out['item_id']} 订正内容",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 409)
+
+            if path == '/api/review/set-choice':
+                try:
+                    ans = str(value.get('answer') or '').strip().upper()[:16]
+                    out = store.set_item_text(
+                        page_id=str(value.get('page_id') or '').strip(),
+                        item_id=str(value.get('item_id') or '').strip(),
+                        text=ans,
+                        answer=ans,
+                        label=str(value.get('label') or '已订正'),
+                        reviewer=str(value.get('reviewer') or 'AI助手'),
+                        expected_page_rev=value.get('expected_page_rev'),
+                    )
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'set_choice',
+                        'page_id': out['page_id'],
+                        'item_id': out['item_id'],
+                        'page_rev': out['page_rev'],
+                        'message': f"AI 已修改选择题 {out['item_id']} 为 {ans}",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 409)
+
+            if path == '/api/review/delete-box':
+                try:
+                    out = store.delete_item_or_box(
+                        page_id=str(value.get('page_id') or '').strip(),
+                        item_id=str(value.get('item_id') or '').strip(),
+                        box_index=value.get('box_index'),
+                        reviewer=str(value.get('reviewer') or 'AI助手'),
+                        expected_page_rev=value.get('expected_page_rev'),
+                    )
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'delete_box',
+                        'page_id': out['page_id'],
+                        'deleted_item_ids': out['deleted_item_ids'],
+                        'page_rev': out['page_rev'],
+                        'results_mtime': out['results_mtime'],
+                        'message': f"AI 已删除 {out['page_id']} 中的标框",
+                    })
+                    return self.reply(out)
+                except ValueError as exc:
+                    return self.reply({'ok': False, 'error': str(exc)}, 409)
+
             if path == '/api/claim':
                 client_id = str(value.get('client_id') or '').strip()
                 user = str(value.get('user') or '成员').strip() or '成员'
@@ -858,12 +1334,24 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                 return self.reply(res)
             if path == '/api/submit-page':
                 try:
-                    out = store.submit_page(value, allow_sync_data=allow_sync_data)
-                    client_id = str(value.get('client_id') or '').strip()
                     pid = str(value.get('page_id') or '').strip()
+                    with store.page_lock(pid):
+                        out = store.submit_page(value, allow_sync_data=allow_sync_data)
+                        new_rev = store.bump_page_rev(pid)
+                    client_id = str(value.get('client_id') or '').strip()
                     if client_id and pid:
                         claims.release(client_id, pid)
                     out['locks'] = claims.snapshot()
+                    out['page_rev'] = new_rev
+                    bus.publish({
+                        'type': 'data_updated',
+                        'source': 'ai' if is_cli else 'gui',
+                        'action': 'submit_page',
+                        'page_id': pid,
+                        'page_rev': new_rev,
+                        'results_mtime': out.get('results_mtime'),
+                        'message': f"已保存并确认 {pid}",
+                    })
                     return self.reply(out)
                 except (ValueError, KeyError, TypeError) as exc:
                     return self.reply({'ok': False, 'error': str(exc)}, 409)
@@ -871,7 +1359,21 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
                     return self.reply({'ok': False, 'error': '保存失败，请重试'}, 500)
             if path == '/api/recognize-box':
                 try:
-                    out = store.recognize_boxes(value, client_factory=client_factory)
+                    pid = str(value.get('page_id') or '').strip()
+                    with store.page_lock(pid):
+                        out = store.recognize_boxes(value, client_factory=client_factory)
+                        new_rev = store.bump_page_rev(pid)
+                    out['page_rev'] = new_rev
+                    if out.get('ok'):
+                        bus.publish({
+                            'type': 'data_updated',
+                            'source': 'ai' if is_cli else 'gui',
+                            'action': 'recognize_box',
+                            'page_id': pid,
+                            'page_rev': new_rev,
+                            'results_mtime': out.get('results_mtime'),
+                            'message': f"已重新识别 {pid} 中的 {len(out.get('recognized') or [])} 个框",
+                        })
                     return self.reply(out, 200 if out.get('ok') else 502)
                 except (ValueError, KeyError, TypeError) as exc:
                     return self.reply({'ok': False, 'error': str(exc)}, 400)
@@ -900,13 +1402,16 @@ def make_server(folder, port=8903, host='127.0.0.1', lock_ttl=300, allow_sync_da
             if path != '/api/feedback':
                 return self.reply({'error': '请求无效'}, 403)
             try:
-                self.reply(store.update(value))
+                out = store.update(value)
+                bus.publish({'type': 'data_updated', 'source': 'ai' if is_cli else 'gui', 'action': 'feedback', 'id': value.get('id')})
+                self.reply(out)
             except (ValueError, KeyError, TypeError) as exc:
                 self.reply({'error': str(exc)}, 409)
             except OSError:
                 self.reply({'error': '保存失败，草稿保留，请重试'}, 500)
     srv = ThreadingHTTPServer((host, port), Handler)
     srv.daemon_threads = True
+    srv._stop_event = stop_event
     return srv
 
 
@@ -914,13 +1419,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dir', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8903)
+    parser.add_argument('--hub-port', type=int, default=8888, help='主控工作台端口（用于 8904 内 AI 帮手同源代理）')
     parser.add_argument('--host', default=None, help='监听地址，默认 127.0.0.1；多人局域网协作传 --lan 或 --host 0.0.0.0')
     parser.add_argument('--lan', action='store_true', help='开启局域网监听（等价于 --host 0.0.0.0）')
     parser.add_argument('--lock-ttl', type=int, default=300, help='多人协作单页锁定超时秒数，默认 300 秒')
     args = parser.parse_args()
     prepare_math_assets(args.dir, async_download=True)
     host = resolve_host(args.host, args.lan)
-    server = make_server(args.dir, args.port, host=host, lock_ttl=args.lock_ttl)
+    server = make_server(args.dir, args.port, host=host, lock_ttl=args.lock_ttl, hub_port=args.hub_port)
     print('识别验收服务已启动', flush=True)
     print_access_urls(host, server.server_port, label='识别验收')
     server.serve_forever()

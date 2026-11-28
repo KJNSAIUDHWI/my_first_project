@@ -26,6 +26,8 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 
 import core  # noqa: E402
+import agent_providers  # noqa: E402
+import capture as capture_mod  # noqa: E402
 import train_bridge  # noqa: E402
 
 
@@ -151,6 +153,14 @@ class WorkbenchState:
         self._ai_proc: subprocess.Popen | None = None
         self._stop_event = threading.Event()
         self.last_check: dict | None = None
+        self.ui_states: dict[str, dict] = {}
+        self.ai_manager = agent_providers.AiSessionManager(
+            self.root,
+            self.batches_root,
+            publish_cb=self.bus.publish,
+            config_loader=lambda: core.load_config(self.batches_root),
+            env_builder=self._utf8_env,
+        )
         # 若本地尚无官方定价永久缓存，在后台静默抓取一次并永久保存（已有缓存时零网络开销）
         self._ensure_pricing_once_async()
 
@@ -225,11 +235,39 @@ class WorkbenchState:
         return snap
 
     def ai_job_snapshot(self) -> dict:
+        return self.ai_manager.legacy_snapshot()
+
+    def update_ui_state(self, payload: dict) -> dict:
+        cid = str(payload.get("client_id") or "default").strip()[:64] or "default"
+        snap = {
+            "client_id": cid,
+            "view": str(payload.get("view") or "overview")[:32],
+            "batch_id": str(payload.get("batch_id") or "")[:96],
+            "dialog": str(payload.get("dialog") or "")[:48],
+            "scroll_y": int(payload.get("scroll_y") or 0),
+            "arch_collapsed": bool(payload.get("arch_collapsed", False)),
+            "recent_errors": [str(x)[:200] for x in (payload.get("recent_errors") or [])[:8]] if isinstance(payload.get("recent_errors"), list) else [],
+            "_ts": time.time(),
+        }
         with self._lock:
-            snap = dict(self.ai_job)
-            snap["logs"] = list(self.ai_job.get("logs") or [])
-            snap["usage"] = dict(self.ai_job.get("usage") or {})
+            self.ui_states[cid] = snap
         return snap
+
+    def latest_ui_state(self, client_id: str = "") -> dict:
+        with self._lock:
+            now = time.time()
+            stale = [k for k, v in self.ui_states.items() if now - float(v.get("_ts") or 0) > 600]
+            for k in stale:
+                self.ui_states.pop(k, None)
+            if client_id and client_id in self.ui_states:
+                d = dict(self.ui_states[client_id])
+                d.pop("_ts", None)
+                return d
+            if not self.ui_states:
+                return {}
+            latest = dict(max(self.ui_states.values(), key=lambda x: float(x.get("_ts") or 0)))
+            latest.pop("_ts", None)
+            return latest
 
     def run_check(self, deep: bool = False) -> dict:
         self.bus.publish({"source": "gui", "step": "check", "status": "running", "message": "正在执行深度依赖导入与模型权重检查..." if deep else "正在检查运行环境与模型权重..."})
@@ -311,7 +349,14 @@ class WorkbenchState:
                 rec_dir = Path(active["recognize_dir"]).resolve()
                 if not (rec_dir / "results.json").is_file():
                     raise ValueError("当前批次尚未完成自动识别，请先点「开始自动识别」")
-                cmd = [sys.executable, str(self.root / "apps" / "review" / "server.py"), "--dir", str(rec_dir), "--port", str(port), "--lan"]
+                cmd = [
+                    sys.executable,
+                    str(self.root / "apps" / "review" / "server.py"),
+                    "--dir", str(rec_dir),
+                    "--port", str(port),
+                    "--hub-port", str(self.port),
+                    "--lan",
+                ]
                 extra = {**extra, "batch_id": active.get("batch_id", ""), "recognize_dir": str(rec_dir)}
             elif task_id == "annotate":
                 m = extra.get("m") or "m1"
@@ -1196,27 +1241,180 @@ class WorkbenchState:
         self.bus.publish({"source": "gui", "step": "train", "status": "stopped", "message": f"已停止训练任务：{run_name}"})
         return {"ok": True, "message": f"已停止训练：{run_name}"}
 
+    def _collect_frozen_context(self, surface: str, ui_state: dict | None = None) -> dict:
+        active = core.get_active_batch(self.batches_root)
+        rep = self.last_check or core.check_environment(self.root, self.batches_root, deep=False)
+        recent_errors: list[str] = []
+        if isinstance(ui_state, dict) and isinstance(ui_state.get("recent_errors"), list):
+            recent_errors.extend(str(x) for x in ui_state["recent_errors"][:5])
+        if self.pipeline_job.get("error_report"):
+            er = self.pipeline_job["error_report"]
+            recent_errors.append(f"[{er.get('module', '流水线')}] {er.get('title', '')}：{er.get('reason', '')}")
+        if active:
+            err_log = Path(active["recognize_dir"]) / "logs" / "errors.log"
+            if err_log.is_file():
+                try:
+                    tail = [ln.strip() for ln in err_log.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()][-5:]
+                    recent_errors.extend(tail)
+                except OSError:
+                    pass
+        chk_sum = "全部就绪" if rep.get("ok") else f"发现 {rep.get('error_count', 0)} 项错误 / {rep.get('warning_count', 0)} 项提醒"
+        rec_status = ""
+        if active:
+            rs = self._read_run_stats(Path(active["recognize_dir"]))
+            if rs:
+                rec_status = str(rs.get("status") or "")
+        return {
+            "surface": surface,
+            "batch_id": active.get("batch_id", "") if active else "",
+            "rec_status": rec_status,
+            "check_summary": chk_sum,
+            "ui_state": ui_state or (self.latest_ui_state() if surface == "workbench" else {}),
+            "recent_errors": recent_errors[:8],
+        }
+
+    def perform_capture(self, payload: dict) -> dict:
+        """统一离屏无遮挡截图入口（支持 8888 控制台无头渲染 & 8904 试卷高清合成/无头 UI 渲染）。"""
+        target = str(payload.get("target") or "workbench").strip().lower()
+        mode = str(payload.get("mode") or "auto").strip().lower()
+        page_id = str(payload.get("page_id") or "").strip()
+        item_id = str(payload.get("item_id") or "").strip()
+        selector = str(payload.get("selector") or "").strip()
+        crop = payload.get("crop")
+        with_elements = bool(payload.get("with_elements", True))
+        som = bool(payload.get("som", False))
+        mirror_client = str(payload.get("mirror_client") or "").strip()
+        width = int(payload.get("width") or 1440)
+        height = int(payload.get("height") or 900)
+
+        if target == "review":
+            # 自动模式：若指定了 item_id / page_id 且未指定 CSS selector，默认优先走高清原图合成（快且字迹超清晰）
+            use_canvas = (mode == "canvas") or (mode == "auto" and not selector and not som)
+            if use_canvas:
+                active = core.get_active_batch(self.batches_root)
+                if not active:
+                    return {"ok": False, "error": "当前没有活跃批次，无法截取审阅试卷图"}
+                return capture_mod.capture_review_canvas(
+                    Path(active["recognize_dir"]),
+                    self.batches_root,
+                    page_id=page_id,
+                    item_id=item_id,
+                    crop=crop,
+                    with_elements=with_elements,
+                )
+            review_port = int(payload.get("review_port") or 8904)
+            url = f"http://127.0.0.1:{review_port}/"
+            res = capture_mod.capture_headless_ui(
+                url,
+                self.batches_root,
+                target="review",
+                mirror_client=mirror_client,
+                selector=selector,
+                crop=crop,
+                width=width,
+                height=height,
+                with_elements=with_elements,
+                som=som,
+            )
+            if not res.get("ok"):
+                # 兜底退回高清原图合成
+                active = core.get_active_batch(self.batches_root)
+                if active:
+                    fb = capture_mod.capture_review_canvas(
+                        Path(active["recognize_dir"]),
+                        self.batches_root,
+                        page_id=page_id,
+                        item_id=item_id,
+                        crop=crop,
+                        with_elements=with_elements,
+                    )
+                    if fb.get("ok"):
+                        fb["fallback_reason"] = res.get("error", "")
+                        return fb
+            return res
+
+        url = f"http://127.0.0.1:{self.port}/"
+        return capture_mod.capture_headless_ui(
+            url,
+            self.batches_root,
+            target="workbench",
+            mirror_client=mirror_client,
+            selector=selector,
+            crop=crop,
+            width=width,
+            height=height,
+            with_elements=with_elements,
+            som=som,
+        )
+
     def start_ai_helper(self, payload: dict) -> dict:
-        """通过 ZCode headless（或降级 opencode/剪贴板）执行只读诊断或受控 AI 辅助。"""
+        """统一多 Agent、多会话、全权同构 Computer-Use 调度入口（8888 与 8904 共用）。"""
         rl = _load_run_log_mod(self.root)
         cfg = core.load_config(self.batches_root)
         pref = str(payload.get("provider") or cfg.get("ai_helper_provider") or "auto").strip().lower()
-        mode = str(payload.get("mode") or "plan").strip().lower()
-        if mode not in ("plan", "guarded"):
-            mode = "plan"
+        default_mode = str(cfg.get("ai_default_mode") or "yolo").strip().lower()
+        mode = str(payload.get("mode") or default_mode or "yolo").strip().lower()
+        if mode not in ("yolo", "guarded", "plan"):
+            mode = "yolo"
+        surface = "review" if str(payload.get("surface") or "").strip().lower() == "review" else "workbench"
+        chat_id = str(payload.get("chat_id") or "").strip()
         session_id = str(payload.get("session_id") or "").strip()
         raw_prompt = str(payload.get("prompt") or "").strip()
         note = str(payload.get("note") or "").strip()
-        if not raw_prompt:
-            rep = self.last_check or core.check_environment(self.root, self.batches_root)
-            raw_prompt = core.build_agent_prompt(rep, root=self.root, extra_note=note)
-        prompt = rl.mask_secret(raw_prompt)
-        attach = payload.get("attach") if isinstance(payload.get("attach"), list) else []
+        user_msg = note or raw_prompt
+        ui_state = payload.get("ui_state") if isinstance(payload.get("ui_state"), dict) else None
+        attach = [str(x) for x in (payload.get("attach") or []) if isinstance(x, str) and x.strip()]
+        attach_elements_path = ""
 
-        # 优先使用 ZCode（除非用户指定 opencode）
-        zc_spec = core.build_zcode_command(prompt, self.root, mode=mode, session_id=session_id, attach=attach, cfg=cfg) if pref != "opencode" else {"ok": False}
-        if not zc_spec.get("ok"):
-            fallback = core.launch_opencode(self.root, prompt, batches_root=self.batches_root)
+        # 若用户勾选了「附带当前画面」，在发送瞬间离屏截取实时画面并自动切换精简提示词
+        want_shot = bool(payload.get("attach_screenshot", cfg.get("ai_default_screenshot", False)))
+        if want_shot and not attach:
+            cap_req = {
+                "target": surface,
+                "mode": "ui" if surface == "workbench" else str(payload.get("screenshot_mode") or "auto"),
+                "page_id": str((ui_state or {}).get("page_id") or ""),
+                "item_id": str((ui_state or {}).get("selected_item_id") or ""),
+                "mirror_client": str((ui_state or {}).get("client_id") or ""),
+                "with_elements": True,
+            }
+            cap_res = self.perform_capture(cap_req)
+            if cap_res.get("ok") and cap_res.get("path"):
+                attach.append(cap_res["path"])
+                attach_elements_path = str(cap_res.get("elements_path") or "")
+
+        frozen_ctx = self._collect_frozen_context(surface, ui_state=ui_state)
+        hub_url = f"http://127.0.0.1:{self.port}"
+        review_port = int(payload.get("review_port") or 8904)
+        review_url = f"http://127.0.0.1:{review_port}"
+
+        # 注意：用户消息本身不提前脱敏，允许用户把要配置的 API Key/密码直接交给本地 Agent 导入；
+        # 系统快照与所有落盘日志/SSE/响应均会严格脱敏！
+        full_prompt = raw_prompt if raw_prompt else agent_providers.build_computer_use_prompt(
+            user_message=user_msg,
+            surface=surface,
+            root=self.root,
+            hub_url=hub_url,
+            review_url=review_url,
+            context_snapshot=frozen_ctx,
+            attached_images=attach,
+            attached_elements_path=attach_elements_path,
+            mode=mode,
+        )
+
+        res = self.ai_manager.submit_turn(
+            chat_id=chat_id,
+            surface=surface,
+            provider=pref,
+            mode=mode,
+            user_message=user_msg,
+            full_prompt=full_prompt,
+            session_id=session_id,
+            attach=attach,
+        )
+        if not res.get("ok") and not res.get("headless"):
+            # 无任何可用本地 CLI Agent 时，回退脱敏剪贴板
+            safe_prompt = agent_providers.scrub_text(full_prompt, agent_providers.extract_inline_secrets(user_msg))
+            fallback = core.launch_opencode(self.root, safe_prompt, batches_root=self.batches_root)
             rl.append_cli_log(
                 self.batches_root,
                 command="ai.fallback",
@@ -1229,174 +1427,17 @@ class WorkbenchState:
             self.bus.publish({"source": "ai", "step": "agent", "status": "done", "message": fallback.get("message") or "诊断提示词已复制"})
             return {**fallback, "provider": "opencode" if fallback.get("launched") else "clipboard", "headless": False}
 
-        with self._lock:
-            if self.ai_job.get("running"):
-                return {"ok": False, "error": "已有 AI 助手诊断任务正在运行，请等待完成或先点击停止"}
-            self.ai_job = {
-                "running": True,
-                "provider": "zcode",
-                "mode": mode,
-                "status": "running",
-                "session_id": session_id,
-                "response": "",
-                "usage": {},
-                "logs": [f"[{core.now_str()}] 启动 ZCode 无头助手（模式：{mode}，目录：{self.root}）..."],
-                "error": "",
-                "started_at": core.now_str(),
-                "finished_at": "",
-            }
+        return {**res, "attached_screenshot": attach[0] if attach else ""}
 
-        def worker():
-            t0 = time.monotonic()
-            cmd = zc_spec["cmd"]
-            env = {**self._utf8_env(), **(zc_spec.get("env_patch") or {})}
-            creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-            self.bus.publish({"source": "ai", "step": "ai", "status": "running", "message": f"ZCode AI 助手诊断中（模式：{mode}）..."})
-            out_lines: list[str] = []
-            last_json: dict | None = None
-            rc = -1
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    cwd=zc_spec["cwd"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=env,
-                    creationflags=creation,
-                )
-                with self._lock:
-                    self._ai_proc = proc
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    text = rl.mask_secret(line.rstrip())
-                    if not text:
-                        continue
-                    out_lines.append(text)
-                    parsed = None
-                    if text.startswith("{") and text.endswith("}"):
-                        try:
-                            parsed = json.loads(text)
-                        except ValueError:
-                            parsed = None
-                    with self._lock:
-                        if isinstance(parsed, dict):
-                            last_json = parsed
-                            if parsed.get("sessionId"):
-                                self.ai_job["session_id"] = str(parsed["sessionId"])
-                            if isinstance(parsed.get("usage"), dict):
-                                self.ai_job["usage"] = parsed["usage"]
-                            if isinstance(parsed.get("response"), str):
-                                self.ai_job["response"] = rl.mask_secret(parsed["response"])
-                            elif isinstance(parsed.get("delta"), str):
-                                self.ai_job["response"] += rl.mask_secret(parsed["delta"])
-                        self.ai_job["logs"].append(text[:300])
-                        if len(self.ai_job["logs"]) > 200:
-                            self.ai_job["logs"] = self.ai_job["logs"][-200:]
-                    self.bus.publish({
-                        "source": "ai",
-                        "step": "ai",
-                        "status": "running",
-                        "message": "ZCode AI 助手输出更新",
-                        "ai_snapshot": self.ai_job_snapshot(),
-                    })
-                rc = proc.wait()
-                # 若整个输出是多行 JSON，尝试整体解析
-                if last_json is None and out_lines:
-                    joined = "\n".join(out_lines).strip()
-                    if joined.startswith("{") and joined.endswith("}"):
-                        try:
-                            obj = json.loads(joined)
-                            if isinstance(obj, dict):
-                                last_json = obj
-                        except ValueError:
-                            pass
-                with self._lock:
-                    was_stopped = self.ai_job.get("status") == "stopped"
-                    self._ai_proc = None
-                    if isinstance(last_json, dict):
-                        if last_json.get("sessionId"):
-                            self.ai_job["session_id"] = str(last_json["sessionId"])
-                        if isinstance(last_json.get("usage"), dict):
-                            self.ai_job["usage"] = last_json["usage"]
-                        if isinstance(last_json.get("response"), str):
-                            self.ai_job["response"] = rl.mask_secret(last_json["response"])
-                    if not self.ai_job["response"] and out_lines:
-                        self.ai_job["response"] = "\n".join(out_lines[-30:])
-                    self.ai_job["running"] = False
-                    self.ai_job["finished_at"] = core.now_str()
-                    if was_stopped:
-                        self.ai_job["status"] = "stopped"
-                    elif rc == 0:
-                        self.ai_job["status"] = "done"
-                    else:
-                        self.ai_job["status"] = "error"
-                        self.ai_job["error"] = f"ZCode 退出码 {rc}"
-                final_snap = self.ai_job_snapshot()
-                dur_ms = round((time.monotonic() - t0) * 1000, 1)
-                rl.append_cli_log(
-                    self.batches_root,
-                    command="ai.zcode",
-                    argv=[cmd[0], cmd[1] if len(cmd) > 1 else "", "--mode", mode],
-                    source="ai",
-                    actor="zcode",
-                    exit_code=rc,
-                    duration_ms=dur_ms,
-                    ok=(rc == 0),
-                    session_id=final_snap.get("session_id") or "",
-                    message=f"ZCode ({mode}) 完成" if rc == 0 else f"ZCode 失败 (rc={rc})",
-                    detail={"usage": final_snap.get("usage") or {}},
-                )
-                self.bus.publish({
-                    "source": "ai",
-                    "step": "ai",
-                    "status": final_snap["status"],
-                    "message": "ZCode AI 诊断完成" if rc == 0 else f"ZCode AI 助手结束（状态：{final_snap['status']}）",
-                    "ai_snapshot": final_snap,
-                })
-            except Exception as exc:
-                err_s = rl.mask_secret(str(exc))
-                with self._lock:
-                    self._ai_proc = None
-                    self.ai_job["running"] = False
-                    self.ai_job["status"] = "error"
-                    self.ai_job["error"] = err_s
-                    self.ai_job["finished_at"] = core.now_str()
-                self.bus.publish({"source": "ai", "step": "ai", "status": "error", "message": f"ZCode 启动失败：{err_s}"})
-
-        threading.Thread(target=worker, daemon=True, name="zcode-ai").start()
-        return {"ok": True, "provider": "zcode", "mode": mode, "headless": True, "message": f"已启动 ZCode AI 助手（{mode} 模式）"}
-
-    def stop_ai_helper(self) -> dict:
-        with self._lock:
-            proc = self._ai_proc
-            if not self.ai_job.get("running"):
-                return {"ok": True, "message": "当前没有运行中的 AI 助手任务"}
-            self.ai_job["status"] = "stopped"
-        if proc and proc.poll() is None:
-            try:
-                if os.name == "nt":
-                    subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=5)
-                else:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-        self.bus.publish({"source": "ai", "step": "ai", "status": "stopped", "message": "已停止 AI 助手任务"})
-        return {"ok": True, "message": "已停止 AI 助手任务"}
+    def stop_ai_helper(self, chat_id: str = "") -> dict:
+        return self.ai_manager.stop_session(chat_id)
 
     def shutdown_all(self) -> None:
         self._stop_event.set()
-        if self.ai_job.get("running"):
-            try:
-                self.stop_ai_helper()
-            except Exception:
-                pass
+        try:
+            self.ai_manager.stop_all()
+        except Exception:
+            pass
         if self.pipeline_job.get("running"):
             try:
                 self.stop_pipeline()
@@ -1571,7 +1612,71 @@ def make_handler(state: WorkbenchState):
             if path == "/api/ai/status":
                 if not self._require_host():
                     return
-                self._send_json(200, {"ok": True, "ai_job": state.ai_job_snapshot(), "zcode": core.find_zcode(core.load_config(state.batches_root))})
+                qs = urllib.parse.parse_qs(parsed.query)
+                cid = str((qs.get("chat_id") or [""])[0] or "").strip()
+                cfg_now = core.load_config(state.batches_root)
+                ai_snap = state.ai_manager.snapshot_session(cid) if cid else state.ai_job_snapshot()
+                self._send_json(200, {
+                    "ok": True,
+                    "ai_job": ai_snap,
+                    "sessions": state.ai_manager.list_sessions(),
+                    "zcode": core.find_zcode(cfg_now),
+                    "agents": agent_providers.detect_all_agents(cfg_now, deep=False),
+                })
+                return
+
+            if path == "/api/ai/sessions":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                surf = str((qs.get("surface") or [""])[0] or "").strip() or None
+                self._send_json(200, {"ok": True, "sessions": state.ai_manager.list_sessions(surface=surf)})
+                return
+
+            if path == "/api/agents":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                deep = qs.get("deep", ["0"])[0] in ("1", "true", "yes")
+                probe_v = qs.get("probe_version", ["0"])[0] in ("1", "true", "yes")
+                cfg_now = core.load_config(state.batches_root)
+                self._send_json(200, agent_providers.detect_all_agents(cfg_now, deep=deep, probe_version=probe_v))
+                return
+
+            if path == "/api/ui-state":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                cid = str((qs.get("client_id") or [""])[0] or "").strip()
+                self._send_json(200, {"ok": True, "active": state.latest_ui_state(cid)})
+                return
+
+            if path == "/api/config/export":
+                if not self._require_host():
+                    return
+                qs = urllib.parse.parse_qs(parsed.query)
+                inc_sec = qs.get("include_secrets", ["0"])[0] in ("1", "true", "yes")
+                cfg_now = core.load_config(state.batches_root)
+                vlm_now = core.get_vlm_settings(state.root)
+                vlm_export = {
+                    "provider": vlm_now.get("provider", "doubao"),
+                    "base_url": vlm_now.get("base_url", ""),
+                    "model": vlm_now.get("model", ""),
+                }
+                if inc_sec:
+                    raw_key = core._read_env_key(state.root, "VLM_API_KEY") or core._read_env_key(state.root, "ARK_API_KEY")
+                    if raw_key:
+                        vlm_export["api_key"] = raw_key
+                else:
+                    vlm_export["api_key_masked"] = vlm_now.get("api_key_masked", "")
+                self._send_json(200, {
+                    "ok": True,
+                    "schema_version": 1,
+                    "exported_at": core.now_str(),
+                    "include_secrets": inc_sec,
+                    "workbench": cfg_now,
+                    "vlm": vlm_export,
+                })
                 return
 
             if path == "/api/machine":
@@ -1678,7 +1783,9 @@ def make_handler(state: WorkbenchState):
                     "recognition_summary": rec_summary,
                     "benchmark_job": state.benchmark_job_snapshot() if self._is_host() else None,
                     "ai_job": state.ai_job_snapshot() if self._is_host() else None,
+                    "ai_sessions": state.ai_manager.list_sessions() if self._is_host() else None,
                     "zcode": core.find_zcode(core.load_config(state.batches_root)) if self._is_host() else None,
+                    "agents": agent_providers.detect_all_agents(core.load_config(state.batches_root), deep=False) if self._is_host() else None,
                     "pipeline_lease": core.read_pipeline_lease(state.batches_root) if self._is_host() else None,
                     "infer_settings": core.get_infer_settings(state.batches_root) if self._is_host() else {},
                     "hardware": diag_mod.probe_compute_hardware() if self._is_host() else {},
@@ -1793,9 +1900,23 @@ def make_handler(state: WorkbenchState):
                     patch["zcode_exe"] = str(body["zcode_exe"] or "").strip()
                 if "zcode_cli" in body:
                     patch["zcode_cli"] = str(body["zcode_cli"] or "").strip()
+                if "agent_paths" in body and isinstance(body["agent_paths"], dict):
+                    existing_ap = dict(core.load_config(state.batches_root).get("agent_paths") or {})
+                    for k, v in body["agent_paths"].items():
+                        if k in agent_providers.PROVIDER_META:
+                            existing_ap[k] = str(v or "").strip()
+                    patch["agent_paths"] = existing_ap
+                if "agent_custom_cmd" in body:
+                    patch["agent_custom_cmd"] = str(body["agent_custom_cmd"] or "").strip()
                 if "ai_helper_provider" in body:
                     prov = str(body["ai_helper_provider"] or "auto").strip().lower()
-                    patch["ai_helper_provider"] = prov if prov in ("auto", "zcode", "opencode") else "auto"
+                    allowed_prov = ("auto",) + agent_providers.PROVIDER_ORDER
+                    patch["ai_helper_provider"] = prov if prov in allowed_prov else "auto"
+                if "ai_default_mode" in body:
+                    dm = str(body["ai_default_mode"] or "yolo").strip().lower()
+                    patch["ai_default_mode"] = dm if dm in ("yolo", "guarded", "plan") else "yolo"
+                if "ai_default_screenshot" in body:
+                    patch["ai_default_screenshot"] = bool(body["ai_default_screenshot"])
                 if "infer_device" in body:
                     dev = str(body["infer_device"] or "auto").strip()
                     patch["infer_device"] = dev if dev in ("auto", "cpu", "cuda:0", "cuda") else "auto"
@@ -1809,10 +1930,72 @@ def make_handler(state: WorkbenchState):
                     patch["last_benchmark"] = body["last_benchmark"]
                 cfg = core.save_config(patch, state.batches_root)
                 state.last_check = core.check_environment(state.root, state.batches_root, deep=False)
+                state.bus.publish({"source": str(body.get("source") or "gui"), "step": "check", "status": "done", "message": "工作台配置已更新"})
                 self._send_json(200, {
                     "ok": True,
                     "config": cfg,
+                    "agents": agent_providers.detect_all_agents(cfg, deep=False),
                     "infer_settings": core.get_infer_settings(state.batches_root),
+                })
+                return
+
+            if path == "/api/config/import":
+                # 一键导入整包配置（工作台参数 + Agent 路径 + VLM 密钥/模型 + 可选自定义单价），自动脱敏返回
+                applied: list[str] = []
+                wb_part = body.get("workbench") if isinstance(body.get("workbench"), dict) else {}
+                if wb_part:
+                    allowed_keys = {
+                        "opencode_path", "zcode_exe", "zcode_cli", "agent_paths", "agent_custom_cmd",
+                        "ai_helper_provider", "ai_default_mode", "ai_default_screenshot",
+                        "infer_device", "yolo_batch", "cpu_workers", "api_concurrency",
+                    }
+                    clean_wb = {k: wb_part[k] for k in wb_part if k in allowed_keys}
+                    if clean_wb:
+                        core.save_config(clean_wb, state.batches_root)
+                        applied.append(f"工作台配置({len(clean_wb)}项)")
+                vlm_part = body.get("vlm") if isinstance(body.get("vlm"), dict) else {}
+                vlm_res = None
+                if vlm_part and any(str(vlm_part.get(k) or "").strip() for k in ("provider", "base_url", "api_key", "model")):
+                    vlm_res = core.save_vlm_settings(
+                        provider=str(vlm_part.get("provider") or "doubao"),
+                        base_url=str(vlm_part.get("base_url") or ""),
+                        api_key=str(vlm_part.get("api_key") or ""),
+                        model=str(vlm_part.get("model") or ""),
+                        root=state.root,
+                    )
+                    if not vlm_res.get("ok"):
+                        self._send_json(400, {"ok": False, "error": vlm_res.get("error") or "导入 VLM 密钥失败"})
+                        return
+                    applied.append("大模型 API 配置与密钥")
+                env_part = body.get("env") if isinstance(body.get("env"), dict) else {}
+                if env_part:
+                    env_res = core.save_env_keys({str(k): str(v) for k, v in env_part.items() if str(v or "").strip()}, root=state.root)
+                    if not env_res.get("ok"):
+                        self._send_json(400, env_res)
+                        return
+                    applied.append(f".env 键值({len(env_part)}项)")
+                pricing_part = body.get("pricing_overrides") if isinstance(body.get("pricing_overrides"), list) else []
+                if pricing_part:
+                    pricing_mod = _load_pricing_mod(state.root)
+                    for pr in pricing_part:
+                        if isinstance(pr, dict) and pr.get("model"):
+                            pricing_mod.save_custom_price_override(
+                                model_id=str(pr["model"]),
+                                input_per_m=float(pr["input_per_m"]),
+                                output_per_m=float(pr["output_per_m"]),
+                                cache_hit_per_m=(float(pr["cache_hit_per_m"]) if pr.get("cache_hit_per_m") not in (None, "") else None),
+                                root=state.root,
+                            )
+                    applied.append(f"自定义模型单价({len(pricing_part)}项)")
+                state.last_check = core.check_environment(state.root, state.batches_root, deep=False)
+                msg = "配置导入完成：" + ("、".join(applied) if applied else "无变更")
+                state.bus.publish({"source": str(body.get("source") or "ai"), "step": "check", "status": "done", "message": msg})
+                self._send_json(200, {
+                    "ok": True,
+                    "applied": applied,
+                    "message": msg,
+                    "vlm": core.get_vlm_settings(state.root),
+                    "config": core.load_config(state.batches_root),
                 })
                 return
 
@@ -1936,8 +2119,57 @@ def make_handler(state: WorkbenchState):
                 return
 
             if path == "/api/ai/stop":
-                res = state.stop_ai_helper()
+                res = state.stop_ai_helper(str(body.get("chat_id") or ""))
                 self._send_json(200, res)
+                return
+
+            if path == "/api/ai/sessions/new":
+                sess = state.ai_manager.create_session(
+                    surface=str(body.get("surface") or "workbench"),
+                    provider=str(body.get("provider") or "auto"),
+                    mode=str(body.get("mode") or "yolo"),
+                    title=str(body.get("title") or ""),
+                )
+                self._send_json(200, {"ok": True, "session": sess, "sessions": state.ai_manager.list_sessions()})
+                return
+
+            if path == "/api/ai/sessions/delete":
+                cid = str(body.get("chat_id") or "").strip()
+                res = state.ai_manager.delete_session(cid)
+                self._send_json(200, {**res, "sessions": state.ai_manager.list_sessions()})
+                return
+
+            if path == "/api/agents/test":
+                prov = str(body.get("provider") or "zcode").strip().lower()
+                cfg_now = core.load_config(state.batches_root)
+                res = agent_providers.test_agent_provider(prov, cfg_now)
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/ui-state":
+                snap = state.update_ui_state(body)
+                self._send_json(200, {"ok": True, "active": {k: v for k, v in snap.items() if k != "_ts"}})
+                return
+
+            if path == "/api/ui/command":
+                ev = {
+                    "source": str(body.get("source") or "ai"),
+                    "step": "ui_command",
+                    "action": str(body.get("action") or "focus").strip()[:32],
+                    "target": str(body.get("target") or "").strip()[:160],
+                    "view": str(body.get("view") or "").strip()[:32],
+                    "label": str(body.get("label") or "").strip()[:120],
+                    "client_id": str(body.get("client_id") or "").strip()[:64],
+                    "status": "done",
+                    "message": str(body.get("label") or f"AI 聚焦界面元素 {body.get('target') or body.get('view') or ''}"),
+                }
+                state.bus.publish(ev)
+                self._send_json(200, {"ok": True, "dispatched": ev})
+                return
+
+            if path == "/api/capture":
+                res = state.perform_capture(body)
+                self._send_json(200 if res.get("ok") else 400, res)
                 return
 
             if path == "/api/pick-folder":
