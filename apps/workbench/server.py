@@ -1528,9 +1528,48 @@ def pick_windows_folder(initial_dir: Path | str | None = None, timeout_seconds: 
 
 def make_handler(state: WorkbenchState):
     html_path = HERE / "index.html"
+    static_dir = (HERE / "static").resolve()
+    shared_dir = (HERE.parent / "shared").resolve()
+    _STATIC_MIME = {
+        ".js": "application/javascript; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".json": "application/json; charset=utf-8",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+    }
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+
+        def _serve_static(self, base_dir: Path, rel: str) -> None:
+            clean_rel = urllib.parse.unquote(rel or "").lstrip("/").replace("\\", "/")
+            if not clean_rel or ".." in Path(clean_rel).parts:
+                self._send_json(404, {"ok": False, "error": "文件不存在"})
+                return
+            try:
+                target = (base_dir / clean_rel).resolve()
+            except OSError:
+                self._send_json(404, {"ok": False, "error": "文件不存在"})
+                return
+            if not target.is_relative_to(base_dir):
+                self._send_json(403, {"ok": False, "error": "禁止访问"})
+                return
+            ctype = _STATIC_MIME.get(target.suffix.lower())
+            if not ctype or not target.is_file():
+                self._send_json(404, {"ok": False, "error": "文件不存在"})
+                return
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
 
         def log_message(self, format, *args):
             pass
@@ -1585,6 +1624,14 @@ def make_handler(state: WorkbenchState):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
+                return
+
+            if path.startswith("/static/"):
+                self._serve_static(static_dir, path.removeprefix("/static/"))
+                return
+
+            if path.startswith("/shared/"):
+                self._serve_static(shared_dir, path.removeprefix("/shared/"))
                 return
 
             if path == "/api/health":

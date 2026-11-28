@@ -555,6 +555,24 @@ class TestWorkbenchDualModeAndSchemaAPI(unittest.TestCase):
                 self.assertEqual(st, 200)
                 host_online = [u for u in ov2["online_users"] if u["name"] == "主机"]
                 self.assertEqual(len(host_online), 1)
+
+                # 拆分后的 8888 静态模块与共享组件路由 + MIME + 防路径穿越
+                with urllib.request.urlopen(f"{base}/static/workbench.css", timeout=5) as r_css:
+                    self.assertEqual(r_css.status, 200)
+                    self.assertIn("text/css", (r_css.headers.get("Content-Type") or "").lower())
+                    self.assertIn(b"data-work-mode", r_css.read())
+                with urllib.request.urlopen(f"{base}/static/state.js", timeout=5) as r_js:
+                    self.assertEqual(r_js.status, 200)
+                    self.assertIn("javascript", (r_js.headers.get("Content-Type") or "").lower())
+                    self.assertIn(b"collectWbUiState", r_js.read())
+                with urllib.request.urlopen(f"{base}/shared/draggable_drawer.js", timeout=5) as r_sh:
+                    self.assertEqual(r_sh.status, 200)
+                    self.assertIn("javascript", (r_sh.headers.get("Content-Type") or "").lower())
+                    self.assertIn(b"initDraggableDrawer", r_sh.read())
+                for bad_url in (f"{base}/static/../server.py", f"{base}/static/%2e%2e/server.py", f"{base}/shared/../workbench/server.py"):
+                    with self.assertRaises(urllib.error.HTTPError) as ctx_err:
+                        urllib.request.urlopen(bad_url, timeout=5)
+                    self.assertIn(ctx_err.exception.code, (403, 404))
             finally:
                 state._stop_event.set()
                 srv.shutdown()
