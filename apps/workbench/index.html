@@ -6,57 +6,166 @@
 <title>自动改卷工作台</title>
 <style>
   :root{
-    --bg:#f5f3ee; --card:#ffffff; --line:#e6e1d6; --line-strong:#d4ccb9;
-    --text:#1d2420; --muted:#68716c; --soft:#f0ede5;
-    --primary:#1f7a53; --primary-hover:#176242; --primary-soft:#e6f4ed;
+    --bg:#f8f2e4;
+    --bg-grad:radial-gradient(circle at 12% 0%, #fffaf0 0%, #f7efe0 54%, #efe3cc 100%);
+    --card:#fffdf8; --line:#e9dec8; --line-strong:#d4c3a3;
+    --text:#252019; --muted:#786c5c; --soft:#f4ebd9;
+    --primary:#1f7a53; --primary-hover:#166141; --primary-soft:#e5f5ec;
+    --accent:#b45309; --accent-soft:#fef3c7;
     --warn:#b45309; --warn-soft:#fef3c7;
     --err:#b91c1c; --err-soft:#fee2e2;
     --blue:#2563eb; --blue-soft:#eff6ff;
     --violet:#7c3aed; --violet-soft:#f5f3ff;
-    --shadow:0 4px 18px rgba(29,36,32,.055);
-    --radius:15px;
+    --shadow:0 6px 22px rgba(96,68,26,.075);
+    --radius:16px;
+    --capsule-bg:#eee4d0;
+    --logo-grad:linear-gradient(135deg,#d97706,#1f7a53);
+  }
+  body[data-work-mode="iteration"]{
+    --bg:#e9f1fb;
+    --bg-grad:radial-gradient(circle at 86% 0%, #dbeafe 0%, #eaf2fc 48%, #dfe9f7 100%);
+    --card:#fafdff; --line:#cdddf0; --line-strong:#a6c1e1;
+    --text:#132033; --muted:#566a85; --soft:#e7f0fb;
+    --primary:#2563eb; --primary-hover:#1d4ed8; --primary-soft:#dbeafe;
+    --accent:#0284c7; --accent-soft:#e0f2fe;
+    --shadow:0 6px 24px rgba(30,64,175,.085);
+    --capsule-bg:#d9e7f8;
+    --logo-grad:linear-gradient(135deg,#1d4ed8,#0ea5e9);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;line-height:1.5}
-  .wrap{max-width:1180px;margin:0 auto;padding:18px 20px 84px}
+  body{margin:0;min-height:100vh;background-color:var(--bg);background-image:var(--bg-grad);background-attachment:fixed;color:var(--text);font-family:"Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;line-height:1.5;transition:background-color .44s ease,color .3s ease}
+  .wrap{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:18px 20px 84px}
+
+  /* 冷暖模式切换径向波纹动效层 */
+  .mode-wave{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:0}
+  .mode-wave.warm{background:radial-gradient(circle at var(--wx,50%) var(--wy,40px), rgba(251,191,36,.38) 0%, rgba(245,222,179,.28) 45%, rgba(248,242,228,0) 75%)}
+  .mode-wave.cool{background:radial-gradient(circle at var(--wx,50%) var(--wy,40px), rgba(59,130,246,.34) 0%, rgba(147,197,253,.26) 45%, rgba(233,241,251,0) 75%)}
+  @keyframes modeWaveExpand{
+    0%{clip-path:circle(0px at var(--wx,50%) var(--wy,40px));opacity:.92}
+    68%{opacity:.65}
+    100%{clip-path:circle(155vmax at var(--wx,50%) var(--wy,40px));opacity:0}
+  }
+  .mode-wave.play{animation:modeWaveExpand .58s cubic-bezier(.22,1,.36,1) forwards}
 
   /* 顶栏 */
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 18px;box-shadow:var(--shadow);margin-bottom:14px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:11px 16px;box-shadow:var(--shadow);margin-bottom:14px;transition:background .35s ease,border-color .35s ease,box-shadow .35s ease}
   .brand{display:flex;align-items:center;gap:11px}
-  .brand-logo{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,#1f7a53,#2ea371);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px;flex:none}
-  .brand h1{margin:0;font-size:17.5px;font-weight:700;line-height:1.25}
+  .brand-logo{width:36px;height:36px;border-radius:11px;background:var(--logo-grad);color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px;flex:none;box-shadow:0 3px 10px rgba(0,0,0,.12);transition:background .4s ease,transform .25s ease}
+  .brand h1{margin:0;font-size:17px;font-weight:700;line-height:1.25}
   .brand .sub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
   .role-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
   .role-pill.host{background:var(--primary-soft);color:var(--primary)}
   .role-pill.collab{background:var(--blue-soft);color:var(--blue)}
   .dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
-  .user-btn{background:var(--soft);border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer;font-size:12.5px;color:var(--text);font-weight:600;white-space:nowrap}
+  .user-btn{display:inline-flex;align-items:center;gap:6px;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:12.5px;color:var(--text);font-weight:600;white-space:nowrap;transition:.16s}
   .user-btn:hover{border-color:var(--primary)}
+  .env-status-pill{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--soft);color:var(--muted);transition:.16s;white-space:nowrap}
+  .env-status-pill:hover{border-color:var(--primary);color:var(--text)}
+  .env-status-pill.ok{background:var(--primary-soft);border-color:rgba(31,122,83,.25);color:var(--primary)}
+  .env-status-pill.warn{background:var(--warn-soft);border-color:#f59e0b;color:var(--warn)}
+  .env-status-pill.err{background:var(--err-soft);border-color:#ef4444;color:var(--err)}
 
-  /* Codex 风格药丸模式切换器（改试卷 ⇄ 模型迭代） */
-  .mode-capsule{position:relative;display:inline-grid;grid-template-columns:1fr 1fr;align-items:center;padding:3px;border-radius:999px;background:#ece8df;border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(29,36,32,.06);user-select:none}
-  .mode-capsule-thumb{position:absolute;top:3px;left:3px;bottom:3px;width:calc(50% - 3px);border-radius:999px;background:#ffffff;box-shadow:0 2px 8px rgba(29,36,32,.12),0 0 0 1px rgba(29,36,32,.04);transition:transform .3s cubic-bezier(.32,.72,0,1);pointer-events:none;z-index:1}
+  /* Codex 风格药丸模式切换器（改试卷 暖色 ⇄ 模型迭代 冷色） */
+  .mode-capsule{position:relative;display:inline-grid;grid-template-columns:1fr 1fr;align-items:center;padding:3px;border-radius:999px;background:var(--capsule-bg);border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(29,36,32,.07);user-select:none;transition:background .36s ease,border-color .36s ease}
+  .mode-capsule-thumb{position:absolute;top:3px;left:3px;bottom:3px;width:calc(50% - 3px);border-radius:999px;background:#ffffff;box-shadow:0 2px 10px rgba(29,36,32,.14),0 0 0 1px rgba(29,36,32,.05);transition:transform .34s cubic-bezier(.32,.72,0,1);pointer-events:none;z-index:1}
   .mode-capsule[data-mode="iteration"] .mode-capsule-thumb{transform:translateX(100%)}
-  .mode-cap-btn{position:relative;z-index:2;border:none;background:transparent;padding:6px 15px;border-radius:999px;font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer;transition:color .22s ease;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+  .mode-cap-btn{position:relative;z-index:2;border:none;background:transparent;padding:6px 16px;border-radius:999px;font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer;transition:color .22s ease;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:5px}
   .mode-cap-btn:hover{color:var(--text)}
-  .mode-cap-btn.active{color:var(--primary)}
-  .mode-capsule[data-mode="iteration"] .mode-cap-btn.active{color:var(--violet)}
-  @keyframes modeSwitchIn{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
-  .mode-switching .card, .mode-switching .stepper{animation:modeSwitchIn .26s cubic-bezier(.22,1,.36,1)}
+  .mode-cap-btn.active{color:#b45309}
+  .mode-capsule[data-mode="iteration"] .mode-cap-btn.active{color:#1d4ed8}
+  @keyframes modeSwitchIn{from{opacity:.58;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .mode-switching .card, .mode-switching .stepper{animation:modeSwitchIn .3s cubic-bezier(.22,1,.36,1)}
 
-  /* 主机步骤导航 */
+  /* 主机步骤导航（改试卷 2 步 / 模型迭代 4 步） */
   .stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;transition:grid-template-columns .24s ease}
-  .stepper.mode-grading{grid-template-columns:repeat(3,1fr)}
+  .stepper.mode-grading{grid-template-columns:repeat(2,1fr)}
 
-  /* 答案 PDF / 自动判分条 & 内存暂存预检条 */
-  .batch-substrip{margin-top:11px;padding:10px 13px;border-radius:12px;border:1px solid var(--line);background:#faf8f3;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12.5px;transition:border-color .18s,background .18s}
-  .batch-substrip.dragover{border:1.5px dashed var(--primary);background:var(--primary-soft)}
-  .batch-substrip.mem-strip{background:#f5f9ff;border-color:#dbeafe}
-  .schema-adv-box{margin-top:8px;padding:11px 13px;border-radius:11px;border:1px solid var(--line);background:#fff;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
+  /* ==================== 改试卷极简双贴入工作区 & 爽感确认动效 ==================== */
+  .dual-drop-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:4px}
+  .drop-card{
+    position:relative;border:2px dashed var(--line-strong);border-radius:16px;padding:18px 18px 16px;
+    background:linear-gradient(180deg,rgba(255,253,247,.95),rgba(248,241,226,.55));
+    display:flex;flex-direction:column;gap:12px;min-height:242px;
+    transition:border-color .22s ease,background .25s ease,box-shadow .22s ease,transform .2s ease;
+    outline:none;
+  }
+  body[data-work-mode="iteration"] .drop-card{
+    background:linear-gradient(180deg,rgba(250,253,255,.96),rgba(232,242,253,.55));
+  }
+  .drop-card:hover,.drop-card:focus-within{border-color:var(--primary);box-shadow:0 8px 24px rgba(31,122,83,.09)}
+  .drop-card.dragover{border-color:var(--primary);background:var(--primary-soft);transform:scale(1.014);box-shadow:0 12px 28px rgba(31,122,83,.16)}
+  .drop-card.is-confirmed{
+    border-style:solid;border-color:#16a34a;
+    background:linear-gradient(180deg,#f3fcf6 0%,#fffef9 100%);
+    box-shadow:0 8px 26px rgba(22,163,74,.13);
+  }
+  body[data-work-mode="iteration"] .drop-card.is-confirmed{
+    background:linear-gradient(180deg,#effaf4 0%,#f8fbff 100%);
+  }
+  @keyframes dropConfirmBounce{
+    0%{transform:scale(1) rotate(0deg)}
+    18%{transform:scale(1.028) rotate(-0.85deg)}
+    38%{transform:scale(0.986) rotate(0.85deg)}
+    58%{transform:scale(1.014) rotate(-0.4deg)}
+    78%{transform:scale(0.996) rotate(0.18deg)}
+    100%{transform:scale(1) rotate(0deg)}
+  }
+  .drop-card.confirm-pop{animation:dropConfirmBounce .56s cubic-bezier(.34,1.56,.64,1)}
+  .drop-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .drop-title{display:flex;align-items:center;gap:8px;font-size:15.5px;font-weight:800;color:var(--text)}
+  .drop-icon{width:32px;height:32px;border-radius:10px;background:var(--soft);display:grid;place-items:center;font-size:16px;flex:none;transition:background .2s}
+  .drop-card.is-confirmed .drop-icon{background:#dcfce7}
+  .drop-sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+  /* 绿色勾勾 SVG 描边入场 + 🎉 粒子庆祝 */
+  .confirm-badge{
+    display:inline-flex;align-items:center;gap:5px;padding:4px 10px 4px 6px;border-radius:999px;
+    background:#16a34a;color:#fff;font-size:12px;font-weight:700;white-space:nowrap;flex:none;
+    box-shadow:0 4px 12px rgba(22,163,74,.32);
+    opacity:0;transform:scale(.45);pointer-events:none;transition:opacity .2s,transform .36s cubic-bezier(.34,1.56,.64,1);
+  }
+  .drop-card.is-confirmed .confirm-badge{opacity:1;transform:scale(1);pointer-events:auto}
+  .confirm-badge svg{width:16px;height:16px;display:block}
+  .confirm-badge .chk-path{stroke:#fff;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;fill:none;stroke-dasharray:26;stroke-dashoffset:26}
+  .drop-card.is-confirmed .confirm-badge .chk-path{animation:drawCheck .38s ease-out .06s forwards}
+  @keyframes drawCheck{to{stroke-dashoffset:0}}
+
+  .celebrate-layer{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:12}
+  .celebrate-bit{
+    position:absolute;font-size:18px;line-height:1;user-select:none;
+    animation:confettiFly .88s cubic-bezier(.16,.84,.44,1) forwards;
+  }
+  @keyframes confettiFly{
+    0%{opacity:0;transform:translate(0,0) scale(.4) rotate(0deg)}
+    18%{opacity:1;transform:translate(var(--tx1),var(--ty1)) scale(1.15) rotate(var(--rot1))}
+    100%{opacity:0;transform:translate(var(--tx2),var(--ty2)) scale(.75) rotate(var(--rot2))}
+  }
+
+  .drop-summary-box{
+    display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:11px;
+    background:#ecfdf5;border:1px solid #86efac;color:#14532d;font-size:12.5px;font-weight:600;
+  }
+  .drop-summary-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid #86efac;background:#fff;flex:none}
+  .drop-summary-info{flex:1;min-width:0}
+  .drop-summary-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+  .drop-summary-meta{font-size:11.5px;color:#15803d;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drop-paste-area{
+    width:100%;min-height:76px;resize:vertical;padding:9px 11px;border-radius:11px;
+    border:1.5px solid var(--line-strong);background:rgba(255,255,255,.88);color:var(--text);
+    font-family:inherit;font-size:13px;line-height:1.45;transition:border-color .16s,background .16s;
+  }
+  .drop-paste-area:focus{outline:none;border-color:var(--primary);background:#fff}
+  .drop-hint-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:auto;font-size:11.5px;color:var(--muted)}
+  .kbd-chip{display:inline-block;padding:1px 6px;border-radius:5px;background:var(--soft);border:1px solid var(--line-strong);font-family:Consolas,monospace;font-size:11px;font-weight:700;color:var(--text)}
+
+  /* 答案条（单行极简） */
+  .batch-substrip{margin-top:11px;padding:9px 13px;border-radius:12px;border:1px solid var(--line);background:var(--soft);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12.5px;transition:border-color .18s,background .18s,transform .18s}
+  .batch-substrip.dragover{border:1.5px dashed var(--primary);background:var(--primary-soft);transform:scale(1.008)}
+  .batch-substrip.confirm-pop{animation:dropConfirmBounce .54s cubic-bezier(.34,1.56,.64,1);border-color:#16a34a;background:#ecfdf5}
   .ratio-pills{display:inline-flex;gap:5px;flex-wrap:wrap}
-  .ratio-pill{border:1px solid var(--line-strong);background:#fff;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text);transition:.15s}
+  .ratio-pill{border:1px solid var(--line-strong);background:#fff;border-radius:999px;padding:4px 11px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text);transition:.15s}
   .ratio-pill.active{background:var(--primary);border-color:var(--primary);color:#fff}
-  .train-db-card{background:linear-gradient(135deg,#fbfaff,#f5f8f6);border:1px solid #d8d4ec}
+  .train-db-card{background:linear-gradient(135deg,#f5f9ff,#eef5ff);border:1px solid #bfdbfe}
   .db-stat-pills{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
   .db-stat-pill{background:#fff;border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:12px;font-weight:600;color:var(--text)}
   .db-stat-pill b{color:var(--primary);margin-left:4px}
@@ -364,9 +473,13 @@
   .tour-pop h4{margin:0 0 5px;font-size:14.5px}
   .tour-pop p{margin:0 0 11px;font-size:12.5px;color:var(--muted);line-height:1.5}
 
-  /* 非阻塞右侧 AI 帮手抽屉（不模糊背景，可边操作界面边看 AI 实时联动） */
-  .ai-drawer{position:fixed;top:64px;right:14px;bottom:14px;width:min(450px,94vw);z-index:95;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.2);display:flex;flex-direction:column;overflow:hidden}
-  .ai-drawer-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px;background:#f8faf9}
+  /* 非阻塞可自由拖动 + 可调尺寸 AI 帮手浮窗（不遮挡/不锁定右下角） */
+  .ai-drawer{position:fixed;top:68px;right:16px;width:min(430px,92vw);height:min(620px,calc(100vh - 88px));min-width:340px;min-height:360px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);z-index:95;background:#fff;border:1px solid var(--line-strong);border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.22);display:flex;flex-direction:column;overflow:hidden}
+  .ai-drawer.is-dragging{user-select:none;box-shadow:0 26px 64px rgba(15,23,42,.32);border-color:var(--primary)}
+  .ai-drawer-head{padding:10px 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--soft);cursor:grab;user-select:none;touch-action:none}
+  .ai-drawer.is-dragging .ai-drawer-head{cursor:grabbing}
+  .ai-drag-grip{font-size:15px;line-height:1;color:var(--muted);letter-spacing:-1px;padding-right:2px}
+  .ai-resize-handle{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;z-index:6;background:linear-gradient(135deg,transparent 50%,rgba(100,116,139,.38) 50%,rgba(100,116,139,.38) 62%,transparent 62%,transparent 76%,rgba(100,116,139,.5) 76%);border-bottom-right-radius:15px}
   .ai-tabs{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--line);overflow-x:auto;background:#fcfdfc;flex-shrink:0}
   .ai-tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
   .ai-tab.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700}
@@ -375,7 +488,7 @@
   .ai-chat-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#fafbfa}
   .ai-msg{padding:9px 11px;border-radius:11px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;max-width:96%}
   .ai-msg.user{align-self:flex-end;background:#e6f4ed;color:#103c28;border:1px solid #b7e4cd}
-  .ai-msg.assistant{align-self:flex-start;background:#fff;color:var(--ink);border:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  .ai-msg.assistant{align-self:flex-start;background:#fff;color:var(--text);border:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:12px}
   .ai-msg-meta{font-size:10.5px;color:var(--muted);margin-bottom:3px}
   .ai-drawer-foot{padding:10px 12px;border-top:1px solid var(--line);background:#fff;display:flex;flex-direction:column;gap:7px;flex-shrink:0}
   .ai-focus-ring{position:fixed;z-index:130;pointer-events:none;border:3px solid #2563eb;border-radius:10px;box-shadow:0 0 0 6px rgba(37,99,235,.22),0 8px 24px rgba(37,99,235,.28);transition:all .22s ease}
@@ -391,12 +504,13 @@
     .train-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
   @media(max-width:860px){
-    .overview-grid,.stepper,.anatomy-grid,.train-opt-row{grid-template-columns:1fr}
+    .overview-grid,.stepper,.anatomy-grid,.train-opt-row,.dual-drop-grid{grid-template-columns:1fr}
     .perf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
 </style>
 </head>
-<body>
+<body data-work-mode="grading">
+<div id="modeWaveOverlay" class="mode-wave" aria-hidden="true"></div>
 <div class="wrap">
   <header class="topbar">
     <div class="brand">
@@ -406,44 +520,49 @@
         <div class="sub" id="topSub">正在连接...</div>
       </div>
     </div>
-    <div id="workModePill" class="mode-capsule hidden" data-mode="grading" role="tablist" aria-label="工作模式切换" title="切换「改试卷模式」与「模型迭代模式」">
+    <div id="workModePill" class="mode-capsule hidden" data-mode="grading" role="tablist" aria-label="工作模式切换" title="切换「改试卷模式（暖色）」与「模型迭代模式（冷色）」">
       <span class="mode-capsule-thumb" id="workModeThumb"></span>
       <button class="mode-cap-btn active" type="button" data-work-mode="grading" role="tab" aria-selected="true">📝 改试卷</button>
       <button class="mode-cap-btn" type="button" data-work-mode="iteration" role="tab" aria-selected="false">🔬 模型迭代</button>
     </div>
-    <div class="row">
-      <button id="btnOpenAi" class="btn sm hidden" type="button" title="打开 ZCode AI 帮手诊断面板">🤖 AI 帮手</button>
+    <div class="row" style="gap:6px">
+      <button id="btnEnvPill" class="env-status-pill ok hidden" type="button" title="查看运行环境与高级硬件调参"><i class="dot"></i><span id="envPillText">就绪</span></button>
+      <button id="btnLanShare" class="btn sm hidden" type="button" title="复制局域网网址，邀请同网设备一起审阅">🔗 协作</button>
+      <button id="btnOpenAi" class="btn sm hidden" type="button" title="打开可拖动 AI 帮手浮窗">🤖 AI 帮手</button>
       <button id="btnOpenVlm" class="btn sm hidden" type="button" title="配置大模型视觉 API">⚙ API</button>
       <button id="btnOpenGuide" class="btn sm" type="button" title="操作引导">? 引导</button>
-      <span id="rolePill" class="role-pill host"><i class="dot"></i><span>主机</span></span>
-      <button id="btnUser" class="user-btn" type="button" title="点击修改你的称呼">未填写</button>
+      <span id="rolePill" class="role-pill collab hidden"><i class="dot"></i><span>协作者</span></span>
+      <button id="btnUser" class="user-btn" type="button" title="点击修改你的称呼"><i class="dot" style="color:var(--primary)"></i><span id="btnUserLabel">主机</span></button>
     </div>
   </header>
 
-  <nav id="hostStepper" class="stepper hidden">
-    <button class="step-tab" data-view="check" id="tabCheck" type="button">
-      <span class="step-num">1</span>
+  <nav id="hostStepper" class="stepper mode-grading hidden">
+    <button class="step-tab hidden" data-view="check" id="tabCheck" type="button">
+      <span class="step-num" id="stepNumCheck">1</span>
       <div><div class="step-title">运行环境</div><div class="step-desc" id="tabCheckDesc">检查就绪状态</div></div>
     </button>
     <button class="step-tab" data-view="ingest" id="tabIngest" type="button">
-      <span class="step-num">2</span>
-      <div><div class="step-title">导入试卷</div><div class="step-desc" id="tabIngestDesc">选图入库</div></div>
+      <span class="step-num" id="stepNumIngest">1</span>
+      <div><div class="step-title" id="tabIngestTitle">贴入试卷与答案</div><div class="step-desc" id="tabIngestDesc">拖放 / 贴路径 / Ctrl+V</div></div>
     </button>
     <button class="step-tab" data-view="overview" id="tabOverview" type="button">
-      <span class="step-num">3</span>
-      <div><div class="step-title">识别与审阅</div><div class="step-desc" id="tabOverviewDesc">实时流向与协作</div></div>
+      <span class="step-num" id="stepNumOverview">2</span>
+      <div><div class="step-title" id="tabOverviewTitle">改卷与导分</div><div class="step-desc" id="tabOverviewDesc">进度 / 复审 / 成绩单</div></div>
     </button>
-    <button class="step-tab" data-view="train" id="tabTrain" type="button">
-      <span class="step-num">4</span>
+    <button class="step-tab hidden" data-view="train" id="tabTrain" type="button">
+      <span class="step-num" id="stepNumTrain">4</span>
       <div><div class="step-title">模型训练</div><div class="step-desc" id="tabTrainDesc">微调与换权重</div></div>
     </button>
   </nav>
 
-  <!-- ==================== 视图 1：架构图化运行环境（仅主机） ==================== -->
+  <!-- ==================== 视图 1：运行环境与高级依赖自检（模型迭代专属 / 改试卷按需展开） ==================== -->
   <section id="viewCheck" class="card hidden">
     <div class="between">
       <div>
-        <h2>运行环境</h2>
+        <div class="row" style="gap:8px;margin-bottom:2px">
+          <button class="btn xs hidden" id="btnBackFromCheck" type="button">← 返回改卷</button>
+          <h2 style="margin:0">运行环境与硬件调参</h2>
+        </div>
         <p class="lead" id="checkSummary">正在检查系统各环节状态...</p>
       </div>
       <div class="row">
@@ -454,7 +573,8 @@
     </div>
 
     <div id="repairBar" class="repair-bar hidden">
-      <strong style="color:var(--warn)">需处理：</strong>
+      <strong id="repairBarTitle" style="color:var(--warn)">提醒：</strong>
+      <span id="repairBarSummary" style="flex:1;min-width:180px;color:var(--text);font-size:12.5px"></span>
       <button class="btn primary sm hidden" id="btnRepairPip" type="button">安装缺失依赖</button>
       <button class="btn warn sm hidden" id="btnUnpackWeights" type="button">解压模型权重</button>
       <button class="btn sm hidden" id="btnSetVlmKey" type="button">配置大模型 API</button>
@@ -589,131 +709,161 @@
     </details>
   </section>
 
-  <!-- ==================== 视图 2：极简导入试卷（两步合一） ==================== -->
+  <!-- ==================== 视图 2：双贴入试卷与答案（极简直观 + 确认动效） ==================== -->
   <section id="viewIngest" class="card hidden">
     <div class="between" style="margin-bottom:14px">
       <div>
-        <h2>导入新试卷</h2>
-        <p class="lead">仅复制原图，自动去重</p>
+        <h2 id="ingestHeading">贴入试卷与答案</h2>
+        <p class="lead" id="ingestLead">左边放试卷（文件夹或单张测图），右边贴答案（可选）；放进去就会弹一下并打绿勾</p>
       </div>
-      <button class="btn sm ghost" id="btnSkipIngest" type="button">跳过，进入总览 →</button>
+      <button class="btn sm ghost" id="btnSkipIngest" type="button">查看已有批次 →</button>
     </div>
 
-    <div class="field">
-      <label>1. 试卷照片文件夹</label>
-      <div class="row">
-        <input id="inputSourceDir" class="input" style="flex:1;min-width:240px" placeholder="选择文件夹或粘贴路径">
-        <button class="btn" id="btnPickFolder" type="button">选择文件夹...</button>
+    <div class="dual-drop-grid">
+      <!-- 左侧：贴入试卷（文件夹路径 / 单张路径 / 拖拽单或多张图片 / Ctrl+V 贴图） -->
+      <div id="dropZonePaper" class="drop-card" tabindex="0">
+        <div class="celebrate-layer" id="paperCelebrate"></div>
+        <div class="drop-head">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <div class="drop-icon">📄</div>
+            <div style="min-width:0">
+              <div class="drop-title">1. 贴入试卷</div>
+              <div class="drop-sub">支持文件夹批量，或拖/粘单张试卷图快速测试</div>
+            </div>
+          </div>
+          <span class="confirm-badge" id="paperConfirmBadge">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path class="chk-path" d="M4.5 10.5 L8.4 14.2 L15.8 6.2"/></svg>
+            <span id="paperConfirmTag">已放入</span>
+          </span>
+        </div>
+
+        <div class="row" style="gap:6px">
+          <input id="inputSourceDir" class="input" style="flex:1;min-width:160px" placeholder="粘贴文件夹路径、单张图片路径，或直接拖图片进来...">
+          <button class="btn sm" id="btnPickFolder" type="button">📂 选文件夹</button>
+          <button class="btn sm" id="btnPickPaperFiles" type="button" title="选择单张或多张试卷照片直接测试">🖼 选图片</button>
+          <input id="paperFilesInput" type="file" accept="image/*" multiple class="hidden">
+        </div>
+
+        <div id="paperSummaryBox" class="drop-summary-box hidden">
+          <img id="paperThumbImg" class="drop-summary-thumb hidden" alt="预览">
+          <div class="drop-summary-info">
+            <div class="drop-summary-title" id="paperSummaryTitle"></div>
+            <div class="drop-summary-meta" id="paperSummaryMeta"></div>
+          </div>
+          <button class="btn xs ghost" id="btnClearPaper" type="button" title="清空重选">✕</button>
+        </div>
+
+        <div id="paperErrorTip" class="hidden" style="font-size:12px;color:var(--err);background:var(--err-soft);padding:6px 10px;border-radius:9px"></div>
+
+        <div class="drop-hint-row">
+          <span>可直接拖入照片，或点击此处按 <span class="kbd-chip">Ctrl+V</span> 粘贴单张截图</span>
+          <span>非破坏性复制 · 自动去重</span>
+        </div>
+      </div>
+
+      <!-- 右侧：贴入答案（可选：拖入 PDF/图片、Ctrl+V 贴答案文字或截图、粘贴路径） -->
+      <div id="dropZoneAnswer" class="drop-card" tabindex="0">
+        <div class="celebrate-layer" id="answerCelebrate"></div>
+        <div class="drop-head">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <div class="drop-icon">✅</div>
+            <div style="min-width:0">
+              <div class="drop-title">2. 贴入答案 <span class="muted" style="font-weight:500;font-size:12px">（可选）</span></div>
+              <div class="drop-sub">拖入答案 PDF / 照片，或直接粘贴文字 / 截图</div>
+            </div>
+          </div>
+          <span class="confirm-badge" id="answerConfirmBadge">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path class="chk-path" d="M4.5 10.5 L8.4 14.2 L15.8 6.2"/></svg>
+            <span id="answerConfirmTag">已放入</span>
+          </span>
+        </div>
+
+        <textarea id="inputAnswerPaste" class="drop-paste-area" placeholder="直接 Ctrl+V 粘贴标准答案文字、答案截图，或粘贴答案 PDF 路径；也可直接把 PDF 拖到这个框里..."></textarea>
+
+        <div id="answerSummaryBox" class="drop-summary-box hidden">
+          <img id="answerThumbImg" class="drop-summary-thumb hidden" alt="答案预览">
+          <div class="drop-summary-info">
+            <div class="drop-summary-title" id="answerSummaryTitle"></div>
+            <div class="drop-summary-meta" id="answerSummaryMeta"></div>
+          </div>
+          <button class="btn xs ghost" id="btnClearAnswerStage" type="button" title="清空答案">✕</button>
+        </div>
+
+        <div class="drop-hint-row">
+          <div class="row" style="gap:6px">
+            <button class="btn xs" id="btnPickAnswerFile" type="button">📄 选答案 PDF / 图片</button>
+            <input id="answerStageFileInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.json" class="hidden">
+          </div>
+          <span>留空也能直接改 · 贴入后自动交 AI 整理判分</span>
+        </div>
       </div>
     </div>
 
-    <div class="field">
-      <label>2. 学科</label>
-      <div id="subjectPills" class="subject-pills"></div>
+    <!-- 学科与自定义批次名仅在「模型迭代模式」展示，改试卷模式彻底免打扰 -->
+    <div id="iterIngestMeta" class="hidden" style="margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)">
+      <div class="field" style="margin-bottom:11px">
+        <label>学科标注 <span class="muted" style="font-weight:400">（模型迭代模式用于归档训练集）</span></label>
+        <div id="subjectPills" class="subject-pills"></div>
+      </div>
+      <div class="field" style="margin-bottom:4px">
+        <label>批次名 <span class="muted" style="font-weight:400">（可选，留空自动命名）</span></label>
+        <input id="inputBatchName" class="input" style="max-width:360px" placeholder="例如：高三期中物理">
+      </div>
     </div>
 
-    <div class="field">
-      <label>3. 批次名 <span class="muted" style="font-weight:400">（可选，留空自动命名）</span></label>
-      <input id="inputBatchName" class="input" style="max-width:360px" placeholder="例如：高三期中物理">
-    </div>
-
-    <div class="row" style="margin-top:6px">
-      <button class="btn primary" id="btnIngestAndRun" type="button">▶ 导入并开始识别</button>
-      <button class="btn" id="btnDoIngest" type="button">仅入库</button>
-      <span id="ingestMsg" class="muted"></span>
+    <div class="between" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+      <div class="row" style="gap:10px">
+        <button class="btn primary" id="btnIngestAndRun" type="button" style="padding:10px 22px;font-size:14.5px">▶ 开始改试卷</button>
+        <button class="btn" id="btnDoIngest" type="button">仅入库</button>
+        <span id="ingestMsg" class="muted"></span>
+      </div>
+      <span class="muted" id="ingestReadyHint" style="font-size:12px">放入试卷后即可一键开改</span>
     </div>
   </section>
 
-  <!-- ==================== 视图 3：识别流向架构图 & 多人协作 ==================== -->
+  <!-- ==================== 视图 3：改卷与导分（极简聚焦首屏 C 位） ==================== -->
   <section id="viewOverview" class="hidden">
-    <div id="inviteBar" class="invite-bar hidden">
-      <div class="invite-left">
-        <strong>局域网协作</strong>
-        <span id="lanUrlText" class="lan-url">http://192.168.x.x:8888</span>
-        <span class="muted">同网电脑/平板浏览器打开即可协同审阅</span>
-      </div>
-      <button class="btn primary xs" id="btnCopyLan" type="button">复制网址</button>
-    </div>
-
-    <div class="card" id="batchCard">
+    <div class="card" id="batchCard" style="padding:15px 18px">
       <div class="between">
         <div>
           <h2 id="activeBatchTitle">尚未导入试卷</h2>
-          <div class="muted" id="activeBatchMeta">请先导入一批试卷</div>
+          <div class="muted" id="activeBatchMeta">请先贴入试卷开始</div>
         </div>
         <div class="row" id="hostBatchActions">
-          <select id="batchSelect" class="input" style="width:auto;min-width:175px;padding:6px 10px;font-size:13px"></select>
+          <select id="batchSelect" class="input" style="width:auto;min-width:170px;padding:6px 10px;font-size:13px"></select>
           <button class="btn primary sm" id="btnStartRecognize" type="button">开始识别</button>
           <button class="btn danger sm hidden" id="btnStopRecognize" type="button">■ 停止</button>
           <button class="btn warn sm hidden" id="btnRetryFailed" type="button" title="仅重跑失败题块，不重复扣费">🔁 补跑失败</button>
-          <button class="btn sm" id="btnGoIngestNew" type="button">+ 导入</button>
+          <button class="btn sm" id="btnGoIngestNew" type="button">+ 新试卷</button>
         </div>
       </div>
 
-      <!-- 标准答案 PDF（默认丢给 AI 自动结构化）+ 自动判分 & 成绩导出 -->
-      <div id="schemaStrip" class="batch-substrip hidden" title="支持把标准答案 PDF / 图片直接拖到这里，自动唤醒 AI 帮手转结构化 JSON">
-        <div class="row" style="gap:8px;flex:1;min-width:220px">
+      <!-- 单行极简答案与成绩条（不堆按钮，详细判分规则收进弹窗） -->
+      <div id="schemaStrip" class="batch-substrip hidden" title="可直接把答案 PDF / 图片拖到这里自动交 AI 解析">
+        <div class="row" style="gap:8px;flex:1;min-width:200px">
           <span class="badge warn" id="schemaBadge">无标准答案</span>
-          <span id="schemaMetaText" class="muted">未配置试卷结构与答案：通用识别模式（空位划分准确率可能略低且不自动判分）</span>
+          <span id="schemaMetaText" class="muted">未配答案（仍可识别，拖入答案 PDF 即可自动判分）</span>
         </div>
         <div class="row" style="gap:6px">
           <input id="answerPdfInput" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.json" class="hidden">
-          <button class="btn primary xs" id="btnUploadAnswerPdf" type="button" title="选择或拖拽答案 PDF/图片，默认直接唤醒 AI 帮手输出结构化 JSON">📄 丢入答案 PDF（AI解析）</button>
+          <button class="btn primary xs" id="btnUploadAnswerPdf" type="button" title="选择或拖拽答案 PDF/图片，默认直接唤醒 AI 帮手整理">📄 贴入答案</button>
           <button class="btn xs" id="btnToggleSchemaAdv" type="button">⚙ 判分规则</button>
           <button class="btn xs hidden" id="btnExportGradesCsv" type="button" title="导出带总分与逐题得分的 Excel 成绩单 CSV">📊 导出成绩 CSV</button>
         </div>
       </div>
-      <div id="schemaAdvBox" class="schema-adv-box hidden">
-        <div class="between">
-          <div class="row" style="gap:8px">
-            <strong>多选题漏选给分（默认一半）：</strong>
-            <div class="ratio-pills" id="multiRatioPills">
-              <button class="ratio-pill active" type="button" data-ratio="0.5">一半 50%（默认）</button>
-              <button class="ratio-pill" type="button" data-ratio="0">全对才给分 0%</button>
-              <button class="ratio-pill" type="button" data-ratio="0.33">三分之一</button>
-            </div>
-            <input id="inputCustomRatio" type="number" min="0" max="1" step="0.05" value="0.5" class="input" style="width:74px;padding:3px 7px;font-size:12px" title="自定义漏选给分比例 (0~1)">
-            <button class="btn xs" id="btnSaveMultiRatio" type="button">应用比例</button>
-          </div>
-          <div class="row" style="gap:6px">
-            <button class="btn xs" id="btnAskAiEditSchema" type="button" title="直接唤起 AI 帮手用自然语言修改答案或评分规则">🤖 喊 AI 改配置</button>
-            <button class="btn xs" id="btnParseSchemaVlm" type="button" title="无本地 CLI Agent 时，直接调用当前 VLM 解析已上传的答案 PDF">⚡ VLM 直连解析</button>
-            <button class="btn xs" id="btnViewSchemaJson" type="button">👁 查看/编辑 JSON</button>
-            <button class="btn xs ghost" id="btnClearSchema" type="button" style="color:var(--err)">清除答案</button>
-          </div>
-        </div>
-        <div id="schemaJsonWrap" class="hidden" style="display:flex;flex-direction:column;gap:6px">
-          <textarea id="schemaJsonEdit" rows="7" class="input" style="font-family:Consolas,monospace;font-size:12px"></textarea>
-          <div class="row" style="justify-content:flex-end">
-            <button class="btn primary xs" id="btnSaveSchemaJson" type="button">保存 JSON</button>
-          </div>
-        </div>
-      </div>
 
-      <!-- 真实改卷内存暂存 Crop & 运行前自动内存压测评估 -->
-      <div id="memCropStrip" class="batch-substrip mem-strip hidden">
-        <div class="row" style="gap:8px;flex:1;min-width:240px">
-          <label class="row" style="gap:5px;cursor:pointer;font-weight:600;color:#1e3a8a">
-            <input id="chkMemoryCrops" type="checkbox" checked> ⚡ 内存暂存 Crop（API 识别完即删）
-          </label>
-          <span id="memPlanText" class="muted" style="font-size:12px">点击右侧或启动识别前将自动跑一遍内存压测评估...</span>
-        </div>
-        <div class="row" style="gap:6px">
-          <button class="btn xs" id="btnRunMemPreflight" type="button">🧪 内存预检测试</button>
-        </div>
-      </div>
-
-      <!-- 实时数据流架构图进度看板 -->
+      <!-- 实时进度条 + 按需展开的 7 节点数据流向图（完成后自动收起，不挤占审阅入口） -->
       <div id="pipelineDashboard" class="pipe-dash hidden">
         <div class="pipe-head">
           <div class="pipe-head-left">
-            <strong id="pipeStageTitle" style="font-size:14.5px">识别流水线</strong>
+            <strong id="pipeStageTitle" style="font-size:14px">识别流水线</strong>
             <span id="pipeStageBadge" class="badge ok">就绪</span>
             <span id="pipeSpeedEta" class="muted" style="font-size:12px"></span>
           </div>
-          <div class="row">
+          <div class="row" style="gap:6px">
             <div class="pipe-meta" id="pipeMetaRow"></div>
-            <button class="btn xs ghost" id="btnToggleArch" type="button">收起架构图</button>
+            <button class="btn xs ghost hidden" id="btnOpenMemDialog" type="button" title="查看内存暂存 Crop 与预检详情">⚡ 内存暂存</button>
+            <button class="btn xs ghost" id="btnToggleArch" type="button">展开流向图</button>
           </div>
         </div>
         <div class="prog-nums" style="margin-bottom:5px">
@@ -1052,11 +1202,12 @@
   <span id="liveText">就绪</span>
 </div>
 
-<!-- 全局非阻塞 AI 帮手右侧抽屉（多 Agent 快探 + 多会话并发 + 配置导入 + 离屏视觉） -->
-<aside id="aiDrawer" class="ai-drawer hidden" aria-label="AI 帮手全局抽屉">
-  <div class="ai-drawer-head">
-    <div class="row" style="gap:7px;align-items:center">
-      <strong style="font-size:14.5px">🤖 AI 帮手</strong>
+<!-- 全局非阻塞可自由拖动 AI 帮手浮窗（多 Agent 快探 + 多会话并发 + 配置导入 + 离屏视觉） -->
+<aside id="aiDrawer" class="ai-drawer hidden" aria-label="AI 帮手全局浮窗">
+  <div class="ai-drawer-head" id="aiDrawerHead" title="按住此处可自由拖动窗口位置，双击还原默认位置">
+    <div class="row" style="gap:6px;align-items:center">
+      <span class="ai-drag-grip" aria-hidden="true">⠿</span>
+      <strong style="font-size:14px">🤖 AI 帮手</strong>
       <span class="badge" id="aiStatusBadge">就绪</span>
     </div>
     <div class="row" style="gap:5px">
@@ -1117,8 +1268,73 @@
       <button class="btn primary sm" id="btnStartAi" type="button">发送</button>
     </div>
   </div>
+  <div id="aiResizeHandle" class="ai-resize-handle" title="拖拽调整窗口大小"></div>
 </aside>
 <div id="aiFocusRing" class="ai-focus-ring hidden"><span id="aiFocusTag" class="ai-focus-tag">🤖 AI 聚焦</span></div>
+
+<!-- 局域网协作分享弹窗（从正文剥离到顶栏） -->
+<dialog id="lanDialog">
+  <div class="between" style="margin-bottom:8px">
+    <h3 style="margin:0;font-size:16px">🔗 局域网协同审阅</h3>
+    <button class="btn xs" id="btnCloseLanDlg" type="button">关闭</button>
+  </div>
+  <p class="muted" style="margin:0 0 12px">同局域网内的电脑或平板浏览器打开下方网址，即可一起分工审阅试卷，不重复领卷。</p>
+  <div class="row" style="gap:8px;padding:10px 12px;border-radius:11px;background:var(--soft);border:1px solid var(--line)">
+    <span id="lanUrlText" class="lan-url" style="flex:1">http://192.168.x.x:8888</span>
+    <button class="btn primary sm" id="btnCopyLan" type="button">复制网址</button>
+  </div>
+</dialog>
+
+<!-- 判分规则与答案详情弹窗（从主页面剥离，保持主界面极简） -->
+<dialog id="schemaRuleDialog" style="max-width:600px">
+  <div class="between" style="margin-bottom:10px">
+    <h3 style="margin:0;font-size:16px">⚙ 判分规则与标准答案配置</h3>
+    <button class="btn xs" id="btnCloseSchemaRuleDlg" type="button">关闭</button>
+  </div>
+  <div class="field" style="margin-bottom:14px">
+    <label style="font-size:13px">多选题漏选给分（默认一半 50%）</label>
+    <div class="row" style="gap:8px">
+      <div class="ratio-pills" id="multiRatioPills">
+        <button class="ratio-pill active" type="button" data-ratio="0.5">一半 50%（默认）</button>
+        <button class="ratio-pill" type="button" data-ratio="0">全对才给分 0%</button>
+        <button class="ratio-pill" type="button" data-ratio="0.33">三分之一</button>
+      </div>
+      <input id="inputCustomRatio" type="number" min="0" max="1" step="0.05" value="0.5" class="input" style="width:76px;padding:4px 8px;font-size:12.5px" title="自定义漏选给分比例 (0~1)">
+      <button class="btn sm" id="btnSaveMultiRatio" type="button">应用</button>
+    </div>
+  </div>
+  <div class="field" style="margin-bottom:12px">
+    <label style="font-size:13px">快速操作</label>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="btn sm" id="btnAskAiEditSchema" type="button">🤖 喊 AI 改规则 / 答案</button>
+      <button class="btn sm" id="btnParseSchemaVlm" type="button" title="无本地 CLI Agent 时直接用视觉大模型解析已传答案">⚡ VLM 直连解析</button>
+      <button class="btn sm" id="btnViewSchemaJson" type="button">👁 查看/编辑 JSON</button>
+      <button class="btn sm ghost" id="btnClearSchema" type="button" style="color:var(--err)">清除当前答案</button>
+    </div>
+  </div>
+  <div id="schemaJsonWrap" class="hidden" style="display:flex;flex-direction:column;gap:8px">
+    <textarea id="schemaJsonEdit" rows="9" class="input" style="font-family:Consolas,monospace;font-size:12px"></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn primary sm" id="btnSaveSchemaJson" type="button">保存 JSON</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- 内存暂存 Crop 高级设置弹窗（静默护航，不打扰日常改卷界面） -->
+<dialog id="memPreflightDialog" style="max-width:520px">
+  <div class="between" style="margin-bottom:8px">
+    <h3 style="margin:0;font-size:16px">⚡ 内存暂存 Crop 与运行预算</h3>
+    <button class="btn xs" id="btnCloseMemDlg" type="button">关闭</button>
+  </div>
+  <p class="muted" style="margin:0 0 12px">改卷模式下默认启用内存暂存：切图与拼图在内存里直接发送给 API，识别完立刻释放，不在硬盘留大量零碎小图；若内存不足会自动降级硬盘缓存。</p>
+  <label class="row" style="gap:7px;cursor:pointer;font-weight:600;margin-bottom:10px">
+    <input id="chkMemoryCrops" type="checkbox" checked> 启用内存暂存 Crop（API 识别完即删）
+  </label>
+  <div id="memPlanText" style="padding:10px 12px;border-radius:10px;background:var(--soft);border:1px solid var(--line);font-size:12.5px;color:var(--text);margin-bottom:12px">正在准备内存预检...</div>
+  <div class="row" style="justify-content:flex-end">
+    <button class="btn sm" id="btnRunMemPreflight" type="button">🧪 立即测一遍内存预算</button>
+  </div>
+</dialog>
 
 <!-- 新手引导弹窗 -->
 <dialog id="guideDialog" class="guide-dlg">
@@ -1270,7 +1486,8 @@ let CHECK = null;
 let CURRENT_VIEW = 'overview';
 let SELECTED_SUBJECT = localStorage.getItem('wbLastSubject') || '物理';
 let INITIALIZED = false;
-let ARCH_COLLAPSED = localStorage.getItem('wbArchCollapsed') === '1';
+let ARCH_COLLAPSED = true;
+let ARCH_USER_EXPANDED = false;
 let OVERVIEW_INFLIGHT = false;
 let OVERVIEW_TIMER = null;
 let OVERVIEW_TIMER_MS = 0;
@@ -1278,7 +1495,8 @@ let OVERVIEW_TIMER_MS = 0;
 function getUserName() { return (localStorage.getItem('reviewUserName') || '').trim(); }
 function setUserName(name) {
   localStorage.setItem('reviewUserName', name.trim());
-  $('btnUser').textContent = '👤 ' + (name.trim() || '填写称呼');
+  const lbl = $('btnUserLabel');
+  if (lbl) lbl.textContent = name.trim() || '填写称呼';
   pingPresence('总览');
 }
 
@@ -1305,6 +1523,9 @@ function setView(view) {
   $('viewIngest').classList.toggle('hidden', view !== 'ingest');
   $('viewOverview').classList.toggle('hidden', view !== 'overview');
   $('viewTrain').classList.toggle('hidden', view !== 'train');
+  if ($('btnBackFromCheck')) {
+    $('btnBackFromCheck').classList.toggle('hidden', !(view === 'check' && WORK_MODE === 'grading'));
+  }
   document.querySelectorAll('.step-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.view === view);
   });
@@ -1770,10 +1991,24 @@ function renderCheck(rep) {
 
   const needRepair = !rep.ok || rep.warning_count > 0;
   $('repairBar').classList.toggle('hidden', !needRepair);
+  if (needRepair) {
+    const errItems = items.filter(x => x.severity === 'error');
+    const warnItems = items.filter(x => x.severity === 'warn');
+    if ($('repairBarTitle')) {
+      $('repairBarTitle').textContent = errItems.length ? '需处理：' : '兼容提醒：';
+      $('repairBarTitle').style.color = errItems.length ? 'var(--err)' : 'var(--warn)';
+    }
+    if ($('repairBarSummary')) {
+      const targetList = errItems.length ? errItems : warnItems;
+      const summaryTxt = targetList.slice(0, 2).map(x => `${x.name}（${x.detail}）`).join('；');
+      $('repairBarSummary').textContent = summaryTxt + (errItems.length ? '' : '（一般不影响正常改卷）');
+    }
+  }
   $('btnRepairPip').classList.toggle('hidden', !(rep.missing_packages && rep.missing_packages.length));
   $('btnUnpackWeights').classList.toggle('hidden', !(rep.missing_weights && rep.missing_weights.length && rep.has_encrypted_weights));
   const vlmKeyItem = items.find(x => x.id === 'vlm_api_key' || x.id === 'ark_key');
   $('btnSetVlmKey').classList.toggle('hidden', !vlmKeyItem || vlmKeyItem.ok);
+  updateEnvStatusPill(rep);
 
   // 节点 1：算力底座（Python + 依赖库 + GPU/CPU）
   const pkgItems = items.filter(x => x.category === 'runtime' || x.category === 'packages');
@@ -1842,10 +2077,10 @@ function renderCheck(rep) {
   ENV_STATES.review = 'ok';
   $('envReviewFoot').textContent = OVERVIEW?.active_batch ? '进入识别与审阅' : '进入导入试卷';
 
-  // 完整自检明细抽屉（仅存在阻塞缺失项 error 时自动展开，保持首屏极简）
+  // 完整自检明细抽屉（仅存在阻塞缺失项 error 时自动展开，平时默认折叠保持整洁）
   const okCnt = items.filter(x => x.severity === 'ok').length;
   $('checkDetailTag').textContent = `${okCnt}/${items.length} 正常` + (rep.warning_count ? ` · ${rep.warning_count} 提醒` : '') + (rep.error_count ? ` · ${rep.error_count} 缺失` : '');
-  if (rep.error_count > 0) $('drawerCheckDetails').open = true;
+  $('drawerCheckDetails').open = rep.error_count > 0;
 
   $('checkGrid').innerHTML = items.map(it => `
     <div class="check-item ${it.severity}">
@@ -1985,7 +2220,7 @@ let LAST_SPEED_UI_TS = 0;
 
 function applyArchCollapseUI() {
   $('archStageBox').classList.toggle('hidden', ARCH_COLLAPSED);
-  $('btnToggleArch').textContent = ARCH_COLLAPSED ? '展开架构图' : '收起架构图';
+  $('btnToggleArch').textContent = ARCH_COLLAPSED ? '展开流向图 ▾' : '收起流向图 ▴';
   if (!ARCH_COLLAPSED) requestAnimationFrame(() => PipeFlow.relayout(true));
 }
 
@@ -2025,9 +2260,11 @@ function renderPipelineDashboard(data) {
     running ? ' running' : (isErrState ? ' error' : (isWarnState ? ' warn' : ''))
   );
 
-  // 若正在运行或出错，自动展开架构图便于观察
-  if ((running || isErrState) && ARCH_COLLAPSED) {
+  // 运行中或出错自动展开流向图；已完成则默认自动收起为紧凑摘要条，把首屏 C 位留给「人工复审」
+  if (running || isErrState) {
     ARCH_COLLAPSED = false;
+  } else {
+    ARCH_COLLAPSED = !ARCH_USER_EXPANDED;
   }
   applyArchCollapseUI();
 
@@ -2391,27 +2628,53 @@ function renderSubjects(list) {
   });
 }
 
+function updateEnvStatusPill(rep) {
+  const pill = $('btnEnvPill');
+  const txt = $('envPillText');
+  if (!pill || !txt) return;
+  if (!rep) {
+    pill.className = 'env-status-pill ok';
+    txt.textContent = '环境就绪';
+    return;
+  }
+  if (!rep.ok) {
+    pill.className = 'env-status-pill err';
+    txt.textContent = `环境缺 ${rep.error_count || 1} 项`;
+  } else if (rep.warning_count > 0) {
+    pill.className = 'env-status-pill warn';
+    txt.textContent = `环境就绪 (${rep.warning_count}提醒)`;
+  } else {
+    pill.className = 'env-status-pill ok';
+    txt.textContent = '环境就绪';
+  }
+  pill.classList.toggle('hidden', !OVERVIEW?.is_host || WORK_MODE !== 'grading');
+}
+
 function renderOverview(data) {
   OVERVIEW = data;
   const isHost = !!data.is_host;
   const workMode = data.work_mode === 'iteration' ? 'iteration' : 'grading';
   WORK_MODE = workMode;
 
-  $('rolePill').className = 'role-pill ' + (isHost ? 'host' : 'collab');
-  $('rolePill').innerHTML = isHost ? '<i class="dot"></i><span>主机</span>' : '<i class="dot"></i><span>协作者</span>';
+  // 主机不重复展示「主机」双徽章；协作者展示蓝色协作者标签
+  $('rolePill').className = 'role-pill ' + (isHost ? 'host hidden' : 'collab');
+  $('rolePill').innerHTML = '<i class="dot"></i><span>协作者</span>';
   $('topSub').textContent = isHost
-    ? `${workMode === 'grading' ? '改试卷模式' : '模型迭代模式'} · 局域网 ${data.lan_url}`
+    ? (workMode === 'grading' ? '改试卷模式 · 暖色轻量批改' : '模型迭代模式 · 冷色训练调优')
     : `已连主机 ${window.location.host}`;
 
   $('workModePill').classList.toggle('hidden', !isHost);
   applyWorkModeUI(workMode, false);
 
   $('hostStepper').classList.toggle('hidden', !isHost);
-  $('inviteBar').classList.toggle('hidden', !isHost);
+  if ($('btnLanShare')) $('btnLanShare').classList.toggle('hidden', !isHost);
+  if ($('btnOpenMemDialog')) $('btnOpenMemDialog').classList.toggle('hidden', !isHost);
   $('hostBatchActions').classList.toggle('hidden', !isHost);
   $('btnOpenAi').classList.toggle('hidden', !isHost);
   $('btnOpenVlm').classList.toggle('hidden', !isHost);
-  $('lanUrlText').textContent = data.lan_url;
+  if ($('lanUrlText')) $('lanUrlText').textContent = data.lan_url;
+  if (isHost && data.last_check) updateEnvStatusPill(data.last_check);
+  else if (isHost) updateEnvStatusPill(CHECK);
 
   if (isHost) {
     renderSchemaStrip(data);
@@ -2426,12 +2689,15 @@ function renderOverview(data) {
   const ab = data.active_batch;
   const rs = data.recognition_summary;
   if (ab) {
-    $('activeBatchTitle').textContent = `${ab.batch_id}（${ab.subject} · ${ab.total_images} 张）`;
+    const showSubj = ab.subject && ab.subject !== '通用' && ab.subject !== '试卷';
+    $('activeBatchTitle').textContent = showSubj
+      ? `${ab.batch_id}（${ab.subject} · ${ab.total_images} 张）`
+      : `${ab.batch_id}（${ab.total_images} 张）`;
     const recText = rs?.status || (ab.has_recognition ? '已识别' : '待识别');
     $('activeBatchMeta').textContent = `${ab.created_at} · ${recText}`;
   } else {
     $('activeBatchTitle').textContent = '尚未导入试卷';
-    $('activeBatchMeta').textContent = isHost ? '点右侧「+ 导入」开始' : '等待主机导入试卷';
+    $('activeBatchMeta').textContent = isHost ? '点右侧「+ 新试卷」或切到第 1 步贴入试卷' : '等待主机导入试卷';
   }
 
   const sel = $('batchSelect');
@@ -2635,10 +2901,32 @@ function connectSSE() {
 }
 
 /* ==================== 事件绑定 ==================== */
-$('btnUser').textContent = '👤 ' + (getUserName() || '填写称呼');
+if ($('btnUserLabel')) $('btnUserLabel').textContent = getUserName() || '主机';
 $('btnUser').onclick = () => { $('nameInput').value = getUserName(); $('nameDialog').showModal(); };
 $('btnSaveName').onclick = () => { const v = $('nameInput').value.trim(); if (!v) return; setUserName(v); $('nameDialog').close(); };
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnSaveName').click(); });
+
+if ($('btnEnvPill')) {
+  $('btnEnvPill').onclick = async () => {
+    setView('check');
+    if (!CHECK) {
+      try { renderCheck(await api('/api/check')); } catch (e) { alert(e.message); }
+    }
+  };
+}
+if ($('btnBackFromCheck')) {
+  $('btnBackFromCheck').onclick = () => setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
+}
+if ($('btnLanShare')) $('btnLanShare').onclick = () => $('lanDialog')?.showModal();
+if ($('btnCloseLanDlg')) $('btnCloseLanDlg').onclick = () => $('lanDialog')?.close();
+if ($('btnOpenMemDialog')) {
+  $('btnOpenMemDialog').onclick = () => {
+    $('memPreflightDialog')?.showModal();
+    if (OVERVIEW?.active_batch && !OVERVIEW.last_memory_plan) runMemoryPreflight(false);
+  };
+}
+if ($('btnCloseMemDlg')) $('btnCloseMemDlg').onclick = () => $('memPreflightDialog')?.close();
+if ($('btnCloseSchemaRuleDlg')) $('btnCloseSchemaRuleDlg').onclick = () => $('schemaRuleDialog')?.close();
 
 document.querySelectorAll('.step-tab').forEach(btn => {
   btn.onclick = async () => {
@@ -2679,7 +2967,7 @@ $('nodeReview').onclick = () => {
 
 $('btnToggleArch').onclick = () => {
   ARCH_COLLAPSED = !ARCH_COLLAPSED;
-  localStorage.setItem('wbArchCollapsed', ARCH_COLLAPSED ? '1' : '0');
+  ARCH_USER_EXPANDED = !ARCH_COLLAPSED;
   applyArchCollapseUI();
 };
 
@@ -2925,11 +3213,131 @@ function renderAiPanel(aiJob) {
   body.scrollTop = body.scrollHeight;
 }
 
-function openAiHelperDialog() {
+/* ==================== 可自由拖动 + 可缩放 AI 帮手浮窗 ==================== */
+const AI_RECT_KEY = 'wbAiDrawerRect';
+function clampAiDrawerRect(rect) {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const w = Math.max(340, Math.min(vw - 16, Number(rect.width) || 430));
+  const h = Math.max(360, Math.min(vh - 16, Number(rect.height) || Math.min(620, vh - 88)));
+  const left = Math.max(8, Math.min(vw - Math.min(w, 160) - 8, Number(rect.left)));
+  const top = Math.max(8, Math.min(vh - 54, Number(rect.top)));
+  return { left: Math.round(left), top: Math.round(top), width: Math.round(w), height: Math.round(h) };
+}
+function applyAiDrawerRect(rect) {
+  const d = $('aiDrawer');
+  if (!d || !rect) return;
+  const c = clampAiDrawerRect(rect);
+  d.style.left = c.left + 'px';
+  d.style.top = c.top + 'px';
+  d.style.right = 'auto';
+  d.style.bottom = 'auto';
+  d.style.width = c.width + 'px';
+  d.style.height = c.height + 'px';
+}
+function restoreAiDrawerRect() {
+  try {
+    const raw = localStorage.getItem(AI_RECT_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+      applyAiDrawerRect(saved);
+    }
+  } catch (_) {}
+}
+function resetAiDrawerRect() {
+  const d = $('aiDrawer');
+  if (!d) return;
+  localStorage.removeItem(AI_RECT_KEY);
+  d.style.left = '';
+  d.style.top = '';
+  d.style.right = '';
+  d.style.bottom = '';
+  d.style.width = '';
+  d.style.height = '';
+}
+(function initDraggableAiDrawer() {
+  const drawer = $('aiDrawer');
+  const head = $('aiDrawerHead');
+  const handle = $('aiResizeHandle');
+  if (!drawer || !head) return;
+
+  let mode = null; // 'drag' | 'resize'
+  let startX = 0, startY = 0, origLeft = 0, origTop = 0, origW = 0, origH = 0;
+
+  head.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button,input,select,a')) return;
+    e.preventDefault();
+    const r = drawer.getBoundingClientRect();
+    mode = 'drag';
+    startX = e.clientX; startY = e.clientY;
+    origLeft = r.left; origTop = r.top; origW = r.width; origH = r.height;
+    applyAiDrawerRect({ left: origLeft, top: origTop, width: origW, height: origH });
+    drawer.classList.add('is-dragging');
+  });
+
+  head.addEventListener('dblclick', e => {
+    if (e.target.closest('button,input,select')) return;
+    resetAiDrawerRect();
+  });
+
+  if (handle) {
+    handle.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = drawer.getBoundingClientRect();
+      mode = 'resize';
+      startX = e.clientX; startY = e.clientY;
+      origLeft = r.left; origTop = r.top; origW = r.width; origH = r.height;
+      applyAiDrawerRect({ left: origLeft, top: origTop, width: origW, height: origH });
+      drawer.classList.add('is-dragging');
+    });
+  }
+
+  window.addEventListener('pointermove', e => {
+    if (!mode) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (mode === 'drag') {
+      applyAiDrawerRect({ left: origLeft + dx, top: origTop + dy, width: origW, height: origH });
+    } else if (mode === 'resize') {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const w = Math.max(340, Math.min(vw - origLeft - 8, origW + dx));
+      const h = Math.max(360, Math.min(vh - origTop - 8, origH + dy));
+      drawer.style.width = Math.round(w) + 'px';
+      drawer.style.height = Math.round(h) + 'px';
+    }
+  });
+
+  window.addEventListener('pointerup', () => {
+    if (!mode) return;
+    mode = null;
+    drawer.classList.remove('is-dragging');
+    const r = drawer.getBoundingClientRect();
+    try {
+      localStorage.setItem(AI_RECT_KEY, JSON.stringify({
+        left: Math.round(r.left), top: Math.round(r.top),
+        width: Math.round(r.width), height: Math.round(r.height),
+      }));
+    } catch (_) {}
+  });
+
+  window.addEventListener('resize', () => {
+    if (drawer.classList.contains('hidden')) return;
+    if (drawer.style.left) {
+      const r = drawer.getBoundingClientRect();
+      applyAiDrawerRect({ left: r.left, top: r.top, width: r.width, height: r.height });
+    }
+  });
+})();
+
+function openAiHelperDialog(forceOpen = false) {
   const drawer = $('aiDrawer');
   if (!drawer) return;
-  drawer.classList.toggle('hidden');
+  if (forceOpen) drawer.classList.remove('hidden');
+  else drawer.classList.toggle('hidden');
   if (!drawer.classList.contains('hidden')) {
+    restoreAiDrawerRect();
     if (!AGENTS_CACHE) api('/api/agents').then(r => syncAgentsUI(r, OVERVIEW?.config)).catch(() => {});
     api('/api/ai/sessions').then(r => syncAiSessions(r.sessions || [])).catch(() => {});
     updateAiProviderHint();
@@ -2937,8 +3345,8 @@ function openAiHelperDialog() {
   }
 }
 
-if ($('btnOpenAi')) $('btnOpenAi').onclick = () => openAiHelperDialog();
-$('btnAskAgent').onclick = () => { $('aiDrawer')?.classList.remove('hidden'); updateAiProviderHint(); };
+if ($('btnOpenAi')) $('btnOpenAi').onclick = () => openAiHelperDialog(false);
+$('btnAskAgent').onclick = () => openAiHelperDialog(true);
 $('btnCloseAiDlg').onclick = () => $('aiDrawer')?.classList.add('hidden');
 if ($('btnToggleAiCfg')) $('btnToggleAiCfg').onclick = () => $('aiCfgBox')?.classList.toggle('hidden');
 if ($('aiProviderSelect')) {
@@ -3072,12 +3480,270 @@ $('btnSaveOpencode').onclick = async () => {
   } catch (err) { alert(err.message); }
 };
 
+/* ==================== 双贴入区（试卷 + 答案）与爽感确认动效（回弹 + 🎉 + 绿勾） ==================== */
+let STAGED_PAPER = null;   // { kind: 'path', path, name, image_count, sample_names } | { kind: 'files', files: [{ name, data_b64, size, thumbUrl }] }
+let STAGED_ANSWER = null;  // { kind: 'file', file, name, size, thumbUrl } | { kind: 'path', path, name, size } | { kind: 'text', text, length }
+
+function fmtFileSize(bytes) {
+  const n = Number(bytes || 0);
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ''));
+    fr.onerror = () => reject(new Error('读取文件失败'));
+    fr.readAsDataURL(file);
+  });
+}
+
+function spawnCelebrateBurst(hostEl) {
+  if (!hostEl) return;
+  hostEl.innerHTML = '';
+  const pieces = [
+    { ch: '🎉', x1: -10, y1: -16, x2: -44, y2: -54, r1: '-18deg', r2: '-42deg' },
+    { ch: '✨', x1: 8,   y1: -20, x2: 26,  y2: -58, r1: '15deg',  r2: '45deg'  },
+    { ch: '🎉', x1: -24, y1: -8,  x2: -74, y2: -34, r1: '-25deg', r2: '-60deg' },
+    { ch: '✓',  x1: -2,  y1: -24, x2: -8,  y2: -64, r1: '0deg',   r2: '12deg', color: '#16a34a' },
+    { ch: '✨', x1: 14,  y1: -8,  x2: 42,  y2: -28, r1: '20deg',  r2: '55deg'  },
+    { ch: '🌟', x1: -18, y1: 6,   x2: -58, y2: 14,  r1: '-10deg', r2: '-35deg' },
+  ];
+  pieces.forEach((p, idx) => {
+    const sp = document.createElement('span');
+    sp.className = 'celebrate-bit';
+    sp.textContent = p.ch;
+    sp.style.right = '22px';
+    sp.style.top = '18px';
+    if (p.color) { sp.style.color = p.color; sp.style.fontWeight = '900'; }
+    sp.style.setProperty('--tx1', p.x1 + 'px');
+    sp.style.setProperty('--ty1', p.y1 + 'px');
+    sp.style.setProperty('--tx2', p.x2 + 'px');
+    sp.style.setProperty('--ty2', p.y2 + 'px');
+    sp.style.setProperty('--rot1', p.r1);
+    sp.style.setProperty('--rot2', p.r2);
+    sp.style.animationDelay = (idx * 24) + 'ms';
+    hostEl.appendChild(sp);
+  });
+  clearTimeout(hostEl._ct);
+  hostEl._ct = setTimeout(() => { hostEl.innerHTML = ''; }, 980);
+}
+
+function triggerDropConfirmFX(cardEl, celebrateEl, tagEl, tagText) {
+  if (!cardEl) return;
+  if (tagEl && tagText) tagEl.textContent = tagText;
+  cardEl.classList.remove('confirm-pop', 'is-confirmed');
+  void cardEl.offsetWidth;
+  cardEl.classList.add('is-confirmed', 'confirm-pop');
+  spawnCelebrateBurst(celebrateEl);
+  clearTimeout(cardEl._pt);
+  cardEl._pt = setTimeout(() => cardEl.classList.remove('confirm-pop'), 620);
+}
+
+function updateIngestReadyHint() {
+  const hint = $('ingestReadyHint');
+  if (!hint) return;
+  const pOk = Boolean(STAGED_PAPER || $('inputSourceDir').value.trim());
+  const aOk = Boolean(STAGED_ANSWER);
+  if (pOk && aOk) hint.textContent = '✓ 试卷与答案都已就位，点左侧按钮即可一键开改';
+  else if (pOk) hint.textContent = '✓ 试卷已就位（答案可留空，也可现在贴入）';
+  else hint.textContent = '放入试卷后即可一键开改';
+}
+
+function showPaperError(msg) {
+  const el = $('paperErrorTip');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+function clearStagedPaper(clearInput = true) {
+  STAGED_PAPER = null;
+  if (clearInput && $('inputSourceDir')) $('inputSourceDir').value = '';
+  $('dropZonePaper')?.classList.remove('is-confirmed', 'confirm-pop');
+  $('paperSummaryBox')?.classList.add('hidden');
+  $('paperThumbImg')?.classList.add('hidden');
+  showPaperError('');
+  updateIngestReadyHint();
+}
+
+function setPaperConfirmedPath(info) {
+  STAGED_PAPER = { kind: 'path', ...info };
+  showPaperError('');
+  $('paperSummaryBox').classList.remove('hidden');
+  $('paperThumbImg').classList.add('hidden');
+  $('paperSummaryTitle').textContent = info.kind === 'file'
+    ? `单张测试卷：${info.name}`
+    : `文件夹：${info.name}（共 ${info.image_count} 张）`;
+  $('paperSummaryMeta').textContent = info.kind === 'file'
+    ? `${fmtFileSize(info.size_bytes)} · ${info.path}`
+    : `含 ${(info.sample_names || []).slice(0, 3).join('、')}${info.image_count > 3 ? ' 等' : ''}`;
+  triggerDropConfirmFX(
+    $('dropZonePaper'),
+    $('paperCelebrate'),
+    $('paperConfirmTag'),
+    info.kind === 'file' ? '已放入 1 张' : `已放入 ${info.image_count} 张`
+  );
+  updateIngestReadyHint();
+}
+
+async function setPaperConfirmedFiles(fileList, sourceLabel = '拖入图片') {
+  const imgs = Array.from(fileList || []).filter(f => f && (f.type.startsWith('image/') || /\.(jpg|jpeg|png|bmp|webp)$/i.test(f.name || '')));
+  if (!imgs.length) {
+    showPaperError('请放入图片格式文件（jpg / png / bmp / webp）');
+    return;
+  }
+  showPaperError('');
+  const encoded = [];
+  for (let i = 0; i < imgs.length; i++) {
+    const f = imgs[i];
+    const dataUrl = await readFileAsDataUrl(f);
+    const fname = f.name && f.name !== 'image.png' ? f.name : `剪贴板试卷_${i + 1}.png`;
+    encoded.push({ name: fname, data_b64: dataUrl, size: f.size || 0, thumbUrl: dataUrl });
+  }
+  STAGED_PAPER = { kind: 'files', files: encoded };
+  if ($('inputSourceDir')) $('inputSourceDir').value = '';
+  $('paperSummaryBox').classList.remove('hidden');
+  const thumb = $('paperThumbImg');
+  if (thumb && encoded[0]?.thumbUrl) {
+    thumb.src = encoded[0].thumbUrl;
+    thumb.classList.remove('hidden');
+  }
+  const totalBytes = encoded.reduce((a, b) => a + (b.size || 0), 0);
+  $('paperSummaryTitle').textContent = encoded.length === 1
+    ? `${sourceLabel}：${encoded[0].name}`
+    : `已选 ${encoded.length} 张试卷照片`;
+  $('paperSummaryMeta').textContent = encoded.length === 1
+    ? `${fmtFileSize(totalBytes)} · 单张快速测试已就绪`
+    : `共 ${fmtFileSize(totalBytes)} · ${encoded.slice(0, 3).map(x => x.name).join('、')}${encoded.length > 3 ? ' 等' : ''}`;
+  triggerDropConfirmFX(
+    $('dropZonePaper'),
+    $('paperCelebrate'),
+    $('paperConfirmTag'),
+    encoded.length === 1 ? '已贴入 1 张' : `已放入 ${encoded.length} 张`
+  );
+  updateIngestReadyHint();
+}
+
+let _paperInspectTimer = null;
+async function inspectPaperPathInput(immediate = false) {
+  const raw = ($('inputSourceDir')?.value || '').trim();
+  if (!raw) {
+    if (STAGED_PAPER?.kind === 'path') clearStagedPaper(false);
+    return;
+  }
+  const run = async () => {
+    try {
+      const info = await api('/api/ingest/inspect-path', { method: 'POST', body: JSON.stringify({ path: raw }) });
+      if (info.ok) {
+        if ($('inputSourceDir').value.trim() !== info.path) $('inputSourceDir').value = info.path;
+        setPaperConfirmedPath(info);
+      }
+    } catch (err) {
+      STAGED_PAPER = null;
+      $('dropZonePaper')?.classList.remove('is-confirmed');
+      $('paperSummaryBox')?.classList.add('hidden');
+      showPaperError(err.message);
+      updateIngestReadyHint();
+    }
+  };
+  clearTimeout(_paperInspectTimer);
+  if (immediate) await run();
+  else _paperInspectTimer = setTimeout(run, 360);
+}
+
+function clearStagedAnswer(clearTextarea = true) {
+  STAGED_ANSWER = null;
+  if (clearTextarea && $('inputAnswerPaste')) $('inputAnswerPaste').value = '';
+  $('dropZoneAnswer')?.classList.remove('is-confirmed', 'confirm-pop');
+  $('answerSummaryBox')?.classList.add('hidden');
+  $('answerThumbImg')?.classList.add('hidden');
+  updateIngestReadyHint();
+}
+
+async function setAnswerConfirmedFile(file, sourceLabel = '答案文件') {
+  if (!file) return;
+  const isImg = file.type.startsWith('image/') || /\.(png|jpg|jpeg|bmp|webp)$/i.test(file.name || '');
+  const fname = file.name && file.name !== 'image.png' ? file.name : '剪贴板答案截图.png';
+  let thumbUrl = '';
+  if (isImg) thumbUrl = await readFileAsDataUrl(file);
+  STAGED_ANSWER = { kind: 'file', file, name: fname, size: file.size || 0, thumbUrl };
+  $('answerSummaryBox').classList.remove('hidden');
+  const thumb = $('answerThumbImg');
+  if (thumb && thumbUrl) { thumb.src = thumbUrl; thumb.classList.remove('hidden'); }
+  else if (thumb) thumb.classList.add('hidden');
+  $('answerSummaryTitle').textContent = `${sourceLabel}：${fname}`;
+  $('answerSummaryMeta').textContent = `${fmtFileSize(file.size)} · 入库后自动交 AI 整理为判分标准`;
+  triggerDropConfirmFX($('dropZoneAnswer'), $('answerCelebrate'), $('answerConfirmTag'), '答案已放入');
+  updateIngestReadyHint();
+}
+
+function setAnswerConfirmedPath(info) {
+  STAGED_ANSWER = { kind: 'path', path: info.path, name: info.name, size: info.size_bytes || 0 };
+  $('answerSummaryBox').classList.remove('hidden');
+  $('answerThumbImg')?.classList.add('hidden');
+  $('answerSummaryTitle').textContent = `本地答案文件：${info.name}`;
+  $('answerSummaryMeta').textContent = `${fmtFileSize(info.size_bytes)} · ${info.path}`;
+  triggerDropConfirmFX($('dropZoneAnswer'), $('answerCelebrate'), $('answerConfirmTag'), '路径已确认');
+  updateIngestReadyHint();
+}
+
+function setAnswerConfirmedText(text) {
+  const clean = String(text || '').trim();
+  if (!clean) {
+    if (STAGED_ANSWER?.kind === 'text' || STAGED_ANSWER?.kind === 'path') clearStagedAnswer(false);
+    return;
+  }
+  const lines = clean.split(/\r?\n/).filter(Boolean).length;
+  STAGED_ANSWER = { kind: 'text', text: clean, length: clean.length };
+  $('answerSummaryBox').classList.remove('hidden');
+  $('answerThumbImg')?.classList.add('hidden');
+  $('answerSummaryTitle').textContent = `已贴入答案文本（${clean.length} 字 · ${lines} 行）`;
+  $('answerSummaryMeta').textContent = clean.slice(0, 56).replace(/\s+/g, ' ') + (clean.length > 56 ? '...' : '');
+  triggerDropConfirmFX($('dropZoneAnswer'), $('answerCelebrate'), $('answerConfirmTag'), '答案已贴入');
+  updateIngestReadyHint();
+}
+
+function looksLikeLocalPath(s) {
+  const t = String(s || '').trim().replace(/^["']|["']$/g, '');
+  if (!t || t.includes('\n') || t.length > 320) return false;
+  return /^[a-zA-Z]:[\\/]/.test(t) || /^\\\\/.test(t);
+}
+
+let _ansInputTimer = null;
+async function processAnswerTextOrPath(raw, immediate = false) {
+  const clean = String(raw || '').trim();
+  if (!clean) {
+    if (STAGED_ANSWER?.kind === 'text' || STAGED_ANSWER?.kind === 'path') clearStagedAnswer(false);
+    return;
+  }
+  const run = async () => {
+    if (looksLikeLocalPath(clean)) {
+      try {
+        const info = await api('/api/schema/inspect-path', { method: 'POST', body: JSON.stringify({ path: clean }) });
+        if (info.ok) {
+          setAnswerConfirmedPath(info);
+          return;
+        }
+      } catch (_) {}
+    }
+    setAnswerConfirmedText(clean);
+  };
+  clearTimeout(_ansInputTimer);
+  if (immediate) await run();
+  else _ansInputTimer = setTimeout(run, 420);
+}
+
+// 左侧试卷卡片绑定
 $('btnPickFolder').onclick = async () => {
   $('btnPickFolder').disabled = true;
   try {
     const res = await api('/api/pick-folder', { method: 'POST', body: '{}' });
     if (res.path) {
       $('inputSourceDir').value = res.path;
+      await inspectPaperPathInput(true);
     } else if (res.timeout || res.cancelled) {
       showBanner('gui', res.message || '已取消选择文件夹，可直接粘贴路径', 4500);
     }
@@ -3087,22 +3753,184 @@ $('btnPickFolder').onclick = async () => {
     $('btnPickFolder').disabled = false;
   }
 };
+if ($('btnPickPaperFiles')) $('btnPickPaperFiles').onclick = () => $('paperFilesInput')?.click();
+if ($('paperFilesInput')) {
+  $('paperFilesInput').onchange = e => {
+    const files = e.target.files;
+    if (files && files.length) setPaperConfirmedFiles(files, '已选单张测试卷');
+    e.target.value = '';
+  };
+}
+if ($('btnClearPaper')) $('btnClearPaper').onclick = () => clearStagedPaper(true);
+if ($('inputSourceDir')) {
+  $('inputSourceDir').addEventListener('paste', () => setTimeout(() => inspectPaperPathInput(true), 20));
+  $('inputSourceDir').addEventListener('change', () => inspectPaperPathInput(true));
+  $('inputSourceDir').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inspectPaperPathInput(true); } });
+}
+const _dzPaper = $('dropZonePaper');
+if (_dzPaper) {
+  _dzPaper.addEventListener('dragover', e => { e.preventDefault(); _dzPaper.classList.add('dragover'); });
+  _dzPaper.addEventListener('dragleave', e => { if (!_dzPaper.contains(e.relatedTarget)) _dzPaper.classList.remove('dragover'); });
+  _dzPaper.addEventListener('drop', e => {
+    e.preventDefault();
+    _dzPaper.classList.remove('dragover');
+    if (e.dataTransfer?.files?.length) setPaperConfirmedFiles(e.dataTransfer.files, '拖入试卷');
+  });
+}
+
+// 右侧答案卡片绑定
+if ($('btnPickAnswerFile')) $('btnPickAnswerFile').onclick = () => $('answerStageFileInput')?.click();
+if ($('answerStageFileInput')) {
+  $('answerStageFileInput').onchange = e => {
+    const f = e.target.files?.[0];
+    if (f) setAnswerConfirmedFile(f, '答案文件');
+    e.target.value = '';
+  };
+}
+if ($('btnClearAnswerStage')) $('btnClearAnswerStage').onclick = () => clearStagedAnswer(true);
+if ($('inputAnswerPaste')) {
+  $('inputAnswerPaste').addEventListener('paste', e => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imgItem = items.find(it => it.type && it.type.startsWith('image/'));
+    if (imgItem) {
+      e.preventDefault();
+      const f = imgItem.getAsFile();
+      if (f) setAnswerConfirmedFile(f, '剪贴板答案截图');
+      return;
+    }
+    setTimeout(() => processAnswerTextOrPath($('inputAnswerPaste').value, true), 20);
+  });
+  $('inputAnswerPaste').addEventListener('input', () => processAnswerTextOrPath($('inputAnswerPaste').value, false));
+}
+const _dzAns = $('dropZoneAnswer');
+if (_dzAns) {
+  _dzAns.addEventListener('dragover', e => { e.preventDefault(); _dzAns.classList.add('dragover'); });
+  _dzAns.addEventListener('dragleave', e => { if (!_dzAns.contains(e.relatedTarget)) _dzAns.classList.remove('dragover'); });
+  _dzAns.addEventListener('drop', e => {
+    e.preventDefault();
+    _dzAns.classList.remove('dragover');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) setAnswerConfirmedFile(f, '拖入答案');
+  });
+}
+
+// 全局智能 Ctrl+V（在「贴入试卷与答案」页面直接贴截图或路径，不用先找按钮）
+document.addEventListener('paste', e => {
+  if (CURRENT_VIEW !== 'ingest') return;
+  const active = document.activeElement;
+  if (active && (active.id === 'inputAnswerPaste' || active.id === 'aiNoteInput' || active.id === 'inputBatchName')) return;
+  const items = Array.from(e.clipboardData?.items || []);
+  const imgItems = items.filter(it => it.type && it.type.startsWith('image/'));
+  const inAnswerZone = active && $('dropZoneAnswer')?.contains(active);
+  if (imgItems.length) {
+    e.preventDefault();
+    const files = imgItems.map(it => it.getAsFile()).filter(Boolean);
+    if (inAnswerZone && files[0]) setAnswerConfirmedFile(files[0], '剪贴板答案截图');
+    else if (files.length) setPaperConfirmedFiles(files, '剪贴板测试卷');
+    return;
+  }
+  if (active && active.id === 'inputSourceDir') return;
+  const txt = (e.clipboardData?.getData('text') || '').trim();
+  if (txt && looksLikeLocalPath(txt) && !inAnswerZone) {
+    e.preventDefault();
+    $('inputSourceDir').value = txt;
+    inspectPaperPathInput(true);
+  }
+});
+
+async function attachStagedAnswerToBatch(batchId, staged) {
+  if (!staged || !batchId) return;
+  try {
+    // 若是标准答案 JSON 文件直接导入生效
+    if (staged.kind === 'file' && /\.json$/i.test(staged.name || '')) {
+      const txt = await staged.file.text();
+      const parsed = JSON.parse(txt);
+      await api('/api/schema', { method: 'POST', body: JSON.stringify({ batch_id: batchId, schema: parsed }) });
+      showBanner('gui', `已直接应用结构化答案 JSON：${staged.name}`, 4500);
+      return;
+    }
+    let res;
+    if (staged.kind === 'file') {
+      const qs = `?batch_id=${encodeURIComponent(batchId)}&filename=${encodeURIComponent(staged.name)}`;
+      const r = await fetch('/api/schema/upload-source' + qs, {
+        method: 'POST',
+        headers: { 'Content-Type': staged.file.type || 'application/octet-stream' },
+        body: staged.file,
+      });
+      res = await r.json().catch(() => ({}));
+      if (!r.ok || !res.ok) throw new Error(res.error || '上传答案失败');
+    } else if (staged.kind === 'path') {
+      res = await api('/api/schema/upload-source', {
+        method: 'POST',
+        body: JSON.stringify({ batch_id: batchId, source_path: staged.path }),
+      });
+    } else if (staged.kind === 'text') {
+      res = await api('/api/schema/upload-source', {
+        method: 'POST',
+        body: JSON.stringify({ batch_id: batchId, filename: 'pasted_answer.txt', text_content: staged.text }),
+      });
+    }
+    if (res && res.ok) {
+      const hasAgent = Boolean(AGENTS_CACHE?.available?.length);
+      if (hasAgent && res.ai_prompt) {
+        openAiHelperDialog(true);
+        $('aiNoteInput').value = res.ai_prompt;
+        $('btnStartAi').click();
+        showBanner('ai', '已把贴入的答案交给 AI 帮手整理为判分标准！', 5500);
+      } else {
+        showBanner('gui', '答案已随批次保存；本机无 CLI Agent，可在「判分规则」中一键走 VLM 直连解析。', 6000);
+      }
+    }
+  } catch (err) {
+    showBanner('gui', '附加答案失败（不影响试卷已入库）：' + err.message, 6000);
+  }
+}
 
 async function doIngest(autoStart = false) {
-  const source_dir = $('inputSourceDir').value.trim();
-  if (!source_dir) { alert('请先选择试卷照片文件夹'); return; }
+  const source_dir = ($('inputSourceDir')?.value || '').trim();
+  const hasFiles = STAGED_PAPER?.kind === 'files' && STAGED_PAPER.files?.length > 0;
+  if (!source_dir && !hasFiles) {
+    showPaperError('请先放入试卷照片文件夹，或拖入 / 粘贴一张测试试卷图');
+    $('dropZonePaper')?.focus();
+    return;
+  }
+  const useIterMeta = WORK_MODE === 'iteration';
+  const subject = useIterMeta ? SELECTED_SUBJECT : '通用';
+  const batch_name = useIterMeta ? ($('inputBatchName')?.value.trim() || '') : '';
+  const stagedAnsCopy = STAGED_ANSWER ? { ...STAGED_ANSWER } : null;
+
   $('btnDoIngest').disabled = true;
   $('btnIngestAndRun').disabled = true;
-  $('ingestMsg').textContent = '正在整理去重...';
+  $('ingestMsg').textContent = hasFiles ? `正在导入 ${STAGED_PAPER.files.length} 张试卷...` : '正在整理去重...';
   try {
-    const res = await api('/api/ingest', {
-      method: 'POST',
-      body: JSON.stringify({ source_dir, subject: SELECTED_SUBJECT, batch_name: $('inputBatchName').value.trim() }),
-    });
+    let res;
+    if (hasFiles) {
+      res = await api('/api/ingest/upload', {
+        method: 'POST',
+        body: JSON.stringify({
+          files: STAGED_PAPER.files.map(f => ({ name: f.name, data_b64: f.data_b64 })),
+          subject,
+          batch_name,
+        }),
+      });
+    } else {
+      res = await api('/api/ingest', {
+        method: 'POST',
+        body: JSON.stringify({ source_dir, subject, batch_name }),
+      });
+    }
     $('ingestMsg').textContent = res.message;
+    clearStagedPaper(true);
+    clearStagedAnswer(true);
+    const newBatchId = res.batch?.batch_id || '';
+    if (stagedAnsCopy && newBatchId) {
+      await attachStagedAnswerToBatch(newBatchId, stagedAnsCopy);
+    }
     await refreshOverview();
     if (autoStart) {
       await triggerRecognize();
+    } else {
+      setView('overview');
     }
   } catch (err) {
     $('ingestMsg').textContent = '失败：' + err.message;
@@ -3608,13 +4436,35 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 
 // 初始化
-/* ==================== 双模式切换（Codex 胶囊）+ 答案 PDF/判分 + 内存预检 + 训练库 ==================== */
+/* ==================== 双模式冷暖分色切换（Codex 胶囊 + 径向波纹动效）+ 答案弹窗 + 静默内存预算 ==================== */
 let WORK_MODE = 'grading';
 let LAST_PREFLIGHT_BATCH = '';
 let CURRENT_SCHEMA_OBJ = null;
 
-function applyWorkModeUI(mode, animate = false) {
+function playModeWave(mode, originPt) {
+  const wave = $('modeWaveOverlay');
+  if (!wave) return;
+  const pill = $('workModePill');
+  let wx = window.innerWidth * 0.5, wy = 36;
+  if (originPt && Number.isFinite(originPt.x) && Number.isFinite(originPt.y)) {
+    wx = originPt.x; wy = originPt.y;
+  } else if (pill) {
+    const r = pill.getBoundingClientRect();
+    wx = r.left + r.width / 2;
+    wy = r.top + r.height / 2;
+  }
+  wave.style.setProperty('--wx', Math.round(wx) + 'px');
+  wave.style.setProperty('--wy', Math.round(wy) + 'px');
+  wave.className = 'mode-wave ' + (mode === 'iteration' ? 'cool' : 'warm');
+  void wave.offsetWidth;
+  wave.classList.add('play');
+  clearTimeout(wave._wt);
+  wave._wt = setTimeout(() => wave.classList.remove('play'), 620);
+}
+
+function applyWorkModeUI(mode, animate = false, originPt = null) {
   const m = mode === 'iteration' ? 'iteration' : 'grading';
+  const isGrading = m === 'grading';
   WORK_MODE = m;
   document.body.dataset.workMode = m;
   const pill = $('workModePill');
@@ -3627,40 +4477,55 @@ function applyWorkModeUI(mode, animate = false) {
     });
   }
   const stepper = $('hostStepper');
-  if (stepper) stepper.classList.toggle('mode-grading', m === 'grading');
-  const tabTrain = $('tabTrain');
-  if (tabTrain) tabTrain.classList.toggle('hidden', m !== 'iteration');
+  if (stepper) stepper.classList.toggle('mode-grading', isGrading);
+  $('tabCheck')?.classList.toggle('hidden', isGrading);
+  $('tabTrain')?.classList.toggle('hidden', isGrading);
+  if ($('stepNumIngest')) $('stepNumIngest').textContent = isGrading ? '1' : '2';
+  if ($('stepNumOverview')) $('stepNumOverview').textContent = isGrading ? '2' : '3';
+  if ($('tabIngestTitle')) $('tabIngestTitle').textContent = isGrading ? '贴入试卷与答案' : '导入试卷';
+  if ($('tabIngestDesc')) $('tabIngestDesc').textContent = isGrading ? '拖放 / 贴路径 / Ctrl+V' : '选图入库与标注';
+  if ($('tabOverviewTitle')) $('tabOverviewTitle').textContent = isGrading ? '改卷与导分' : '识别与审阅';
+  if ($('tabOverviewDesc')) $('tabOverviewDesc').textContent = isGrading ? '进度 / 复审 / 成绩单' : '实时流向与协作';
+  if ($('iterIngestMeta')) $('iterIngestMeta').classList.toggle('hidden', isGrading);
+  if ($('btnIngestAndRun')) $('btnIngestAndRun').textContent = isGrading ? '▶ 开始改试卷' : '▶ 导入并开始识别';
+  if ($('btnEnvPill')) $('btnEnvPill').classList.toggle('hidden', !OVERVIEW?.is_host || !isGrading);
+
   const secWrap = $('secondaryWrap');
   if (secWrap && OVERVIEW) {
     const hasSec = (OVERVIEW.tasks || []).some(t => t.tier === 'secondary');
-    secWrap.classList.toggle('hidden', !OVERVIEW.is_host || m !== 'iteration' || !hasSec);
+    secWrap.classList.toggle('hidden', !OVERVIEW.is_host || isGrading || !hasSec);
   }
-  if (m === 'grading' && CURRENT_VIEW === 'train') {
-    setView('overview');
+  if (isGrading && (CURRENT_VIEW === 'train' || CURRENT_VIEW === 'check')) {
+    setView(OVERVIEW?.active_batch ? 'overview' : 'ingest');
   }
-  if ($('topSub') && OVERVIEW?.is_host && OVERVIEW?.lan_url) {
-    $('topSub').textContent = `${m === 'grading' ? '改试卷模式' : '模型迭代模式'} · 局域网 ${OVERVIEW.lan_url}`;
+  if ($('btnBackFromCheck')) {
+    $('btnBackFromCheck').classList.toggle('hidden', !(CURRENT_VIEW === 'check' && isGrading));
+  }
+  if ($('topSub') && OVERVIEW?.is_host) {
+    $('topSub').textContent = isGrading ? '改试卷模式 · 暖色轻量批改' : '模型迭代模式 · 冷色训练调优';
   }
   if ($('chkMemoryCrops') && animate) {
-    $('chkMemoryCrops').checked = (m === 'grading');
+    $('chkMemoryCrops').checked = isGrading;
   }
   if (animate) {
+    playModeWave(m, originPt);
     document.body.classList.remove('mode-switching');
     void document.body.offsetWidth;
     document.body.classList.add('mode-switching');
-    setTimeout(() => document.body.classList.remove('mode-switching'), 300);
+    setTimeout(() => document.body.classList.remove('mode-switching'), 340);
   }
 }
 
 document.querySelectorAll('#workModePill .mode-cap-btn').forEach(btn => {
-  btn.onclick = async () => {
+  btn.onclick = async e => {
     const nextMode = btn.dataset.workMode;
     if (!nextMode || nextMode === WORK_MODE) return;
-    applyWorkModeUI(nextMode, true);
+    const originPt = { x: e.clientX, y: e.clientY };
+    applyWorkModeUI(nextMode, true, originPt);
     try {
       const res = await api('/api/config', { method: 'POST', body: JSON.stringify({ work_mode: nextMode, memory_crops: nextMode === 'grading' }) });
       if (res.training_db) renderTrainingDbCard(res.training_db);
-      showBanner('gui', nextMode === 'grading' ? '已切换到「改试卷模式」：专注导入、答案解析、内存暂存识别与判分导出' : '已切换到「模型迭代模式」：已展开本地训练数据库、标框与微调面板');
+      showBanner('gui', nextMode === 'grading' ? '已切换到「改试卷模式」（暖色 · 极简两步改卷）' : '已切换到「模型迭代模式」（冷色 · 展开环境自检与训练库）');
       await refreshOverview();
     } catch (err) {
       showBanner('gui', '切换模式失败：' + err.message);
@@ -3673,22 +4538,19 @@ function renderSchemaStrip(data) {
   const strip = $('schemaStrip');
   if (!strip) return;
   strip.classList.toggle('hidden', !ab);
-  if (!ab) {
-    $('schemaAdvBox')?.classList.add('hidden');
-    return;
-  }
+  if (!ab) return;
   const s = data.schema_summary || {};
   const badge = $('schemaBadge');
   const meta = $('schemaMetaText');
   const csvBtn = $('btnExportGradesCsv');
   if (s.configured) {
     badge.className = 'badge ok';
-    badge.textContent = `已配答案 · 满分 ${s.total_possible_score || 0}`;
-    meta.textContent = `选择 ${s.choice_count || 0} 题（单${s.single_count || 0}/多${s.multi_count || 0}，多选漏选 ${Math.round((s.multi_choice_partial_ratio ?? 0.5) * 100)}%）· 填空 ${s.fill_question_count || 0} 大题 ${s.fill_blank_count || 0} 空（动态结构提示词生效，不泄标准答案）`;
+    badge.textContent = `✓ 已配答案 · 满分 ${s.total_possible_score || 0}`;
+    meta.textContent = `选择 ${s.choice_count || 0} 题 · 填空 ${s.fill_blank_count || 0} 空（多选漏选 ${Math.round((s.multi_choice_partial_ratio ?? 0.5) * 100)}%）`;
   } else {
     badge.className = 'badge warn';
-    badge.textContent = '无标准答案';
-    meta.textContent = '未配置答案：仍可直接识别（通用模式，空位划分准确率可能略低且不自动判分）· 拖入答案 PDF 即可由 AI 自动生成';
+    badge.textContent = '未配答案';
+    meta.textContent = '仍可直接识别；把答案 PDF / 图片拖到这里即可自动判分';
   }
   if (csvBtn) csvBtn.classList.toggle('hidden', !ab.has_recognition);
   const ratio = Number(s.multi_choice_partial_ratio ?? 0.5);
@@ -3706,6 +4568,21 @@ async function handleAnswerSourceFile(file) {
     return;
   }
   const bid = OVERVIEW.active_batch.batch_id;
+  // 若直接拖入的是结构化 JSON，免解析直接生效并弹绿勾
+  if (/\.json$/i.test(file.name || '')) {
+    try {
+      const parsed = JSON.parse(await file.text());
+      await api('/api/schema', { method: 'POST', body: JSON.stringify({ batch_id: bid, schema: parsed }) });
+      const st = $('schemaStrip');
+      if (st) { st.classList.remove('confirm-pop'); void st.offsetWidth; st.classList.add('confirm-pop'); setTimeout(() => st.classList.remove('confirm-pop'), 650); }
+      showBanner('gui', `🎉 已直接导入标准答案 JSON：${file.name}`, 4500);
+      await refreshOverview();
+      return;
+    } catch (err) {
+      alert('JSON 格式错误：' + err.message);
+      return;
+    }
+  }
   showBanner('gui', `正在上传并提取答案文件：${file.name}...`, 10000);
   try {
     const qs = `?batch_id=${encodeURIComponent(bid)}&filename=${encodeURIComponent(file.name)}`;
@@ -3716,17 +4593,19 @@ async function handleAnswerSourceFile(file) {
     });
     const res = await r.json().catch(() => ({}));
     if (!r.ok || !res.ok) throw new Error(res.error || '上传答案失败');
-    showBanner('gui', `已提取 ${res.manifest?.page_count || 1} 页答案，正在默认唤醒 AI 帮手生成结构化 JSON...`, 6000);
+    const st = $('schemaStrip');
+    if (st) { st.classList.remove('confirm-pop'); void st.offsetWidth; st.classList.add('confirm-pop'); setTimeout(() => st.classList.remove('confirm-pop'), 650); }
+    showBanner('gui', `🎉 已放入 ${res.manifest?.page_count || 1} 页答案，正在交由 AI 帮手整理判分标准...`, 6000);
 
-    // 默认直接唤醒 AI 帮手解析输出结构化 JSON；若本机无可用 CLI Agent，则自动提示走 VLM 直连解析兜底
+    // 默认直接唤醒可拖动 AI 帮手解析输出结构化 JSON；无本地 Agent 时打开判分规则弹窗走 VLM 兜底
     const hasAgent = Boolean(AGENTS_CACHE?.available?.length);
     if (hasAgent && res.ai_prompt) {
-      $('aiDrawer')?.classList.remove('hidden');
+      openAiHelperDialog(true);
       $('aiNoteInput').value = res.ai_prompt;
       $('btnStartAi').click();
     } else {
-      $('schemaAdvBox')?.classList.remove('hidden');
-      if (confirm('已提取答案 PDF 页面，但本机暂未检测到可用 CLI Agent（如 ZCode / OpenCode）。\n是否立即使用「VLM 视觉大模型直连解析」生成结构化标准答案？')) {
+      $('schemaRuleDialog')?.showModal();
+      if (confirm('已提取答案文件，但本机暂未检测到可用 CLI Agent（如 ZCode / OpenCode）。\n是否立即使用「VLM 视觉大模型直连解析」生成结构化标准答案？')) {
         $('btnParseSchemaVlm').click();
       }
     }
@@ -3752,7 +4631,7 @@ if (_scStrip) {
     if (f) handleAnswerSourceFile(f);
   });
 }
-$('btnToggleSchemaAdv').onclick = () => $('schemaAdvBox').classList.toggle('hidden');
+$('btnToggleSchemaAdv').onclick = () => $('schemaRuleDialog')?.showModal();
 document.querySelectorAll('#multiRatioPills .ratio-pill').forEach(btn => {
   btn.onclick = () => {
     $('inputCustomRatio').value = btn.dataset.ratio;
@@ -3769,17 +4648,19 @@ $('btnSaveMultiRatio').onclick = async () => {
   } catch (err) { alert(err.message); }
 };
 $('btnAskAiEditSchema').onclick = () => {
-  $('aiDrawer')?.classList.remove('hidden');
+  $('schemaRuleDialog')?.close();
+  openAiHelperDialog(true);
   $('aiNoteInput').value = '请查看当前批次的 exam_schema 试卷答案与多选题评分规则，帮我修改为：';
   $('aiNoteInput').focus();
 };
 $('btnParseSchemaVlm').onclick = async () => {
   $('btnParseSchemaVlm').disabled = true;
-  showBanner('gui', '正在调用视觉大模型直连解析答案 PDF，请稍候...', 20000);
+  showBanner('gui', '正在调用视觉大模型直连解析答案，请稍候...', 20000);
   try {
     const res = await api('/api/schema/parse-vlm', { method: 'POST', body: '{}' });
     const s = res.summary || {};
     showBanner('gui', `解析完成：选择 ${s.choice_count || 0} 题 · 填空 ${s.fill_blank_count || 0} 空 · 满分 ${s.total_possible_score || 0}`);
+    $('schemaRuleDialog')?.close();
     await refreshOverview();
   } catch (err) { alert(err.message); }
   finally { $('btnParseSchemaVlm').disabled = false; }
@@ -3802,6 +4683,7 @@ $('btnSaveSchemaJson').onclick = async () => {
     await api('/api/schema', { method: 'POST', body: JSON.stringify({ schema: parsed }) });
     showBanner('gui', '已保存结构化标准答案 JSON');
     $('schemaJsonWrap').classList.add('hidden');
+    $('schemaRuleDialog')?.close();
     await refreshOverview();
   } catch (err) { alert('JSON 格式错误或保存失败：' + err.message); }
 };
@@ -3810,6 +4692,7 @@ $('btnClearSchema').onclick = async () => {
   try {
     await api('/api/schema/clear', { method: 'POST', body: '{}' });
     showBanner('gui', '已清除标准答案');
+    $('schemaRuleDialog')?.close();
     await refreshOverview();
   } catch (err) { alert(err.message); }
 };
@@ -3820,20 +4703,24 @@ $('btnExportGradesCsv').onclick = () => {
 
 function renderMemCropStrip(data) {
   const ab = data.active_batch;
-  const strip = $('memCropStrip');
-  if (!strip) return;
-  strip.classList.toggle('hidden', !ab);
-  if (!ab) return;
+  const memBtn = $('btnOpenMemDialog');
+  if (!ab) {
+    if (memBtn) memBtn.classList.add('hidden');
+    return;
+  }
   const memOn = Boolean(data.infer_settings?.memory_crops ?? (WORK_MODE === 'grading'));
   if ($('chkMemoryCrops')) $('chkMemoryCrops').checked = memOn;
+  if (memBtn) {
+    memBtn.classList.remove('hidden');
+    memBtn.textContent = memOn ? '⚡ 内存暂存' : '💾 硬盘缓存';
+  }
   const plan = data.last_memory_plan || data.pipeline_job?.memory_preflight || null;
   if (plan && (!plan.batch_id || plan.batch_id === ab.batch_id)) {
     const badge = plan.use_memory_crops ? '✅ 推荐内存暂存' : '⚠ 自动降级硬盘缓存';
-    $('memPlanText').textContent = `${badge} · 可用 ${(plan.available_ram_mb / 1024).toFixed(1)} GB · 预计稳态峰值 ~${plan.est_peak_mb} MB · 在途窗口 ${plan.max_inflight_grids} 拼图 · 省写 ~${plan.est_saved_files} 小文件 (${plan.benchmark_ms}ms 实测)`;
-  } else if (memOn && LAST_PREFLIGHT_BATCH !== ab.batch_id && !IS_MIRROR_MODE) {
-    LAST_PREFLIGHT_BATCH = ab.batch_id;
-    runMemoryPreflight(true);
-  } else if (!memOn) {
+    if ($('memPlanText')) {
+      $('memPlanText').textContent = `${badge} · 可用 ${(plan.available_ram_mb / 1024).toFixed(1)} GB · 预计稳态峰值 ~${plan.est_peak_mb} MB · 在途窗口 ${plan.max_inflight_grids} 拼图 · 省写 ~${plan.est_saved_files} 小文件 (${plan.benchmark_ms}ms 实测)`;
+    }
+  } else if (!memOn && $('memPlanText')) {
     $('memPlanText').textContent = '已关闭内存暂存（保留 crops/*.png 与 grids/*.png 到硬盘，适合训练/排障）';
   }
 }
@@ -3841,14 +4728,14 @@ function renderMemCropStrip(data) {
 async function runMemoryPreflight(silent = false) {
   const btn = $('btnRunMemPreflight');
   if (btn) btn.disabled = true;
-  if (!silent) $('memPlanText').textContent = '正在抽样实测本批次试卷内存占用与释放预算...';
+  if (!silent && $('memPlanText')) $('memPlanText').textContent = '正在抽样实测本批次试卷内存占用与释放预算...';
   try {
     const plan = await api('/api/memory/preflight', { method: 'POST', body: '{}' });
     if (OVERVIEW) OVERVIEW.last_memory_plan = plan;
     renderMemCropStrip(OVERVIEW || { active_batch: { batch_id: plan.batch_id }, infer_settings: { memory_crops: $('chkMemoryCrops')?.checked }, last_memory_plan: plan });
     if (!silent) showBanner('gui', plan.reason || '内存预检完成', 5000);
   } catch (err) {
-    if (!silent) $('memPlanText').textContent = '预检失败：' + err.message;
+    if (!silent && $('memPlanText')) $('memPlanText').textContent = '预检失败：' + err.message;
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -3859,7 +4746,8 @@ $('chkMemoryCrops').onchange = async () => {
   try {
     await api('/api/config', { method: 'POST', body: JSON.stringify({ memory_crops: on }) });
     if (on) await runMemoryPreflight(false);
-    else $('memPlanText').textContent = '已切换为传统硬盘缓存（写入 crops/*.png 到磁盘）';
+    else if ($('memPlanText')) $('memPlanText').textContent = '已切换为传统硬盘缓存（写入 crops/*.png 到磁盘）';
+    if ($('btnOpenMemDialog')) $('btnOpenMemDialog').textContent = on ? '⚡ 内存暂存' : '💾 硬盘缓存';
   } catch (err) { alert(err.message); }
 };
 

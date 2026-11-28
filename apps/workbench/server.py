@@ -1917,7 +1917,60 @@ def make_handler(state: WorkbenchState):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
 
-            # 大文件上传通道：答案 PDF/图片直传（最高 40MB，支持二进制直传或 JSON base64 / 本机路径）
+            # 大文件上传通道：单张/多张试卷照片直接上传入库（支持拖放图片或 Ctrl+V 剪贴板贴图）
+            if path == "/api/ingest/upload":
+                if not self._require_host():
+                    return
+                try:
+                    import base64
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    ctype = (self.headers.get("Content-Type") or "").lower()
+                    length = int(self.headers.get("Content-Length") or 0)
+                    if length > 68_000_000:
+                        self._send_json(413, {"ok": False, "error": "上传试卷图片总大小超过 64MB 限制，大批量请直接使用文件夹路径导入"})
+                        return
+                    files_to_ingest: list[tuple[str, bytes]] = []
+                    subject = str((qs.get("subject") or ["通用"])[0] or "通用").strip()
+                    batch_name = str((qs.get("batch_name") or [""])[0] or "").strip() or None
+                    if "application/json" in ctype:
+                        payload = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
+                        subject = str(payload.get("subject") or subject or "通用").strip()
+                        batch_name = str(payload.get("batch_name") or batch_name or "").strip() or None
+                        for idx_f, item in enumerate(payload.get("files") or [], 1):
+                            if not isinstance(item, dict):
+                                continue
+                            b64 = str(item.get("data_b64") or "").strip()
+                            if "," in b64 and b64.startswith("data:"):
+                                b64 = b64.split(",", 1)[1]
+                            if not b64:
+                                continue
+                            fname = str(item.get("name") or f"paper_{idx_f}.png").strip()
+                            files_to_ingest.append((fname, base64.b64decode(b64)))
+                    else:
+                        raw_bytes = self.rfile.read(length) if length > 0 else b""
+                        fname = str((qs.get("filename") or ["paper.png"])[0] or "paper.png").strip()
+                        if raw_bytes:
+                            files_to_ingest.append((fname, raw_bytes))
+                    if not files_to_ingest:
+                        self._send_json(400, {"ok": False, "error": "未收到有效试卷图片"})
+                        return
+                    state.bus.publish({"source": "gui", "step": "ingest", "status": "running", "message": f"正在导入 {len(files_to_ingest)} 张试卷图片..."})
+                    meta = core.ingest_uploaded_images(
+                        files=files_to_ingest,
+                        subject=subject,
+                        batches_root=state.batches_root,
+                        batch_name=batch_name,
+                        progress_cb=lambda m: state.bus.publish({"source": "gui", "step": "ingest", "status": "running", "message": m}),
+                    )
+                    msg = f"入库完成：{meta['batch_id']}，新增 {meta['last_imported']} 张（跳过重复 {meta['last_skipped_dup']} 张）"
+                    state.bus.publish({"source": "gui", "step": "ingest", "status": "done", "message": msg})
+                    self._send_json(200, {"ok": True, "batch": meta, "message": msg})
+                except Exception as exc:
+                    state.bus.publish({"source": "gui", "step": "ingest", "status": "error", "message": f"图片入库失败：{exc}"})
+                    self._send_json(400, {"ok": False, "error": str(exc)})
+                return
+
+            # 大文件上传通道：答案 PDF/图片/剪贴板文本直传（最高 40MB，支持二进制直传、JSON base64、纯文本或本机路径）
             if path == "/api/schema/upload-source":
                 if not self._require_host():
                     return
@@ -1940,11 +1993,19 @@ def make_handler(state: WorkbenchState):
                         bid = str(payload.get("batch_id") or bid).strip()
                         raw_filename = str(payload.get("filename") or raw_filename).strip()
                         auto_ai = bool(payload.get("auto_ai", auto_ai))
-                        sp = str(payload.get("source_path") or "").strip()
+                        sp = core._clean_path_str(str(payload.get("source_path") or ""))
+                        text_content = str(payload.get("text_content") or "")
                         if sp:
-                            src_file_path = Path(sp)
+                            src_file_path = Path(sp).expanduser().resolve()
                         elif payload.get("data_b64"):
-                            raw_bytes = base64.b64decode(str(payload["data_b64"]))
+                            b64 = str(payload["data_b64"])
+                            if "," in b64 and b64.startswith("data:"):
+                                b64 = b64.split(",", 1)[1]
+                            raw_bytes = base64.b64decode(b64)
+                        elif text_content.strip():
+                            raw_bytes = text_content.encode("utf-8")
+                            if not raw_filename:
+                                raw_filename = "pasted_answer.txt"
                     else:
                         raw_bytes = self.rfile.read(length) if length > 0 else b""
 
@@ -2537,12 +2598,44 @@ def make_handler(state: WorkbenchState):
                 self._send_json(200 if res.get("ok") else 500, res)
                 return
 
+            if path == "/api/ingest/inspect-path":
+                res = core.inspect_ingest_path(str(body.get("path") or ""), state.batches_root)
+                self._send_json(200 if res.get("ok") else 400, res)
+                return
+
+            if path == "/api/schema/inspect-path":
+                cleaned = core._clean_path_str(str(body.get("path") or ""))
+                if not cleaned:
+                    self._send_json(400, {"ok": False, "error": "路径为空"})
+                    return
+                p = Path(cleaned).expanduser()
+                try:
+                    p = p.resolve()
+                except OSError:
+                    self._send_json(400, {"ok": False, "error": f"无效文件路径：{cleaned}"})
+                    return
+                allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".txt", ".md", ".json", ".csv"}
+                if not p.is_file():
+                    self._send_json(400, {"ok": False, "error": f"找不到该答案文件：{p}"})
+                    return
+                if p.suffix.lower() not in allowed_ext:
+                    self._send_json(400, {"ok": False, "error": f"暂不支持该答案文件类型：{p.suffix}"})
+                    return
+                self._send_json(200, {
+                    "ok": True,
+                    "path": str(p),
+                    "name": p.name,
+                    "ext": p.suffix.lower(),
+                    "size_bytes": p.stat().st_size,
+                })
+                return
+
             if path == "/api/ingest":
-                source_dir = str(body.get("source_dir") or "").strip()
-                subject = str(body.get("subject") or "物理").strip()
+                source_dir = core._clean_path_str(str(body.get("source_dir") or ""))
+                subject = str(body.get("subject") or "通用").strip() or "通用"
                 batch_name = str(body.get("batch_name") or "").strip() or None
                 try:
-                    state.bus.publish({"source": "gui", "step": "ingest", "status": "running", "message": f"正在整理入库（学科：{subject}）..."})
+                    state.bus.publish({"source": "gui", "step": "ingest", "status": "running", "message": "正在整理试卷入库..."})
                     meta = core.ingest_batch(
                         source_dir=source_dir,
                         subject=subject,

@@ -488,6 +488,56 @@ class TestWorkbenchDualModeAndSchemaAPI(unittest.TestCase):
                 st, sc_r2 = _http_json(f"{base}/api/schema", "POST", {"multi_choice_partial_ratio": 0.0})
                 self.assertEqual(st, 200)
                 self.assertEqual(sc_r2["schema"]["choices"]["9"]["partial_score"], 0.0)
+
+                # 6) 路径探测（文件夹 & 单张图带引号）+ 剪贴板图片上传 + 剪贴板纯文本答案上传 + 在线去重
+                st, ins_dir = _http_json(f"{base}/api/ingest/inspect-path", "POST", {"path": f'"{src_imgs}"'})
+                self.assertEqual(st, 200)
+                self.assertEqual(ins_dir["kind"], "folder")
+                self.assertEqual(ins_dir["image_count"], 1)
+
+                single_img = src_imgs / "scan1.jpg"
+                st, ins_file = _http_json(f"{base}/api/ingest/inspect-path", "POST", {"path": f'"{single_img}"'})
+                self.assertEqual(st, 200)
+                self.assertEqual(ins_file["kind"], "file")
+                self.assertEqual(ins_file["image_count"], 1)
+
+                # 单张图片路径直接入库
+                st, ing_one = _http_json(f"{base}/api/ingest", "POST", {"source_dir": f'"{single_img}"', "subject": "通用"})
+                self.assertEqual(st, 200)
+                self.assertEqual(ing_one["batch"]["total_images"], 1)
+
+                # 剪贴板 / 拖拽图片直接 base64 上传入库
+                import base64
+                from io import BytesIO
+                buf = BytesIO()
+                Image.new("RGB", (600, 800), (240, 240, 240)).save(buf, format="PNG")
+                b64_img = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+                st, up_img = _http_json(f"{base}/api/ingest/upload", "POST", {
+                    "files": [{"name": "paste_test.png", "data_b64": b64_img}],
+                    "subject": "通用",
+                })
+                self.assertEqual(st, 200)
+                self.assertEqual(up_img["batch"]["total_images"], 1)
+
+                # 剪贴板粘贴答案文本 & 本地答案路径探测
+                st, ans_txt = _http_json(f"{base}/api/schema/upload-source", "POST", {
+                    "batch_id": up_img["batch"]["batch_id"],
+                    "text_content": "1. A (4分)\n2. BD (6分)\n14. (1) 2.5 m/s",
+                })
+                self.assertEqual(st, 200)
+                self.assertIn("2.5 m/s", ans_txt["manifest"]["text_preview"])
+
+                st, ins_ans = _http_json(f"{base}/api/schema/inspect-path", "POST", {"path": f'"{pdf_p}"'})
+                self.assertEqual(st, 200)
+                self.assertEqual(ins_ans["name"], "ans.pdf")
+
+                # 多标签页同名「主机」在线列表自动去重
+                _http_json(f"{base}/api/presence", "POST", {"client_id": "tab_1", "name": "主机", "task": "总览"})
+                _http_json(f"{base}/api/presence", "POST", {"client_id": "tab_2", "name": "主机", "task": "总览"})
+                st, ov2 = _http_json(f"{base}/api/overview")
+                self.assertEqual(st, 200)
+                host_online = [u for u in ov2["online_users"] if u["name"] == "主机"]
+                self.assertEqual(len(host_online), 1)
             finally:
                 state._stop_event.set()
                 srv.shutdown()

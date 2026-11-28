@@ -1205,35 +1205,113 @@ def _sanitize_token(text: str, fallback: str = "未分类") -> str:
     return cleaned[:24] or fallback
 
 
+def _clean_path_str(raw: str | Path) -> str:
+    s = str(raw or "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        s = s[1:-1].strip()
+    return s
+
+
+def inspect_ingest_path(
+    source_path: str | Path,
+    batches_root: Path = DEFAULT_BATCHES_ROOT,
+) -> dict:
+    """快速探测用户粘贴或选中的路径：支持文件夹（批量试卷）或单张图片文件（单张测试）。"""
+    cleaned = _clean_path_str(source_path)
+    if not cleaned:
+        return {"ok": False, "error": "路径为空"}
+    src = Path(cleaned).expanduser()
+    try:
+        src = src.resolve()
+    except OSError:
+        return {"ok": False, "error": f"无效路径：{cleaned}"}
+    if src.is_file():
+        if src.suffix.lower() not in IMAGE_EXTS:
+            return {"ok": False, "error": f"不是支持的试卷图片格式（支持 jpg/png/bmp/webp）：{src.name}"}
+        return {
+            "ok": True,
+            "kind": "file",
+            "path": str(src),
+            "name": src.name,
+            "image_count": 1,
+            "sample_names": [src.name],
+            "size_bytes": src.stat().st_size,
+        }
+    if not src.is_dir():
+        return {"ok": False, "error": f"找不到该文件夹或图片文件：{src}"}
+    b_root_resolved = batches_root.resolve()
+    if src == b_root_resolved or b_root_resolved.is_relative_to(src):
+        return {"ok": False, "error": "不能选择包含 batches/ 目录的根目录，请直接选择存放试卷照片的子文件夹"}
+    imgs = sorted(
+        p for p in src.rglob("*")
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+    )
+    if not imgs:
+        return {"ok": False, "error": f"文件夹中没有找到图片文件（支持 jpg/png/bmp/webp）：{src.name}"}
+    return {
+        "ok": True,
+        "kind": "folder",
+        "path": str(src),
+        "name": src.name,
+        "image_count": len(imgs),
+        "sample_names": [p.name for p in imgs[:4]],
+    }
+
+
+def _auto_batch_id(label: str, batches_root: Path) -> str:
+    base_tok = _sanitize_token(label, "试卷")
+    hm = datetime.now().strftime("%m%d_%H%M")
+    cand = f"{base_tok}_{hm}"
+    if (batches_root / cand).exists():
+        cand = f"{base_tok}_{datetime.now().strftime('%m%d_%H%M%S')}"
+    return cand
+
+
 def ingest_batch(
     source_dir: str | Path,
-    subject: str,
+    subject: str = "通用",
     batches_root: Path = DEFAULT_BATCHES_ROOT,
     batch_name: str | None = None,
     progress_cb=None,
 ) -> dict:
-    """非破坏性导入新一批试卷图片：SHA256 去重 + 统一时间戳/学科/序号命名 + manifest.csv。"""
-    src = Path(source_dir).expanduser().resolve()
-    if not src.is_dir():
-        raise FileNotFoundError(f"找不到源文件夹：{src}")
+    """非破坏性导入新一批试卷图片：支持文件夹批量或单张图片文件，SHA256 去重 + manifest.csv。"""
+    cleaned = _clean_path_str(source_dir)
+    src = Path(cleaned).expanduser().resolve()
+    is_single_file = src.is_file()
+    if not is_single_file and not src.is_dir():
+        raise FileNotFoundError(f"找不到源文件夹或图片文件：{src}")
+    if is_single_file and src.suffix.lower() not in IMAGE_EXTS:
+        raise ValueError(f"不支持的图片格式（支持 jpg/png/bmp/webp）：{src.name}")
     b_root_resolved = batches_root.resolve()
-    if src == b_root_resolved or b_root_resolved.is_relative_to(src):
+    if not is_single_file and (src == b_root_resolved or b_root_resolved.is_relative_to(src)):
         raise ValueError("不能选择包含 batches/ 目录的项目根目录作为源文件夹，请直接选择存放试卷照片的子文件夹。")
 
-    subj = _sanitize_token(subject, "其他")
+    raw_subj = (subject or "").strip()
+    subj = _sanitize_token(raw_subj, "通用")
     day = datetime.now().strftime("%Y%m%d")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    batch_id = _sanitize_token(batch_name, f"{stamp}_{subj}") if batch_name else f"{stamp}_{subj}"
+    if batch_name:
+        batch_id = _sanitize_token(batch_name, f"{stamp}_{subj}")
+    elif not raw_subj or subj in ("通用", "试卷"):
+        stem_lbl = f"单张_{src.stem}" if is_single_file else src.name
+        batch_id = _auto_batch_id(stem_lbl, batches_root)
+    else:
+        batch_id = f"{stamp}_{subj}"
 
     batch_dir = batches_root / batch_id
     images_dir = batch_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    # 收集源目录图片（支持一层及子目录，按相对路径稳定排序）
-    src_files = sorted(
-        p for p in src.rglob("*")
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
-    )
+    # 收集源图片（支持单文件或文件夹递归）
+    if is_single_file:
+        src_files = [src]
+        src_base = src.parent
+    else:
+        src_files = sorted(
+            p for p in src.rglob("*")
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+        )
+        src_base = src
     if not src_files:
         raise ValueError(f"文件夹中没有找到图片文件（支持 jpg/png/bmp/webp）：{src}")
 
@@ -1293,7 +1371,7 @@ def ingest_batch(
             "batch": batch_id,
             "subject": subj,
             "source": str(src),
-            "orig_name": str(fpath.relative_to(src)),
+            "orig_name": str(fpath.relative_to(src_base)),
             "sha256": digest,
             "imported_at": imported_at,
         }
@@ -1303,7 +1381,7 @@ def ingest_batch(
             progress_cb(f"整理入库 {idx}/{len(src_files)}（新增 {imported}，跳过重复 {skipped_dup}）")
 
     if imported == 0 and not existing_rows and skipped_bad > 0:
-        raise ValueError(f"文件夹中的 {skipped_bad} 张图片均已损坏或无法读取，请检查图片文件是否完整。")
+        raise ValueError(f"选中的 {skipped_bad} 张图片均已损坏或无法读取，请检查图片文件是否完整。")
 
     all_rows = existing_rows + new_rows
     fields = ["new_name", "batch", "subject", "source", "orig_name", "sha256", "imported_at"]
@@ -1316,6 +1394,119 @@ def ingest_batch(
         "batch_id": batch_id,
         "subject": subj,
         "source": str(src),
+        "created_at": imported_at,
+        "total_images": len(all_rows),
+        "last_imported": imported,
+        "last_skipped_dup": skipped_dup,
+        "images_dir": str(images_dir),
+        "recognize_dir": str(batch_dir / "recognized"),
+    }
+    write_json(batch_dir / "batch.json", meta)
+    set_active_batch(batch_id, batches_root=batches_root)
+    return meta
+
+
+def ingest_uploaded_images(
+    files: list[tuple[str, bytes]],
+    subject: str = "通用",
+    batches_root: Path = DEFAULT_BATCHES_ROOT,
+    batch_name: str | None = None,
+    progress_cb=None,
+) -> dict:
+    """支持拖拽单张/多张试卷照片或 Ctrl+V 剪贴板贴图直接入库（SHA256 去重 + JPEG 标准化）。"""
+    if not files:
+        raise ValueError("未收到任何试卷图片文件")
+    from io import BytesIO
+    from PIL import Image
+
+    raw_subj = (subject or "").strip()
+    subj = _sanitize_token(raw_subj, "通用")
+    day = datetime.now().strftime("%Y%m%d")
+    if batch_name:
+        batch_id = _sanitize_token(batch_name, _auto_batch_id("试卷", batches_root))
+    elif len(files) == 1:
+        stem = Path(files[0][0] or "剪贴板试卷").stem
+        batch_id = _auto_batch_id(f"单张_{stem}", batches_root)
+    else:
+        batch_id = _auto_batch_id(f"试卷_{len(files)}张", batches_root)
+
+    batch_dir = batches_root / batch_id
+    images_dir = batch_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = batch_dir / "manifest.csv"
+    seen_hashes: set[str] = set()
+    existing_rows: list[dict] = []
+    if manifest_path.is_file():
+        with manifest_path.open("r", encoding="utf-8-sig", newline="") as fh:
+            for row in csv.DictReader(fh):
+                existing_rows.append(row)
+                if row.get("sha256"):
+                    seen_hashes.add(row["sha256"])
+
+    seq = len(existing_rows)
+    imported = 0
+    skipped_dup = 0
+    skipped_bad = 0
+    new_rows = []
+    imported_at = now_str()
+
+    for idx, (orig_name, raw_bytes) in enumerate(files, 1):
+        if not raw_bytes:
+            skipped_bad += 1
+            continue
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        if digest in seen_hashes:
+            skipped_dup += 1
+            continue
+        safe_orig = Path(orig_name or f"upload_{idx}.png").name
+        ext = Path(safe_orig).suffix.lower()
+        seq += 1
+        new_name = f"{day}_{subj}_{seq:04d}.jpg"
+        dest = images_dir / new_name
+        try:
+            with Image.open(BytesIO(raw_bytes)) as im:
+                if ext in (".jpg", ".jpeg") and im.format == "JPEG" and im.mode in ("RGB", "L"):
+                    dest.write_bytes(raw_bytes)
+                else:
+                    im.convert("RGB").save(dest, format="JPEG", quality=95, subsampling=0)
+        except Exception:
+            seq -= 1
+            skipped_bad += 1
+            if dest.exists():
+                try:
+                    dest.unlink()
+                except OSError:
+                    pass
+            continue
+        seen_hashes.add(digest)
+        new_rows.append({
+            "new_name": new_name,
+            "batch": batch_id,
+            "subject": subj,
+            "source": "upload",
+            "orig_name": safe_orig,
+            "sha256": digest,
+            "imported_at": imported_at,
+        })
+        imported += 1
+        if progress_cb and (idx % 5 == 0 or idx == len(files)):
+            progress_cb(f"整理上传图片 {idx}/{len(files)}（新增 {imported}，跳过重复 {skipped_dup}）")
+
+    if imported == 0 and not existing_rows:
+        raise ValueError("上传的文件均不是有效图片或无法读取，请检查图片格式。")
+
+    all_rows = existing_rows + new_rows
+    fields = ["new_name", "batch", "subject", "source", "orig_name", "sha256", "imported_at"]
+    with manifest_path.open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerows(all_rows)
+
+    meta = {
+        "batch_id": batch_id,
+        "subject": subj,
+        "source": "upload",
         "created_at": imported_at,
         "total_images": len(all_rows),
         "last_imported": imported,
@@ -1678,16 +1869,27 @@ def collect_tasks_and_leaderboard(
         },
     ]
 
-    # 合并在线人员与历史贡献
+    # 合并在线人员与历史贡献（按称呼+角色去重，避免同一人在本机开多标签页重复出现多个芯片）
     now_ts = time.time()
-    online_users = []
+    seen_online: dict[tuple[str, str], dict] = {}
     for cid, info in list(presence.items()):
-        if now_ts - info.get("seen", 0) <= 65:
-            online_users.append({
-                "name": info.get("name") or "成员",
-                "role": info.get("role") or "collaborator",
-                "task": info.get("task") or "总览",
-            })
+        seen_at = float(info.get("seen", 0) or 0)
+        if now_ts - seen_at <= 65:
+            uname = str(info.get("name") or "成员").strip() or "成员"
+            urole = str(info.get("role") or "collaborator")
+            key = (uname, urole)
+            prev = seen_online.get(key)
+            if not prev or seen_at > prev["_seen"]:
+                seen_online[key] = {
+                    "name": uname,
+                    "role": urole,
+                    "task": info.get("task") or "总览",
+                    "_seen": seen_at,
+                }
+    online_users = [
+        {"name": v["name"], "role": v["role"], "task": v["task"]}
+        for v in seen_online.values()
+    ]
 
     people = [
         {"name": name, "count": count}
