@@ -236,8 +236,8 @@ function stepFxAnim(ts) {
   _fxAnim.lastTs = ts;
 
   const kBox = 1 - Math.exp(-dt * 23);
-  // 进入蒙版采用丝滑阻尼缓入（约 220ms），移出轻柔回退为原直角框
-  const kAlpha = 1 - Math.exp(-dt * (_fxAnim.targetAlpha > _fxAnim.alpha ? 14 : 17));
+  // 进入蒙版采用丝滑阻尼缓入（约 220ms）；退出蒙版在 drawFxCanvas 中立即清零生效
+  const kAlpha = 1 - Math.exp(-dt * 14);
   const kColor = 1 - Math.exp(-dt * 18);
 
   _fxAnim.alpha += (_fxAnim.targetAlpha - _fxAnim.alpha) * kAlpha;
@@ -557,22 +557,15 @@ function drawFxCanvas(immediate = false) {
     }
     renderFxCanvasNow();
   } else {
-    _fxAnim.targetBox = null;
+    // 退出蒙版 / 离开题框 / 取消固定立即生效：零延迟、零淡出拖尾，瞬间还原清晰原卷与原直角框
+    if (_fxAnim.raf) { cancelAnimationFrame(_fxAnim.raf); _fxAnim.raf = 0; }
+    _fxAnim.alpha = 0;
     _fxAnim.targetAlpha = 0;
     _fxAnim.entering = false;
-    if (immediate || _fxAnim.alpha <= 0.02 || state.mode !== "view" || state.subboxTarget) {
-      if (_fxAnim.raf) { cancelAnimationFrame(_fxAnim.raf); _fxAnim.raf = 0; }
-      _fxAnim.alpha = 0;
-      _fxAnim.box = null;
-      _fxAnim.focusId = null;
-      _fxAnim.lastTs = 0;
-      renderFxCanvasNow();
-      return;
-    }
-    if (!_fxAnim.raf) {
-      _fxAnim.lastTs = 0;
-      _fxAnim.raf = requestAnimationFrame(stepFxAnim);
-    }
+    _fxAnim.box = null;
+    _fxAnim.targetBox = null;
+    _fxAnim.focusId = null;
+    _fxAnim.lastTs = 0;
     renderFxCanvasNow();
   }
 }

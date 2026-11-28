@@ -297,6 +297,13 @@
   .overlay-layer.has-focus .choice-zone-badge {
     opacity: 0.42;
   }
+  /* 退出聚焦/蒙版时立即还原清晰度，零淡出拖尾；仅在进入聚焦时平滑压暗 */
+  .overlay-layer:not(.has-focus) .overlay-chip,
+  .overlay-layer:not(.has-focus) .fill-mini-tag,
+  .overlay-layer:not(.has-focus) .choice-zone-badge,
+  .ov-list:not(.has-focus) .ov-card {
+    transition: none !important;
+  }
   .overlay-chip {
     position: absolute; pointer-events: auto;
     border-radius: 4px; line-height: 1.25;

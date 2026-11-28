@@ -149,6 +149,9 @@ function renderFillMarginInto(el, it, containerSource = "pop") {
                     commitInlineBlankEdit(it, sub, k, inp.value, moveDir);
                   } else {
                     state.inlineBlankEdit = null;
+                    if (containerSource === "overview" && !state.pinnedItemId && state.selectedItemId === it.id) {
+                      state.selectedItemId = null;
+                    }
                     refreshOverviewPanel();
                     draw();
                   }
@@ -472,16 +475,89 @@ function unpinFillItem() {
   state.inlineBlankEdit = null;
   syncHoverPopoverOnly();
 }
-function scheduleHoverClear() {
-  if (getLockedFillItemId()) return;
-  clearTimeout(hoverHideTimer);
-  hoverHideTimer = setTimeout(() => {
-    if (!getLockedFillItemId() && !state.hoverInPopover && state.hoverItemId && state.hoverSource !== "overview") {
-      state.hoverItemId = null;
-      state.hoverSource = null;
-      syncHoverPopoverOnly();
+function findCanvasHoverItemAt(ix, iy) {
+  const p = currentPage();
+  if (!p) return null;
+  let hitItem = null;
+  let bestArea = Infinity;
+  const items = getPageItems(p);
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind === "fill" && !shouldShowFillInView(it)) continue;
+    const b = it.box;
+    if (!b || b.length !== 4) continue;
+    if (ix >= b[0] && ix <= b[2] && iy >= b[1] && iy <= b[3]) {
+      const area = Math.max(0, (b[2] - b[0]) * (b[3] - b[1]));
+      if (area < bestArea) { bestArea = area; hitItem = it; }
     }
-  }, 190);
+  }
+  return hitItem;
+}
+function isInPopoverBridge(sx, sy) {
+  if (!state.hoverItemId || state.hoverSource !== "canvas") return false;
+  const pop = overlayLayer.querySelector(".fill-hover-pop");
+  if (!pop) return false;
+  const p = currentPage();
+  if (!p) return false;
+  const it = getPageItems(p).find(x => x.id === state.hoverItemId && x.kind === "fill");
+  if (!it || !it.box || it.box.length !== 4) return false;
+  const [x1, y1, x2, y2] = it.box;
+  const sx1 = x1 * state.scale + state.tx;
+  const sy1 = y1 * state.scale + state.ty;
+  const sx2 = x2 * state.scale + state.tx;
+  const sy2 = y2 * state.scale + state.ty;
+  const pl = parseFloat(pop.style.left);
+  const pt = parseFloat(pop.style.top);
+  if (!Number.isFinite(pl) || !Number.isFinite(pt)) return false;
+  const pr = pl + (pop.offsetWidth || 0);
+  const pb = pt + (pop.offsetHeight || 0);
+  // 仅覆盖当前题框与悬浮气泡之间 8~10px 的狭长桥接走廊；离开该走廊立即退出蒙版
+  if (pop.classList.contains("pos-above")) {
+    return sy >= pb - 2 && sy <= sy1 + 2 && sx >= Math.min(sx1, pl) && sx <= Math.max(sx2, pr);
+  }
+  if (pop.classList.contains("pos-below")) {
+    return sy >= sy2 - 2 && sy <= pt + 2 && sx >= Math.min(sx1, pl) && sx <= Math.max(sx2, pr);
+  }
+  if (pop.classList.contains("pos-right")) {
+    return sx >= sx2 - 2 && sx <= pl + 2 && sy >= Math.min(sy1, pt) && sy <= Math.max(sy2, pb);
+  }
+  return false;
+}
+function clearHoverCanvasImmediate() {
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = null;
+  clearTimeout(_ovCenterTimer);
+  if (getLockedFillItemId()) return;
+  if (state.hoverItemId && state.hoverSource !== "overview") {
+    state.hoverItemId = null;
+    state.hoverSource = null;
+    state.hoverInPopover = false;
+    syncHoverPopoverOnly();
+  }
+}
+function handleOverlayBadgeLeave(it, ev) {
+  if (getLockedFillItemId()) return;
+  if (ev) {
+    const rel = ev.relatedTarget;
+    if (rel && rel.closest && rel.closest(".fill-hover-pop, .overlay-chip, .fill-mini-tag")) return;
+    const rect = getHostMetrics();
+    const sx = ev.clientX - rect.left;
+    const sy = ev.clientY - rect.top;
+    if (sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+      const [ix, iy] = screenToImg(sx, sy);
+      const nextHit = findCanvasHoverItemAt(ix, iy);
+      if (nextHit) {
+        setHoverCanvasItem(nextHit.id);
+        return;
+      }
+      if (isInPopoverBridge(sx, sy)) return;
+    }
+  }
+  clearHoverCanvasImmediate();
+}
+function scheduleHoverClear(ev = null) {
+  if (ev) { handleOverlayBadgeLeave(null, ev); return; }
+  clearHoverCanvasImmediate();
 }
 function setHoverCanvasItem(itemId) {
   // 已点击固定或正在气泡内编辑时，鼠标滑过其他题框绝不抢焦、绝不销毁气泡
@@ -593,9 +669,9 @@ function renderFillHoverPopover(row, rect, reuseEl = null, animate = false) {
     clearTimeout(hoverHideTimer);
     state.hoverInPopover = true;
   };
-  pop.onmouseleave = () => {
+  pop.onmouseleave = (ev) => {
     state.hoverInPopover = false;
-    if (!getLockedFillItemId()) scheduleHoverClear();
+    if (!getLockedFillItemId()) handleOverlayBadgeLeave(it, ev);
   };
   pop.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
   pop.onclick = (e) => {
@@ -791,6 +867,8 @@ function renderOverlays() {
           if (done) return;
           done = true;
           state.inlineChipEdit = null;
+          if (state.selectedItemId === it.id) state.selectedItemId = null;
+          if (!save && state.hoverItemId === it.id) { state.hoverItemId = null; state.hoverSource = null; }
           if (save) {
             const nv = inp.value.trim().toUpperCase();
             if (nv && nv !== getChoiceDisplayAnswer(it)) {
@@ -844,7 +922,7 @@ function renderOverlays() {
       const stdTip = cg ? ` · 标准答案 ${cg.standard}（得分 ${fmtScoreNum(cg.earned)}/${fmtScoreNum(cg.possible)}）` : "";
       chip.title = `第 ${it.number || "?"} 题：${ans}${stdTip}${ruleTip}（单击原地改选项）`;
       chip.onmouseenter = () => setHoverCanvasItem(it.id);
-      chip.onmouseleave = () => scheduleHoverClear();
+      chip.onmouseleave = (ev) => handleOverlayBadgeLeave(it, ev);
       chip.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       chip.onclick = (e) => {
         e.stopPropagation();
@@ -870,6 +948,8 @@ function renderOverlays() {
           if (done) return;
           done = true;
           state.inlineChipEdit = null;
+          if (state.selectedItemId === it.id) state.selectedItemId = null;
+          if (!save && state.hoverItemId === it.id) { state.hoverItemId = null; state.hoverSource = null; }
           if (save && inp.value.trim()) {
             try {
               const res = await api("/api/review/set-text", { page_id: p.id, item_id: it.id, text: inp.value.trim(), reviewer: REVIEWER || "审阅员" });
@@ -900,7 +980,7 @@ function renderOverlays() {
       chip.style.top = Math.round(Math.max(4, sy1 - 26)) + "px";
       chip.title = "单击原地修改姓名/学号";
       chip.onmouseenter = () => setHoverCanvasItem(it.id);
-      chip.onmouseleave = () => scheduleHoverClear();
+      chip.onmouseleave = (ev) => handleOverlayBadgeLeave(it, ev);
       chip.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       chip.onclick = (e) => {
         e.stopPropagation();
@@ -953,7 +1033,7 @@ function renderOverlays() {
       tag.title = `第 ${qno} 题（悬停预览，点击固定改字）`;
       tag.onmousedown = (e) => { if (e.button === 0 && !spaceDown) e.stopPropagation(); };
       tag.onmouseenter = () => setHoverCanvasItem(it.id);
-      tag.onmouseleave = () => scheduleHoverClear();
+      tag.onmouseleave = (ev) => handleOverlayBadgeLeave(it, ev);
       tag.onclick = (e) => { e.stopPropagation(); pinFillItem(it.id); };
       frag.appendChild(tag);
       tagEntries.push({ tag, row });

@@ -171,38 +171,25 @@ function processHoverMove(ev) {
   const overRightDock = ev.target && ev.target.closest && ev.target.closest("#sidebarRight");
   if (overRightDock) {
     if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-      scheduleHoverClear();
+      clearHoverCanvasImmediate();
     }
     return;
   }
 
   if (state.showOverlay && !state.editingPopItemId && sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
-    const p = currentPage();
-    let hitItem = null;
-    let bestArea = Infinity;
-    const items = getPageItems(p);
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (it.kind === "fill" && !shouldShowFillInView(it)) continue;
-      const b = it.box;
-      if (!b || b.length !== 4) continue;
-      if (ix >= b[0] && ix <= b[2] && iy >= b[1] && iy <= b[3]) {
-        const area = Math.max(0, (b[2] - b[0]) * (b[3] - b[1]));
-        if (area < bestArea) { bestArea = area; hitItem = it; }
-      }
-    }
+    const hitItem = findCanvasHoverItemAt(ix, iy);
     host.style.cursor = hitItem ? "pointer" : "grab";
     if (!getLockedFillItemId()) {
       if (hitItem) {
         setHoverCanvasItem(hitItem.id);
       } else if (state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-        scheduleHoverClear();
+        if (!isInPopoverBridge(sx, sy)) clearHoverCanvasImmediate();
       }
     }
   } else {
     host.style.cursor = "grab";
     if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-      scheduleHoverClear();
+      clearHoverCanvasImmediate();
     }
   }
 }
@@ -229,6 +216,7 @@ window.addEventListener("mousemove", (ev) => {
     if (Math.hypot(sx - d.sx, sy - d.sy) >= 5) {
       d.type = "pan";
       host.classList.add("panning");
+      if (!getLockedFillItemId() && state.hoverItemId) clearHoverCanvasImmediate();
       state.tx = d.tx0 + (sx - d.sx);
       state.ty = d.ty0 + (sy - d.sy);
       schedulePanFrame();
@@ -404,9 +392,11 @@ window.addEventListener("mouseup", () => {
   }
 });
 
-host.addEventListener("mouseleave", () => {
+host.addEventListener("mouseleave", (ev) => {
+  const rel = ev && ev.relatedTarget;
+  if (rel && rel.closest && rel.closest(".fill-hover-pop")) return;
   if (!getLockedFillItemId() && state.hoverItemId && state.hoverSource === "canvas" && !state.hoverInPopover) {
-    scheduleHoverClear();
+    clearHoverCanvasImmediate();
   }
 });
 host.addEventListener("dblclick", () => { if (!state.subboxTarget) { fitCanvas(); draw(); } });

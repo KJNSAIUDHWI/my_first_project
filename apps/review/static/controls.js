@@ -292,7 +292,7 @@ window.addEventListener("keydown", (ev) => {
       draw();
       return;
     }
-    if (state.editingPopItemId || state.pinnedItemId || state.selectedItemId || state.focusedLowConf) {
+    if (state.editingPopItemId || state.pinnedItemId || state.selectedItemId || state.hoverItemId || state.focusedLowConf) {
       state.editingPopItemId = null;
       state.pinnedItemId = null;
       state.selectedItemId = null;

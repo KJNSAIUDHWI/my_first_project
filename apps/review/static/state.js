@@ -441,6 +441,8 @@ async function commitInlineBlankEdit(it, sub, blank, nextVal, moveDir = 0) {
     if (curI >= 0 && nxtI >= 0 && nxtI < slots.length) {
       state.inlineBlankEdit = { itemId: it.id, sub: slots[nxtI].sub, blank: slots[nxtI].blank, source: prevSrc };
     }
+  } else if (prevSrc === "overview" && !state.pinnedItemId && state.selectedItemId === it.id) {
+    state.selectedItemId = null;
   }
   updateTopbar();
   renderLeftList();
